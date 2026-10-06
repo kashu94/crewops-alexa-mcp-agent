@@ -23,13 +23,18 @@ vector buckets only accept lowercase letters, digits and hyphens."""
 TITAN_V2_DIMENSIONS = (256, 512, 1024)
 """Output sizes Titan Text Embeddings V2 supports."""
 
-# Amazon Nova on Bedrock, called through the US cross-region inference profiles, which keep
-# traffic inside US regions. Nova 2 Lite has no in-region endpoint in us-east-1, so the
-# profile ID (``us.`` prefix) is required, not optional. Any Bedrock Converse model with
-# tool calling can replace these through the environment.
-DEFAULT_ROUTER_MODEL = "us.amazon.nova-micro-v1:0"
-DEFAULT_ADVISOR_MODEL = "us.amazon.nova-2-lite-v1:0"
-DEFAULT_EXPLAINER_MODEL = "us.amazon.nova-2-lite-v1:0"
+DEFAULT_REGION = "ap-southeast-2"
+"""Sydney: the home region of the AWS project this deploys to. Every service we use runs
+there: DynamoDB, SQS, SNS, Lambda, S3 Vectors, AgentCore, Bedrock (Nova and Titan)."""
+
+# Amazon Nova on Bedrock. These IDs work from any region that offers them, so changing
+# AWS_REGION does not silently break model calls:
+# - Nova Micro runs in-region (no profile prefix needed).
+# - Nova 2 Lite has no in-region endpoint; the global cross-region profile is required.
+# Any Bedrock Converse model with tool calling can replace these through the environment.
+DEFAULT_ROUTER_MODEL = "amazon.nova-micro-v1:0"
+DEFAULT_ADVISOR_MODEL = "global.amazon.nova-2-lite-v1:0"
+DEFAULT_EXPLAINER_MODEL = "global.amazon.nova-2-lite-v1:0"
 DEFAULT_EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
 
 
@@ -192,7 +197,7 @@ class Settings:
 
         return cls(
             stage=stage,
-            aws_region=_get(env, "AWS_REGION") or _get(env, "AWS_DEFAULT_REGION", "us-east-1"),
+            aws_region=_get(env, "AWS_REGION") or _get(env, "AWS_DEFAULT_REGION", DEFAULT_REGION),
             router_model_id=_get(env, "CREWOPS_ROUTER_MODEL_ID", DEFAULT_ROUTER_MODEL),
             advisor_model_id=_get(env, "CREWOPS_ADVISOR_MODEL_ID", DEFAULT_ADVISOR_MODEL),
             explainer_model_id=_get(env, "CREWOPS_EXPLAINER_MODEL_ID", DEFAULT_EXPLAINER_MODEL),

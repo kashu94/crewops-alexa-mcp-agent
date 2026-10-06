@@ -6,10 +6,10 @@ from crewops.config import ConfigError, Settings
 def test_defaults_without_environment():
     s = Settings.from_env({})
     assert s.stage == "dev"
-    assert s.aws_region == "us-east-1"
-    assert s.advisor_model_id == "us.amazon.nova-2-lite-v1:0"
-    assert s.router_model_id == "us.amazon.nova-micro-v1:0"
-    assert s.explainer_model_id == "us.amazon.nova-2-lite-v1:0"
+    assert s.aws_region == "ap-southeast-2"
+    assert s.advisor_model_id == "global.amazon.nova-2-lite-v1:0"
+    assert s.router_model_id == "amazon.nova-micro-v1:0"
+    assert s.explainer_model_id == "global.amazon.nova-2-lite-v1:0"
     assert s.embedding_dimensions == 512
     assert s.max_tool_iterations == 8
     assert s.guardrails_enabled is False
@@ -29,14 +29,14 @@ def test_overrides_are_applied():
     s = Settings.from_env(
         {
             "AWS_REGION": "ap-south-1",
-            "CREWOPS_ADVISOR_MODEL_ID": "us.amazon.nova-pro-v1:0",
+            "CREWOPS_ADVISOR_MODEL_ID": "apac.amazon.nova-pro-v1:0",
             "CREWOPS_EMBEDDING_DIMENSIONS": "1024",
             "CREWOPS_GUARDRAIL_ID": "gr-123",
             "CREWOPS_RESPONSE_BUDGET_SECONDS": "5.5",
         }
     )
     assert s.aws_region == "ap-south-1"
-    assert s.advisor_model_id == "us.amazon.nova-pro-v1:0"
+    assert s.advisor_model_id == "apac.amazon.nova-pro-v1:0"
     assert s.embedding_dimensions == 1024
     assert s.guardrails_enabled is True
     assert s.response_budget_seconds == 5.5

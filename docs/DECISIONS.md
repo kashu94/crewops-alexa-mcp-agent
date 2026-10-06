@@ -64,8 +64,9 @@ Function URL without code changes if AgentCore blocks progress.
 The rules engine does the hard reasoning; the model only chooses tools and phrases answers,
 and the verifier rejects anything it did not get from a tool. That makes a small, fast model
 enough. Amazon Nova 2 Lite runs the advisor loop and the explainer; Amazon Nova Micro handles
-triage. Both are called through Bedrock's model-neutral Converse API using the US
-cross-region inference profiles, so every model is a setting, not code.
+triage. Both are called through Bedrock's model-neutral Converse API, so every model is a
+setting, not code. Nova Micro runs in the deployment region; Nova 2 Lite is only offered
+through Bedrock's global cross-region profile.
 
 **Traded away:** some fluency. A smaller model chooses tools less reliably, so more answers
 fall back to the verified template wording. That is safe by construction, and the evaluation
@@ -118,3 +119,14 @@ deployed as it is built. Problems with a service surface the day it is added, no
 week. CDK's high-level constructs cover DynamoDB, SQS with dead-letter queues, SNS, Lambda
 event sources, Cognito, AppSync Events and AgentCore; S3 Vectors and Bedrock Guardrails use
 the lower-level CloudFormation constructs.
+
+## D13. Deploy to the project's home region, Sydney
+
+The AWS account this runs in is a project in AWS's new account experience. AWS-managed
+policies pin each project to one home region and deny almost every service elsewhere.
+This project's home region is Asia Pacific (Sydney), and everything the system uses is
+available there: DynamoDB, SQS, SNS, Lambda, S3 Vectors, AgentCore and Bedrock with Nova and
+Titan. Model IDs were chosen so they also work unchanged in other regions.
+
+**Not chosen:** activating the account's advanced features to lift the region policy. It is
+irreversible and removes the spend limit, for no gain this project needs.

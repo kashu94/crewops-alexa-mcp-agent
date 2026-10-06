@@ -12,14 +12,26 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Load .env without overriding variables already set in the shell, the same rule the Python
+# code follows: `AWS_REGION=... scripts/cdk.sh diff` beats the file.
 if [[ -f .env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env
-  set +a
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "${line}" || "${line}" == \#* ]] && continue
+    line="${line#export }"
+    key="${line%%=*}"
+    value="${line#*=}"
+    [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    if [[ "${value}" =~ ^\"(.*)\"$ || "${value}" =~ ^\'(.*)\'$ ]]; then
+      value="${BASH_REMATCH[1]}"
+    else
+      value="${value%% #*}"
+    fi
+    [[ -z "${!key+set}" ]] && export "${key}=${value}"
+  done < .env
 fi
 
-: "${AWS_REGION:=us-east-1}"
+: "${AWS_REGION:=ap-southeast-2}"
 : "${CREWOPS_STAGE:=dev}"
 export AWS_REGION CREWOPS_STAGE
 export JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION=1

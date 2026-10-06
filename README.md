@@ -111,19 +111,18 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
-cp .env.example .env     # optional: every setting has a default
 uv run pytest
 uv run ruff check .
 ```
 
 ## Deploying
 
-Infrastructure is defined with the AWS CDK in Python and deployed to `us-east-1`. You need
+Infrastructure is defined with the AWS CDK in Python and deployed to `ap-southeast-2`
+(Sydney), the home region of the AWS project it runs in. You need
 Node.js (22 or later recommended) and an AWS CLI profile for the target account.
 
 ```bash
 aws configure --profile crewops   # once: access keys stay in ~/.aws
-cp .env.example .env              # once: names the profile, region and stage
 
 scripts/cdk.sh bootstrap          # once per account and region
 scripts/cdk.sh diff               # what would change
@@ -133,6 +132,34 @@ scripts/cdk.sh destroy --all      # remove a dev stage completely
 
 `scripts/cdk.sh` reads `.env`, refuses to run without a named profile, and prints the
 target account before calling the CDK CLI.
+
+### Settings
+
+Settings are read from a `.env` file in the repository root (not committed) and from the
+environment; a value set in the shell wins over the file. Only `AWS_PROFILE` is required.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `AWS_PROFILE` | none | AWS CLI profile to deploy and run with; `default` is refused |
+| `AWS_REGION` | `ap-southeast-2` | Region for every resource |
+| `CREWOPS_STAGE` | `dev` | Prefix for resource names (`crewops-<stage>-...`) |
+| `CREWOPS_ROUTER_MODEL_ID` | `amazon.nova-micro-v1:0` | Triage model |
+| `CREWOPS_ADVISOR_MODEL_ID` | `global.amazon.nova-2-lite-v1:0` | Tool-calling advisor model |
+| `CREWOPS_EXPLAINER_MODEL_ID` | `global.amazon.nova-2-lite-v1:0` | Answer rewriting model |
+| `CREWOPS_EMBEDDING_MODEL_ID` | `amazon.titan-embed-text-v2:0` | Embeddings for search |
+| `CREWOPS_EMBEDDING_DIMENSIONS` | `512` | 256, 512 or 1024 |
+| `CREWOPS_GUARDRAIL_ID` | none | Bedrock guardrail, once deployed |
+| `CREWOPS_GUARDRAIL_VERSION` | `DRAFT` | Guardrail version |
+| `CREWOPS_MAX_TOOL_ITERATIONS` | `8` | Cap on the advisor's tool loop |
+| `CREWOPS_RESPONSE_BUDGET_SECONDS` | `6.0` | Time budget for a spoken answer |
+
+A minimal `.env`:
+
+```bash
+AWS_PROFILE=crewops
+```
+
+Access keys never go in `.env`; they stay in `~/.aws`.
 
 The `dev` stage is disposable: destroying it deletes its data. Any other stage keeps its
 table, with point-in-time recovery and deletion protection.
