@@ -89,12 +89,18 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why each piece was ch
 ## Repository layout
 
 ```
-src/crewops/     Python package (agent, tools, rules engine, data access)
-tests/           Unit tests
-docs/            Architecture, decisions, friction log
+data/seed/              Sample operating week (JSON)
+src/crewops/
+  config.py             Runtime settings
+  domain/               Typed records shared by every layer
+  ingestion/            Seed loading and validation; roster uploads and live reports later
+tests/                  Unit tests
+docs/                   Architecture, decisions, friction log
 ```
 
-More folders arrive as the build progresses: infrastructure, the web app and the Alexa skill.
+More folders arrive as the build progresses: the legality engine, DynamoDB access, search,
+tools, agents and the MCP server inside the package, then infrastructure, the web app and
+the Alexa skill at the top level.
 
 ## Getting started
 
