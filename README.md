@@ -93,7 +93,7 @@ data/seed/              Sample operating week (JSON)
 src/crewops/
   config.py             Runtime settings
   domain/               Typed records shared by every layer
-  ingestion/            Seed loading and validation; roster uploads and live reports later
+  ingestion/            Seed loading and validation, roster uploads (S3 + Lambda)
   engine/               Legality engine: duty math, the seven rules, assessment, cost ranking
   store/                DynamoDB key layout, item conversion, reads and writes
 infra/                  AWS CDK app: one stack per part of the system
@@ -101,9 +101,8 @@ tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
 ```
 
-More folders arrive as the build progresses: DynamoDB access, search,
-tools, agents and the MCP server inside the package, then infrastructure, the web app and
-the Alexa skill at the top level.
+More folders arrive as the build progresses: search, tools, agents and the MCP server
+inside the package, then the web app and the Alexa skill at the top level.
 
 ## Getting started
 
@@ -175,8 +174,27 @@ uv run python -m crewops.ingestion.load_seed --dry-run   # validate and count, n
 uv run python -m crewops.ingestion.load_seed             # validate, then write
 ```
 
-The `dev` stage is disposable: destroying it deletes its data. Any other stage keeps its
-table, with point-in-time recovery and deletion protection.
+### Uploading roster changes
+
+Admins change the operation by uploading a JSON file to the roster bucket (its name is in the
+`CrewOps-dev-Ingestion` stack outputs). The file holds any of the operation's collections in
+the same shapes as the seed files, for example `{"pairings": [...]}`; the seed's
+`rosters.json` and `rules.json` can be uploaded as they are.
+
+```bash
+aws s3 cp week-38.json s3://<roster-bucket>/uploads/week-38.json --profile crewops
+aws s3 cp s3://<roster-bucket>/results/week-38.json.result.json - --profile crewops
+```
+
+A Lambda merges the upload over the current operation, validates the whole result, and
+writes the uploaded records only if there are no errors. Records with the same id are
+replaced and new ids are added; nothing is deleted. Every upload gets a report under
+`results/` saying accepted or rejected, with the errors and any new warnings. Upload one
+file at a time: two uploads processed at the same moment are each checked against the
+operation as it was before either of them.
+
+The `dev` and `test` stages are disposable: destroying them deletes their data. Any other
+stage keeps its table, with point-in-time recovery and deletion protection.
 
 ## Friction log
 

@@ -92,15 +92,26 @@ Seven rules, each returning the numbers behind its verdict rather than a bare pa
 
 Multi-day pairings are checked day by day, with earlier days of the same pairing counted in
 the windows. Duty already rostered later in the week counts too, so a cover that looks legal
-today cannot quietly breach a limit on a trip the crew member already has. Rest is checked on
-both sides of the new duty, and between the days of the pairing itself when a delay eats into
-the overnight.
+today cannot quietly breach a limit on a trip the crew member already has: every window the
+new duty falls into is checked, including those ending on their later rostered days. Duty
+flown on the snapshot day counts even when the duty-clock history has not recorded it yet.
+Rest is checked on both sides of the new duty, and between the days of the pairing itself
+when a delay or positioning slip eats into the overnight.
 
-A crew member from another base is positioned on a real same-day flight from the schedule.
-The whole pairing then slips until they can report 15 minutes after landing. A reserve is
-usable only if their on-call window covers that report time; otherwise they are unavailable,
-not a cheaper option. Thresholds come from the rule parameters in the data, so changing a
+A crew member from another base is positioned on a real same-day flight from the schedule
+that has not yet departed. The first day then slips until they can report 15 minutes after
+landing; later days keep their schedule, so a late first release that cuts the overnight rest
+below the minimum makes the option illegal. Crew already rostered on a pairing are in
+position by definition. A reserve is usable only if their on-call window covers the required
+report time; otherwise they are unavailable, not a cheaper option. (The rules file phrases the
+window in terms of the callout time; the reference scenarios apply it to the report time, and
+so does the engine.) Thresholds come from the rule parameters in the data, so changing a
 limit needs no code change.
+
+Known simplification: the positioning flight itself is not counted as duty time.
+
+A pairing whose first report is before the snapshot ("now") has already started and cannot
+be re-crewed, so candidate search refuses it.
 
 Candidates are everyone of the needed rank not already on the pairing. Each one either
 becomes a costed option or drops out at the first stage they fail: qualified, certified, in
@@ -119,7 +130,7 @@ question, because acting on the wrong id dispatches the wrong person.
 | Flow | Path |
 |---|---|
 | Starting data | A script validates the seed week and writes it to DynamoDB. |
-| Roster upload | An admin uploads a roster file to S3. The upload event runs a loader Lambda, which validates the file with the same checks as the seed and writes it. A rejected file records its errors for the admin. |
+| Roster upload | An admin uploads a JSON file under `uploads/` in the roster bucket. The upload event runs a loader Lambda, which merges it over the current operation, validates the whole result with the same checks as the seed, and writes the uploaded records only if there are no errors. Every upload gets an accepted or rejected report under `results/`. |
 | Live report | A reporter or crew member reports by voice or web. The report goes to SQS, with a dead-letter queue for failures. A worker Lambda checks the reporter's role, stores the report once even if it arrives twice, and marks it REPORTED. |
 | Disruption analysis | The DynamoDB stream starts the disruption Lambda. It works out the blast radius and ranked options, marks the disruption OPTIONS_READY, and alerts the controller through SNS and the live console. |
 | Question | Any role asks by voice or chat. Router, advisor tools, verifier and explainer produce a cited answer. |

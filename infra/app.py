@@ -11,6 +11,7 @@ import os
 
 from aws_cdk import App, Environment, Tags
 from crewops_infra.data_stack import DataStack
+from crewops_infra.ingestion_stack import IngestionStack
 
 from crewops.config import Settings, load_env_file
 
@@ -21,7 +22,14 @@ def main() -> None:
     app = App()
     env = Environment(account=os.environ.get("CDK_DEFAULT_ACCOUNT"), region=settings.aws_region)
 
-    DataStack(app, f"CrewOps-{settings.stage}-Data", settings=settings, env=env)
+    data = DataStack(app, f"CrewOps-{settings.stage}-Data", settings=settings, env=env)
+    IngestionStack(
+        app,
+        f"CrewOps-{settings.stage}-Ingestion",
+        settings=settings,
+        table=data.table,
+        env=env,
+    )
 
     Tags.of(app).add("project", "crewops")
     Tags.of(app).add("stage", settings.stage)
