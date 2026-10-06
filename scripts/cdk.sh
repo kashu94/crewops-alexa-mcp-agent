@@ -12,28 +12,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Load .env without overriding variables already set in the shell, the same rule the Python
-# code follows: `AWS_REGION=... scripts/cdk.sh diff` beats the file.
-if [[ -f .env ]]; then
-  while IFS= read -r line || [[ -n "${line}" ]]; do
-    line="${line#"${line%%[![:space:]]*}"}"
-    [[ -z "${line}" || "${line}" == \#* ]] && continue
-    line="${line#export }"
-    key="${line%%=*}"
-    value="${line#*=}"
-    [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-    if [[ "${value}" =~ ^\"(.*)\"$ || "${value}" =~ ^\'(.*)\'$ ]]; then
-      value="${BASH_REMATCH[1]}"
-    else
-      value="${value%% #*}"
-    fi
-    [[ -z "${!key+set}" ]] && export "${key}=${value}"
-  done < .env
-fi
+# Read .env with the project's own parser (crewops.config), so this script and the Python
+# code always agree on every value. Variables already set in the shell win over the file.
+exports=$(uv run --quiet python -m crewops.config) || {
+  echo "Could not read settings from .env (see the error above)." >&2
+  exit 1
+}
+eval "${exports}"
 
-: "${AWS_REGION:=ap-southeast-2}"
-: "${CREWOPS_STAGE:=dev}"
-export AWS_REGION CREWOPS_STAGE
 export JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION=1
 
 if [[ -z "${AWS_PROFILE:-}" || "${AWS_PROFILE}" == "default" ]]; then

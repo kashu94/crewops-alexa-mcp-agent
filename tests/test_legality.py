@@ -56,11 +56,38 @@ def test_reserve_window_must_cover_report(world):
 
 
 def test_positioning_from_other_base(world):
-    a = assess(world, "C-2210", "P-2291")
+    a = assess(world, "C-1622", "P-2213")
     assert a.legal and a.on_reserve
-    assert a.positioning.flight_id == "DX402-2026-09-15"
-    assert a.departure_slip_hours == 3.0
-    assert a.days[0].report_utc.strftime("%H:%M") == "09:00"
+    assert a.positioning.flight_id == "DX402-2026-09-19"
+    assert a.departure_slip_hours == 7.0
+
+
+def test_positioning_slip_cannot_eat_the_overnight_rest(world):
+    # Positioning delays day one by 3h; day two keeps its 04:00 report, leaving 9.5h rest.
+    a = assess(world, "C-2210", "P-2291")
+    assert a.days[1].report_utc == world.days_of("P-2291")[1].report_utc
+    assert details(a) == ["only 9.5h rest between 2026-09-15 and 2026-09-16 of the pairing"]
+
+
+def test_duty_flown_on_snapshot_day_counts_once(world):
+    # C-5837 flew 11.25h on 09-14; the duty-clock history records 0 for that day.
+    c = world.state("C-5837")
+    assert c.duty_in_window(date(2026, 9, 8), date(2026, 9, 14)) == 30.88
+    # Covering P-2203 (11.25h on 09-16): the 7 days ending 09-16 then hold 42.13h ...
+    on_the_day = c.duty_in_window(date(2026, 9, 10), date(2026, 9, 16), "P-2203") + 11.25
+    assert round(on_the_day, 2) == 42.13
+    # ... and the worst window is the one ending on their next trip, P-2207 on 09-20.
+    duty = next(
+        v for v in assess(world, "C-5837", "P-2203").verdicts if v.rule_id == "RULE-DUTY-02"
+    )
+    assert duty.used == 45.0
+    assert duty.detail == "45.0h of 60h/7d in the 7 days ending 2026-09-20"
+
+
+def test_crew_rostered_on_a_pairing_are_in_position(world):
+    # P-2289 starts in DEL with BLR-based crew; the roster itself places them there.
+    for seat in world.pairing("P-2289").crew:
+        assert assess(world, seat.crew_id, "P-2289").legal
 
 
 def test_downstream_rest_conflict(world):

@@ -3,8 +3,8 @@
 ``assess`` is the one entry point the rest of the system uses for a legality answer. It
 handles the two things that change *when* a duty happens before the rules run:
 
-* **Positioning.** A crew member based elsewhere flies in first, so the whole pairing
-  slips until they can report.
+* **Positioning.** A crew member based elsewhere flies in first, so the first day slips
+  until they can report. Later days keep their schedule.
 * **A what-if delay.** A late first departure stretches day one, which is how a delay
   pushes someone past their duty-period limit.
 
@@ -58,8 +58,8 @@ class Assessment:
 def _intra_pairing_rest(days: list[DutyDay], world: World) -> list[RuleVerdict]:
     """Rest between consecutive days of the same pairing.
 
-    Only a delay can break it (the published roster respects it), but a delay that eats
-    into the overnight must show up as a rest breach, not pass silently.
+    Only a delay or a positioning slip can break it (the published roster respects it), but
+    either one eating into the overnight must show up as a rest breach, not pass silently.
     """
     out = []
     minimum = world.book.min_rest_hours
@@ -94,11 +94,18 @@ def assess(world: World, crew_id: str, pairing_id: str, delay_hours: float = 0.0
     if crew.last_rest_ended and any(d.release_utc <= crew.last_rest_ended for d in own):
         crew = replace(crew, last_rest_ended=None)
 
+    # The base rule is about calling someone in. Crew already rostered on the pairing are
+    # placed there by the roster itself, so they are in position by definition.
+    rostered_here = bool(own)
+
     positioning = None
-    if crew.base != first.dep_station:
+    if crew.base != first.dep_station and not rostered_here:
         positioning = world.positioning(crew, first)
         if positioning and positioning.delay_hours:
-            days = [d.shifted(positioning.delay_hours) for d in days]
+            # Only the first day waits for the positioned crew member. Later days keep their
+            # schedule, so a late first release shortens the overnight rest, and the
+            # intra-pairing rest check below catches it if it falls below the minimum.
+            days[0] = days[0].shifted(positioning.delay_hours)
 
     if delay_hours:
         days[0] = days[0].delayed(delay_hours)
@@ -108,7 +115,7 @@ def assess(world: World, crew_id: str, pairing_id: str, delay_hours: float = 0.0
         days,
         world.book,
         exclude_pairing=pairing_id,
-        positioned=positioning is not None,
+        positioned=positioning is not None or rostered_here,
     )
     verdicts += _intra_pairing_rest(days, world)
 

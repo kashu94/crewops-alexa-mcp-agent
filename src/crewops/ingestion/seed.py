@@ -166,9 +166,19 @@ def validate(seed: SeedData) -> list[Issue]:
         ("flight", [f.flight_id for f in seed.flights]),
         ("pairing", [p.pairing_id for p in seed.pairings]),
         ("rule", [r.rule_id for r in seed.rules]),
+        ("duty clock", [c.crew_id for c in seed.duty_clocks]),
+        ("risk signal", [r.crew_id for r in seed.risk_signals]),
+        ("gate slot for flight", [g.flight_id for g in seed.gates]),
+        ("certification", [f"{c.crew_id} {c.cert_type}" for c in seed.certifications]),
+        ("reserve duty", [f"{r.crew_id} at {r.base}" for r in seed.reserves]),
+        (
+            "roster exception",
+            [f"{e.crew_id} {e.date} {e.rule_id}" for e in seed.exceptions],
+        ),
     ):
+        # Each of these is one item in the table; a duplicate would silently overwrite.
         for dup in _duplicates(ids):
-            error(dup, f"duplicate {kind} id")
+            error(dup, f"duplicate {kind}")
 
     crew = {c.crew_id: c for c in seed.crew}
     flights = {f.flight_id: f for f in seed.flights}
@@ -253,8 +263,6 @@ def validate(seed: SeedData) -> list[Issue]:
     for crew_id in crew:
         if clocks[crew_id] == 0:
             error(crew_id, "no duty clock")
-        elif clocks[crew_id] > 1:
-            error(crew_id, "more than one duty clock")
 
     certified = {c.crew_id for c in seed.certifications}
     for crew_id in sorted(set(crew) - certified):

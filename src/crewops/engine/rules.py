@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import StrEnum
 
 from crewops.domain import AircraftType, CertType, CrewStatus, Rank, Rule
@@ -134,35 +134,39 @@ class CrewState:
     ratings: tuple[AircraftType, ...]
     status: CrewStatus
     last_rest_ended: datetime | None
-    history_end: date | None
-    """Last day covered by the duty-clock history. Rostered duties after it are added."""
     daily_duty: Mapping[date, float] = field(default_factory=dict)
     daily_flight: Mapping[date, float] = field(default_factory=dict)
     certs: tuple[tuple[CertType, date, date], ...] = ()
     """(type, valid_from, valid_to)."""
     duties: tuple[Duty, ...] = ()
 
-    def _future(self, exclude_pairing: str | None) -> list[Duty]:
-        return [
-            d
-            for d in self.duties
-            if d.pairing_id != exclude_pairing
-            and (self.history_end is None or d.date > self.history_end)
-        ]
+    def _per_day(
+        self, history: Mapping[date, float], hours_of, exclude_pairing: str | None
+    ) -> dict[date, float]:
+        """Hours per calendar day: recorded history and rostered duty, never both.
+
+        The duty-clock history can stop short of a day the crew member is rostered on (the
+        snapshot day, for example, records 0 for a duty flown that morning). Taking the
+        larger of the two per day counts that duty once, whether or not the history
+        already includes it.
+        """
+        rostered: dict[date, float] = {}
+        for d in self.duties:
+            if d.pairing_id != exclude_pairing:
+                rostered[d.date] = rostered.get(d.date, 0.0) + hours_of(d)
+        days = set(history) | set(rostered)
+        return {d: max(history.get(d, 0.0), round(rostered.get(d, 0.0), 2)) for d in days}
 
     def duty_in_window(self, start: date, end: date, exclude_pairing: str | None = None) -> float:
-        past = sum(h for d, h in self.daily_duty.items() if start <= d <= end)
-        rostered = sum(
-            d.duty_hours for d in self._future(exclude_pairing) if start <= d.date <= end
-        )
-        return round(past + rostered, 2)
+        per_day = self._per_day(self.daily_duty, lambda d: d.duty_hours, exclude_pairing)
+        return round(sum(h for d, h in per_day.items() if start <= d <= end), 2)
 
     def flight_in_window(self, start: date, end: date, exclude_pairing: str | None = None) -> float:
-        past = sum(h for d, h in self.daily_flight.items() if start <= d <= end)
-        rostered = sum(
-            d.block_hours for d in self._future(exclude_pairing) if start <= d.date <= end
-        )
-        return round(past + rostered, 2)
+        per_day = self._per_day(self.daily_flight, lambda d: d.block_hours, exclude_pairing)
+        return round(sum(h for d, h in per_day.items() if start <= d <= end), 2)
+
+    def rostered_dates(self, exclude_pairing: str | None = None) -> set[date]:
+        return {d.date for d in self.duties if d.pairing_id != exclude_pairing}
 
 
 # --------------------------------------------------------------------------
@@ -183,6 +187,50 @@ def check_fdp(day: DutyDay, book: RuleBook) -> RuleVerdict:
     return ok(FDP, f"FDP {used}h of {limit}h ({day.n_sectors} sectors)", **numbers)
 
 
+def _worst_window(
+    crew: CrewState,
+    day: DutyDay,
+    earlier: Iterable[DutyDay],
+    window_days: int,
+    in_window,
+    hours_of,
+    exclude_pairing: str | None,
+) -> tuple[float, date]:
+    """The largest total across every window the new duty can push over the limit.
+
+    That is the window ending on the duty date, plus each window ending on a later day the
+    crew member is already rostered for: adding a duty today can breach the limit on a
+    trip they fly in three days' time.
+    """
+    new_days = [*earlier, day]
+    horizon = day.date + timedelta(days=window_days - 1)
+    ends = {day.date} | {d for d in crew.rostered_dates(exclude_pairing) if day.date < d <= horizon}
+    worst: tuple[float, date] | None = None
+    for end in sorted(ends):
+        start, _ = calendar_window(end, window_days)
+        total = round(
+            in_window(start, end, exclude_pairing)
+            + sum(hours_of(d) for d in new_days if start <= d.date <= end),
+            2,
+        )
+        if worst is None or total > worst[0]:
+            worst = (total, end)
+    assert worst is not None
+    return worst
+
+
+def _window_verdict(
+    rule_id: str, total: float, end: date, day: DutyDay, limit: float, window_days: int
+) -> RuleVerdict:
+    numbers = {"used": total, "limit": limit, "headroom": round(limit - total, 2), "date": day.date}
+    window = f"{limit:g}h/{window_days}d"
+    where = f"on {day.date}" if end == day.date else f"in the {window_days} days ending {end}"
+    if total > limit:
+        over = format_hours(total - limit)
+        return fail(rule_id, f"would exceed {window} by {over} {where} (total {total}h)", **numbers)
+    return ok(rule_id, f"{total}h of {window} {where}", **numbers)
+
+
 def check_duty_window(
     crew: CrewState,
     day: DutyDay,
@@ -190,27 +238,21 @@ def check_duty_window(
     earlier: Iterable[DutyDay] = (),
     exclude_pairing: str | None = None,
 ) -> RuleVerdict:
-    """Duty hours in the calendar window ending on the duty date.
+    """Duty hours in every calendar window the new duty falls into.
 
     Earlier days of the *same* pairing count too: a two-day cover can be legal on each day
     alone and still breach once day one sits inside day two's window.
     """
-    start, end = calendar_window(day.date, book.duty_window_days)
-    total = round(
-        crew.duty_in_window(start, end, exclude_pairing)
-        + sum(d.fdp_hours for d in earlier if start <= d.date <= end)
-        + day.fdp_hours,
-        2,
+    total, end = _worst_window(
+        crew,
+        day,
+        earlier,
+        book.duty_window_days,
+        crew.duty_in_window,
+        lambda d: d.fdp_hours,
+        exclude_pairing,
     )
-    limit = book.max_duty_hours
-    numbers = {"used": total, "limit": limit, "headroom": round(limit - total, 2), "date": day.date}
-    window = f"{limit:g}h/{book.duty_window_days}d"
-    if total > limit:
-        over = format_hours(total - limit)
-        return fail(
-            DUTY, f"would exceed {window} by {over} on {day.date} (total {total}h)", **numbers
-        )
-    return ok(DUTY, f"{total}h of {window} on {day.date}", **numbers)
+    return _window_verdict(DUTY, total, end, day, book.max_duty_hours, book.duty_window_days)
 
 
 def check_flight_window(
@@ -220,22 +262,16 @@ def check_flight_window(
     earlier: Iterable[DutyDay] = (),
     exclude_pairing: str | None = None,
 ) -> RuleVerdict:
-    start, end = calendar_window(day.date, book.flight_window_days)
-    total = round(
-        crew.flight_in_window(start, end, exclude_pairing)
-        + sum(d.block_hours for d in earlier if start <= d.date <= end)
-        + day.block_hours,
-        2,
+    total, end = _worst_window(
+        crew,
+        day,
+        earlier,
+        book.flight_window_days,
+        crew.flight_in_window,
+        lambda d: d.block_hours,
+        exclude_pairing,
     )
-    limit = book.max_flight_hours
-    numbers = {"used": total, "limit": limit, "headroom": round(limit - total, 2), "date": day.date}
-    window = f"{limit:g}h/{book.flight_window_days}d"
-    if total > limit:
-        over = format_hours(total - limit)
-        return fail(
-            FLIGHT, f"would exceed {window} by {over} on {day.date} (total {total}h)", **numbers
-        )
-    return ok(FLIGHT, f"{total}h of {window} on {day.date}", **numbers)
+    return _window_verdict(FLIGHT, total, end, day, book.max_flight_hours, book.flight_window_days)
 
 
 def check_rest(

@@ -110,3 +110,9 @@ def test_invalid_json_names_line(tmp_path: Path):
     (tmp_path / "costs.json").write_text("{ not json")
     with pytest.raises(DataError, match="costs.json: invalid JSON at line 1"):
         load_seed(tmp_path)
+
+
+def test_duplicate_keyed_records_are_errors(seed):
+    cert = seed.certifications[0]
+    broken = replace(seed, certifications=(*seed.certifications, cert))
+    assert any("duplicate certification" in i.message for i in errors(validate(broken)))

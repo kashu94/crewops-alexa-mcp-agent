@@ -22,6 +22,10 @@ from crewops.engine.rules import BASE, CERT, DUTY, FDP, FLIGHT, QUAL, REST
 from crewops.engine.world import World
 
 
+class AlreadyStarted(ValueError):
+    """The pairing reported before the snapshot: it can no longer be re-crewed."""
+
+
 class Strategy(StrEnum):
     RESERVE_CALLOUT = "reserve_callout"
     DAY_OFF_CALLOUT = "day_off_callout"
@@ -41,7 +45,7 @@ class Strategy(StrEnum):
 FUNNEL = (
     ("qualified", (QUAL,), "not rated on the aircraft or not active"),
     ("certified", (CERT,), "a certification is invalid on a duty date"),
-    ("in position", (BASE,), "cannot get to the departure in time"),
+    ("in position", (BASE,), "cannot reach the departure, or on-call window misses the report"),
     ("rested", (REST,), "rest conflict or already rostered"),
     ("within limits", (FDP, DUTY, FLIGHT), "would breach a duty or flight-hour limit"),
 )
@@ -181,6 +185,12 @@ def find_options(world: World, pairing_id: str, role: Rank | str) -> OptionsResu
     """Every legal way to fill ``role`` on ``pairing_id``, cheapest first."""
     role = Rank(role)
     pairing = world.pairing(pairing_id)
+    first_report = world.days_of(pairing_id)[0].report_utc
+    if first_report < world.snapshot_utc:
+        raise AlreadyStarted(
+            f"{pairing_id} reported at {first_report:%Y-%m-%d %H:%M}Z, before now "
+            f"({world.snapshot_utc:%Y-%m-%d %H:%M}Z); it can no longer be re-crewed"
+        )
     incumbents = set(pairing.holder(role))
     pool = sorted(
         (c for c in world.crew.values() if c.rank is role and c.crew_id not in incumbents),

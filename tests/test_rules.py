@@ -50,7 +50,6 @@ def crew(**overrides) -> CrewState:
         ratings=(AircraftType.A320,),
         status=CrewStatus.ACTIVE,
         last_rest_ended=at(14, 10),
-        history_end=date(2026, 9, 14),
         certs=((CertType.LICENCE, date(2025, 1, 1), date(2027, 1, 1)),),
     )
     return replace(base, **overrides)
@@ -165,3 +164,23 @@ def test_rulebook_reads_params_and_keeps_defaults():
     )
     assert book.max_duty_hours == 55 and book.min_rest_hours == 10
     assert book.base_fdp_hours == 13.0
+
+
+def test_duty_window_checks_windows_ending_on_later_rostered_days():
+    # Rostered 11h on each of the 5 days after the new duty: the window ending on the
+    # last of them holds 55h + the new 9.5h, even though the window ending today does not.
+    later = tuple(
+        Duty(f"P-{i}", date(2026, 9, 15 + i), at(15 + i, 1), at(15 + i, 12), 6.0)
+        for i in range(1, 6)
+    )
+    c = crew(duties=later, last_rest_ended=None)
+    v = check_duty_window(c, duty_day(15, report=0, release=9.5, sectors=2), BOOK)
+    assert v.failed and v.used == 64.5
+    assert "in the 7 days ending 2026-09-20" in v.detail
+
+
+def test_duty_window_counts_a_history_day_and_its_rostered_duty_once():
+    # History already records the rostered duty on 09-14: it must not be added twice.
+    same_day = Duty("P-1", date(2026, 9, 14), at(14, 1), at(14, 11), 6.0)
+    c = crew(daily_duty={date(2026, 9, 14): 10.0}, duties=(same_day,))
+    assert c.duty_in_window(date(2026, 9, 8), date(2026, 9, 14)) == 10.0

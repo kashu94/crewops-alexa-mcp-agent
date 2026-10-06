@@ -74,16 +74,22 @@ class OpsStore:
         self.table = table
 
     def put_records(self, records: Iterable[Any]) -> Counter[str]:
-        """Write records, replacing any item with the same keys. Returns counts by entity."""
-        counts: Counter[str] = Counter()
+        """Write records, replacing any item with the same keys. Returns counts by entity.
+
+        Every record is converted and checked before the first write, so a bad batch is
+        refused whole instead of being left half-written.
+        """
+        items = [to_item(record) for record in records]
         seen: set[tuple[str, str]] = set()
+        for item in items:
+            key = (item[schema.PK], item[schema.SK])
+            if key in seen:
+                raise DataError(f"two records map to the same key {key}")
+            seen.add(key)
+
+        counts: Counter[str] = Counter()
         with self.table.batch_writer() as batch:
-            for record in records:
-                item = to_item(record)
-                key = (item[schema.PK], item[schema.SK])
-                if key in seen:
-                    raise DataError(f"two records map to the same key {key}")
-                seen.add(key)
+            for item in items:
                 batch.put_item(Item=item)
                 counts[item[ENTITY]] += 1
         return counts

@@ -78,12 +78,15 @@ class World:
     def positioning(self, crew: CrewState, day: DutyDay) -> Positioning | None:
         """The same-day flight from the crew member's base that delays the day least.
 
-        None means nobody can get them there that day: a base-rule exclusion.
+        Only flights departing at or after the snapshot count. None means nobody can get
+        them there that day: a base-rule exclusion.
         """
         best: Positioning | None = None
         for f in self.flights.values():
             if f.date != day.date or f.dep_station != crew.base:
                 continue
+            if f.dep_utc < self.snapshot_utc:
+                continue  # already departed: nobody can be put on it now
             if f.arr_station != day.dep_station:
                 continue
             new_report = f.arr_utc + POSITIONING_REPORT_BUFFER
@@ -137,7 +140,6 @@ def build_world(seed: SeedData) -> World:
             ratings=c.ratings,
             status=c.status,
             last_rest_ended=clock.last_rest_ended if clock else None,
-            history_end=history[-1].date if history else None,
             daily_duty={h.date: h.duty_hours for h in history},
             daily_flight={h.date: h.flight_hours for h in history},
             certs=tuple(certs.get(c.crew_id, ())),

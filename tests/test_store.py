@@ -133,14 +133,16 @@ def test_items_outside_the_operation_are_ignored_on_load(seed):
     assert store.load_seed() == normalised(seed)
 
 
-def test_duplicate_keys_are_refused(seed):
+def test_duplicate_keys_are_refused_before_any_write(seed):
     store = OpsStore(create_table())
     crew = seed.crew[0]
     with pytest.raises(DataError, match="same key"):
-        store.put_records([crew, crew])
+        store.put_records([seed.crew[1], crew, crew])
+    assert sum(1 for _ in store.scan()) == 0
 
 
-def test_loader_dry_run_needs_no_aws(capsys):
+def test_loader_dry_run_needs_no_aws(monkeypatch, capsys):
+    monkeypatch.setattr(loader, "load_env_file", lambda: {})  # never read a developer's .env
     assert loader.main(["--dry-run"]) == 0
     assert f"{EXPECTED_ITEMS} items would be written" in capsys.readouterr().out
 

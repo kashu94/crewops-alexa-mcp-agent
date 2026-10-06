@@ -45,13 +45,31 @@ class ConfigError(ValueError):
 ENV_LINE_RE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
 
 
+def _parse_value(value: str, where: str) -> str:
+    """``"a b" # note`` -> ``a b``; ``plain # note`` -> ``plain``; ``a=b#c`` -> ``a=b#c``."""
+    if value[:1] in ('"', "'"):
+        quote = value[0]
+        end = value.find(quote, 1)
+        if end == -1:
+            raise ConfigError(f"{where}: unterminated quote in {value!r}")
+        rest = value[end + 1 :].strip()
+        if rest and not rest.startswith("#"):
+            raise ConfigError(f"{where}: unexpected text after the quoted value: {rest!r}")
+        return value[1:end]
+    if " #" in value or "\t#" in value:
+        value = re.split(r"\s#", value, maxsplit=1)[0]
+    return value.rstrip()
+
+
 def load_env_file(path: str | os.PathLike[str] = ".env", override: bool = False) -> dict[str, str]:
     """Load ``KEY=VALUE`` lines from a ``.env`` file into ``os.environ``.
 
-    Blank lines and ``#`` comments are skipped, and matching quotes around a value are
-    removed. Variables already set in the shell win unless ``override`` is true, so a
-    one-off ``CREWOPS_STAGE=demo ...`` on the command line beats the file. A missing file
-    is not an error: every setting has a default.
+    Blank lines and ``#`` comments are skipped, an optional ``export`` prefix is allowed,
+    spaces around ``=`` and trailing whitespace (including Windows line endings) are
+    ignored, a quoted value keeps its spaces, and ``value # note`` drops the note.
+    Variables already set in the shell win unless ``override`` is true, so a one-off
+    ``CREWOPS_STAGE=demo ...`` on the command line beats the file. A missing file is not
+    an error: every setting has a default.
 
     Returns the values that were applied.
     """
@@ -69,11 +87,7 @@ def load_env_file(path: str | os.PathLike[str] = ".env", override: bool = False)
         match = ENV_LINE_RE.match(line)
         if not match:
             raise ConfigError(f"{path}:{number}: expected KEY=VALUE, got {line!r}")
-        key, value = match.group(1), match.group(2).strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        elif " #" in value:
-            value = value.split(" #", 1)[0].rstrip()
+        key, value = match.group(1), _parse_value(match.group(2).strip(), f"{path}:{number}")
         if override or key not in os.environ:
             os.environ[key] = value
             applied[key] = value
@@ -208,3 +222,20 @@ class Settings:
             max_tool_iterations=_int(env, "CREWOPS_MAX_TOOL_ITERATIONS", 8),
             response_budget_seconds=_float(env, "CREWOPS_RESPONSE_BUDGET_SECONDS", 6.0),
         )
+
+
+def shell_exports(path: str | os.PathLike[str] = ".env") -> str:
+    """``export`` lines for a POSIX shell: the ``.env`` values plus the resolved region and
+    stage. ``scripts/cdk.sh`` evaluates this, so the deploy script and the Python code read
+    ``.env`` with one parser and agree on every value, including defaults.
+    """
+    import shlex
+
+    applied = load_env_file(path)
+    settings = Settings.from_env()
+    values = {**applied, "AWS_REGION": settings.aws_region, "CREWOPS_STAGE": settings.stage}
+    return "\n".join(f"export {key}={shlex.quote(value)}" for key, value in values.items())
+
+
+if __name__ == "__main__":
+    print(shell_exports())
