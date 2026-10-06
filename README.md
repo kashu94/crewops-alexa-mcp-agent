@@ -131,7 +131,14 @@ scripts/cdk.sh destroy --all      # remove a dev stage completely
 ```
 
 `scripts/cdk.sh` reads `.env`, refuses to run without a named profile, and prints the
-target account before calling the CDK CLI.
+target account before calling the latest CDK CLI. The CLI must be at least as new as the
+`aws-cdk-lib` the app uses; an older global install fails with a "cloud assembly schema
+version mismatch". On Windows, run the same settings directly:
+
+```powershell
+$env:AWS_PROFILE="crewops"; $env:AWS_REGION="ap-southeast-2"; $env:CREWOPS_STAGE="dev"
+npx --yes aws-cdk@latest deploy --all --profile crewops
+```
 
 ### Settings
 

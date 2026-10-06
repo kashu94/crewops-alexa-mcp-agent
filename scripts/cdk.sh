@@ -51,4 +51,4 @@ read -r account arn <<<"${identity}"
 echo "Profile: ${AWS_PROFILE}  Account: ${account}  Region: ${AWS_REGION}  Stage: ${CREWOPS_STAGE}"
 echo "Identity: ${arn}"
 
-exec npx --yes aws-cdk@2 "$@" --profile "${AWS_PROFILE}"
+exec npx --yes aws-cdk@latest "$@" --profile "${AWS_PROFILE}"
