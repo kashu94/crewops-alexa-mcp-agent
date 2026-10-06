@@ -100,7 +100,15 @@ A crew member from another base is positioned on a real same-day flight from the
 The whole pairing then slips until they can report 15 minutes after landing. A reserve is
 usable only if their on-call window covers that report time; otherwise they are unavailable,
 not a cheaper option. Thresholds come from the rule parameters in the data, so changing a
-limit needs no code change. Candidate search ranks every legal option by cost across four strategies:
+limit needs no code change.
+
+Candidates are everyone of the needed rank not already on the pairing. Each one either
+becomes a costed option or drops out at the first stage they fail: qualified, certified, in
+position, rested, within limits. That funnel, with a reason for every drop, answers "why not
+C-2087?" without another calculation. The engine also precomputes every comparison an
+answer might speak: the premium of the next price tier, how many options tie, and how many
+times the recommendation's cost cancelling would be. Seniority and the provided risk score
+are shown next to each option and never change its rank. Candidate search ranks every legal option by cost across four strategies:
 reserve callout, day-off callout, deadhead, and cancellation as the explicit last resort.
 
 Ids that do not exist are never silently corrected. A transposed id gets a "did you mean?"

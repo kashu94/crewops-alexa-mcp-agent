@@ -52,6 +52,12 @@ class World:
     costs: CostTable
     book: RuleBook
     snapshot_utc: datetime
+    reachability: Mapping[str, int]
+    """Minutes to reach each crew member. Shown to the controller, never ranked on."""
+    seniority: Mapping[str, int]
+    """Years of service. Shown, never ranked on."""
+    risk: Mapping[str, float]
+    """Provided disruption-risk score. Shown, never changes legality or rank."""
 
     def state(self, crew_id: str) -> CrewState:
         try:
@@ -151,4 +157,7 @@ def build_world(seed: SeedData) -> World:
         costs=seed.costs,
         book=RuleBook.from_rules(seed.rules),
         snapshot_utc=seed.snapshot_utc,
+        reachability={c.crew_id: c.reachability_minutes for c in seed.crew},
+        seniority={c.crew_id: c.seniority for c in seed.crew},
+        risk={r.crew_id: r.score for r in seed.risk_signals},
     )
