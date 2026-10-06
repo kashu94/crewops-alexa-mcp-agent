@@ -91,7 +91,16 @@ Seven rules, each returning the numbers behind its verdict rather than a bare pa
 | BASE-07 | Called out from own base, or positioned by deadhead at a cost |
 
 Multi-day pairings are checked day by day, with earlier days of the same pairing counted in
-the windows. Candidate search ranks every legal option by cost across four strategies:
+the windows. Duty already rostered later in the week counts too, so a cover that looks legal
+today cannot quietly breach a limit on a trip the crew member already has. Rest is checked on
+both sides of the new duty, and between the days of the pairing itself when a delay eats into
+the overnight.
+
+A crew member from another base is positioned on a real same-day flight from the schedule.
+The whole pairing then slips until they can report 15 minutes after landing. A reserve is
+usable only if their on-call window covers that report time; otherwise they are unavailable,
+not a cheaper option. Thresholds come from the rule parameters in the data, so changing a
+limit needs no code change. Candidate search ranks every legal option by cost across four strategies:
 reserve callout, day-off callout, deadhead, and cancellation as the explicit last resort.
 
 Ids that do not exist are never silently corrected. A transposed id gets a "did you mean?"

@@ -94,11 +94,12 @@ src/crewops/
   config.py             Runtime settings
   domain/               Typed records shared by every layer
   ingestion/            Seed loading and validation; roster uploads and live reports later
+  engine/               Legality engine: duty math, the seven rules, per-crew assessment
 tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
 ```
 
-More folders arrive as the build progresses: the legality engine, DynamoDB access, search,
+More folders arrive as the build progresses: candidate ranking, DynamoDB access, search,
 tools, agents and the MCP server inside the package, then infrastructure, the web app and
 the Alexa skill at the top level.
 

@@ -1,0 +1,137 @@
+"""Is this crew member legal for this pairing, and if not, exactly why?
+
+``assess`` is the one entry point the rest of the system uses for a legality answer. It
+handles the two things that change *when* a duty happens before the rules run:
+
+* **Positioning.** A crew member based elsewhere flies in first, so the whole pairing
+  slips until they can report.
+* **A what-if delay.** A late first departure stretches day one, which is how a delay
+  pushes someone past their duty-period limit.
+
+It also enforces the reserve on-call window: a reserve whose window does not cover the
+required report time is unavailable, not a cheaper option.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+
+from crewops.engine.duty import DutyDay
+from crewops.engine.rules import (
+    BASE,
+    REST,
+    RuleVerdict,
+    blocking,
+    evaluate,
+    fail,
+)
+from crewops.engine.world import Positioning, World
+
+
+@dataclass(frozen=True, slots=True)
+class Assessment:
+    crew_id: str
+    pairing_id: str
+    verdicts: tuple[RuleVerdict, ...]
+    positioning: Positioning | None
+    delay_hours: float
+    """The what-if delay applied to the first departure."""
+    on_reserve: bool
+    """On call that day with a window covering the required report time."""
+    days: tuple[DutyDay, ...]
+    """The duty days as evaluated, after positioning and delay."""
+
+    @property
+    def legal(self) -> bool:
+        return not any(v.failed for v in self.verdicts)
+
+    @property
+    def blocking(self) -> list[RuleVerdict]:
+        return blocking(self.verdicts)
+
+    @property
+    def departure_slip_hours(self) -> float:
+        """How late the first departure leaves because of positioning."""
+        return self.positioning.delay_hours if self.positioning else 0.0
+
+
+def _intra_pairing_rest(days: list[DutyDay], world: World) -> list[RuleVerdict]:
+    """Rest between consecutive days of the same pairing.
+
+    Only a delay can break it (the published roster respects it), but a delay that eats
+    into the overnight must show up as a rest breach, not pass silently.
+    """
+    out = []
+    minimum = world.book.min_rest_hours
+    for prev, nxt in zip(days, days[1:], strict=False):
+        rest = round((nxt.report_utc - prev.release_utc).total_seconds() / 3600, 2)
+        if rest < minimum:
+            out.append(
+                fail(
+                    REST,
+                    f"only {rest}h rest between {prev.date} and {nxt.date} of the pairing",
+                    used=rest,
+                    limit=minimum,
+                    headroom=round(rest - minimum, 2),
+                    date=nxt.date,
+                )
+            )
+    return out
+
+
+def assess(world: World, crew_id: str, pairing_id: str, delay_hours: float = 0.0) -> Assessment:
+    """Evaluate all seven rules for one crew member on every day of one pairing."""
+    if delay_hours < 0:
+        raise ValueError("delay_hours cannot be negative")
+
+    crew = world.state(crew_id)
+    days = list(world.days_of(pairing_id))
+    first = days[0]
+
+    # For crew already rostered on this pairing, a rest period that ends after one of its
+    # days is the rest *from* that day, not rest they still owe before it.
+    own = [d for d in crew.duties if d.pairing_id == pairing_id]
+    if crew.last_rest_ended and any(d.release_utc <= crew.last_rest_ended for d in own):
+        crew = replace(crew, last_rest_ended=None)
+
+    positioning = None
+    if crew.base != first.dep_station:
+        positioning = world.positioning(crew, first)
+        if positioning and positioning.delay_hours:
+            days = [d.shifted(positioning.delay_hours) for d in days]
+
+    if delay_hours:
+        days[0] = days[0].delayed(delay_hours)
+
+    verdicts = evaluate(
+        crew,
+        days,
+        world.book,
+        exclude_pairing=pairing_id,
+        positioned=positioning is not None,
+    )
+    verdicts += _intra_pairing_rest(days, world)
+
+    reserves = world.reserves.get(crew_id, ())
+    rostered = [r for r in reserves if first.date in r.dates]
+    on_reserve = any(r.covers(days[0].report_utc) for r in rostered)
+    if rostered and not on_reserve:
+        r = rostered[0]
+        verdicts.append(
+            fail(
+                BASE,
+                f"on-call window {r.window_start:%H:%M}-{r.window_end:%H:%M}Z does not cover "
+                f"report at {days[0].report_utc:%H:%M}Z",
+                date=first.date,
+            )
+        )
+
+    return Assessment(
+        crew_id=crew_id,
+        pairing_id=pairing_id,
+        verdicts=tuple(verdicts),
+        positioning=positioning,
+        delay_hours=delay_hours,
+        on_reserve=on_reserve,
+        days=tuple(days),
+    )
