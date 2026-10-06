@@ -13,11 +13,12 @@ Item                            pk / sk                    gsi1pk / gsi1sk
 Crew profile                    CREW#id / PROFILE          BASE#station / RANK#rank#id
 Certification                   CREW#id / CERT#type
 Duty clock (with history)       CREW#id / CLOCK
-Reserve duty                    CREW#id / RESERVE          RESERVE#date / CREW#id
-Rostered duty day               CREW#id / DUTY#report      PAIRING#id / DUTY#report#id
+Reserve duty                    CREW#id / RESERVE#base
+Risk signal                     CREW#id / RISK
+Roster exception                CREW#id / EXCEPTION#date#rule
 Flight                          FLIGHT#id / META           DATE#yyyy-mm-dd / DEP#utc#id
 Pairing (days and crew seats)   PAIRING#id / META          AIRCRAFT#tail / DATE#first-day
-Gate slot                       GATE#gate / SLOT#start     FLIGHT#id / GATE
+Gate slot                       GATE#gate / SLOT#start#id  FLIGHT#id / GATE
 Rule, cost table                CONFIG / RULE#id, COSTS
 Disruption                      DISRUPTION#id / META       STATUS#status / AT#reported
 Plan                            DISRUPTION#id / PLAN#id    PLAN#status / AT#submitted
@@ -25,8 +26,10 @@ Audit event                     DISRUPTION#id / AUDIT#ts
 Idempotency marker (expires)    REQUEST#key / SEEN
 ==============================  =========================  ===============================
 
-``gsi2`` is reserved for a second overloaded view (for example a controller's desk) so it
-can be added without recreating the table.
+The operational records above are written by ``crewops.store.items``. Disruptions, plans,
+audit events and idempotency markers arrive with the features that create them. ``gsi2`` is
+reserved for a second overloaded view (for example a controller's desk) so it can be added
+without recreating the table.
 """
 
 from __future__ import annotations

@@ -95,7 +95,7 @@ src/crewops/
   domain/               Typed records shared by every layer
   ingestion/            Seed loading and validation; roster uploads and live reports later
   engine/               Legality engine: duty math, the seven rules, assessment, cost ranking
-  store/                DynamoDB table layout (data access arrives next)
+  store/                DynamoDB key layout, item conversion, reads and writes
 infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
@@ -167,6 +167,13 @@ AWS_PROFILE=crewops
 ```
 
 Access keys never go in `.env`; they stay in `~/.aws`.
+
+After the first deploy, load the sample week into the table (about 1,400 items):
+
+```bash
+uv run python -m crewops.ingestion.load_seed --dry-run   # validate and count, no AWS calls
+uv run python -m crewops.ingestion.load_seed             # validate, then write
+```
 
 The `dev` stage is disposable: destroying it deletes its data. Any other stage keeps its
 table, with point-in-time recovery and deletion protection.
