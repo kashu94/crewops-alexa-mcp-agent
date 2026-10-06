@@ -7,8 +7,9 @@ def test_defaults_without_environment():
     s = Settings.from_env({})
     assert s.stage == "dev"
     assert s.aws_region == "us-east-1"
-    assert s.advisor_model_id == "anthropic.claude-sonnet-5-5"
-    assert s.router_model_id == "anthropic.claude-haiku-4-5"
+    assert s.advisor_model_id == "us.amazon.nova-2-lite-v1:0"
+    assert s.router_model_id == "us.amazon.nova-micro-v1:0"
+    assert s.explainer_model_id == "us.amazon.nova-2-lite-v1:0"
     assert s.embedding_dimensions == 512
     assert s.max_tool_iterations == 8
     assert s.guardrails_enabled is False
@@ -28,14 +29,14 @@ def test_overrides_are_applied():
     s = Settings.from_env(
         {
             "AWS_REGION": "ap-south-1",
-            "CREWOPS_ADVISOR_MODEL_ID": "anthropic.claude-opus-5-5",
+            "CREWOPS_ADVISOR_MODEL_ID": "us.amazon.nova-pro-v1:0",
             "CREWOPS_EMBEDDING_DIMENSIONS": "1024",
             "CREWOPS_GUARDRAIL_ID": "gr-123",
             "CREWOPS_RESPONSE_BUDGET_SECONDS": "5.5",
         }
     )
     assert s.aws_region == "ap-south-1"
-    assert s.advisor_model_id == "anthropic.claude-opus-5-5"
+    assert s.advisor_model_id == "us.amazon.nova-pro-v1:0"
     assert s.embedding_dimensions == 1024
     assert s.guardrails_enabled is True
     assert s.response_budget_seconds == 5.5
@@ -76,3 +77,53 @@ def test_settings_are_immutable():
     s = Settings.from_env({})
     with pytest.raises(AttributeError):
         s.stage = "prod"
+
+
+def test_load_env_file_applies_values_without_overriding_shell(tmp_path, monkeypatch):
+    from crewops.config import load_env_file
+
+    env = tmp_path / ".env"
+    env.write_text(
+        "# comment\n"
+        "\n"
+        "CREWOPS_STAGE=demo\n"
+        "export AWS_REGION='eu-west-1'\n"
+        'CREWOPS_GUARDRAIL_ID="gr-1"\n'
+        "CREWOPS_MAX_TOOL_ITERATIONS=5  # inline comment\n"
+        "AWS_PROFILE=fromfile\n"
+    )
+    for key in (
+        "CREWOPS_STAGE",
+        "AWS_REGION",
+        "CREWOPS_GUARDRAIL_ID",
+        "CREWOPS_MAX_TOOL_ITERATIONS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("AWS_PROFILE", "fromshell")
+
+    applied = load_env_file(env)
+
+    import os
+
+    assert os.environ["CREWOPS_STAGE"] == "demo"
+    assert os.environ["AWS_REGION"] == "eu-west-1"
+    assert os.environ["CREWOPS_GUARDRAIL_ID"] == "gr-1"
+    assert os.environ["CREWOPS_MAX_TOOL_ITERATIONS"] == "5"
+    assert os.environ["AWS_PROFILE"] == "fromshell"
+    assert "AWS_PROFILE" not in applied
+    assert Settings.from_env().stage == "demo"
+
+
+def test_load_env_file_missing_is_fine(tmp_path):
+    from crewops.config import load_env_file
+
+    assert load_env_file(tmp_path / "nope.env") == {}
+
+
+def test_load_env_file_rejects_garbage(tmp_path):
+    from crewops.config import load_env_file
+
+    bad = tmp_path / ".env"
+    bad.write_text("this is not a setting\n")
+    with pytest.raises(ConfigError, match=r"\.env:1"):
+        load_env_file(bad)

@@ -23,14 +23,56 @@ vector buckets only accept lowercase letters, digits and hyphens."""
 TITAN_V2_DIMENSIONS = (256, 512, 1024)
 """Output sizes Titan Text Embeddings V2 supports."""
 
-DEFAULT_ROUTER_MODEL = "anthropic.claude-haiku-4-5"
-DEFAULT_ADVISOR_MODEL = "anthropic.claude-sonnet-5-5"
-DEFAULT_EXPLAINER_MODEL = "anthropic.claude-haiku-4-5"
+# Amazon Nova on Bedrock, called through the US cross-region inference profiles, which keep
+# traffic inside US regions. Nova 2 Lite has no in-region endpoint in us-east-1, so the
+# profile ID (``us.`` prefix) is required, not optional. Any Bedrock Converse model with
+# tool calling can replace these through the environment.
+DEFAULT_ROUTER_MODEL = "us.amazon.nova-micro-v1:0"
+DEFAULT_ADVISOR_MODEL = "us.amazon.nova-2-lite-v1:0"
+DEFAULT_EXPLAINER_MODEL = "us.amazon.nova-2-lite-v1:0"
 DEFAULT_EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
 
 
 class ConfigError(ValueError):
     """A setting is present but unusable."""
+
+
+ENV_LINE_RE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
+
+
+def load_env_file(path: str | os.PathLike[str] = ".env", override: bool = False) -> dict[str, str]:
+    """Load ``KEY=VALUE`` lines from a ``.env`` file into ``os.environ``.
+
+    Blank lines and ``#`` comments are skipped, and matching quotes around a value are
+    removed. Variables already set in the shell win unless ``override`` is true, so a
+    one-off ``CREWOPS_STAGE=demo ...`` on the command line beats the file. A missing file
+    is not an error: every setting has a default.
+
+    Returns the values that were applied.
+    """
+    applied: dict[str, str] = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        return applied
+
+    for number, raw in enumerate(lines, start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = ENV_LINE_RE.match(line)
+        if not match:
+            raise ConfigError(f"{path}:{number}: expected KEY=VALUE, got {line!r}")
+        key, value = match.group(1), match.group(2).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        elif " #" in value:
+            value = value.split(" #", 1)[0].rstrip()
+        if override or key not in os.environ:
+            os.environ[key] = value
+            applied[key] = value
+    return applied
 
 
 def _get(env: Mapping[str, str], key: str, default: str | None = None) -> str | None:

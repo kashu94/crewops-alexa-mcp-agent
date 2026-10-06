@@ -59,14 +59,18 @@ event-triggered jobs: the SQS worker, the roster loader and the disruption agent
 **Fallback:** the MCP server is stateless between requests, so it can move to Lambda behind a
 Function URL without code changes if AgentCore blocks progress.
 
-## D6. Models: Sonnet for the advisor, Haiku for triage and narration
+## D6. Models: Amazon Nova, chosen by evaluation
 
-The rules engine does the hard reasoning; the advisor only chooses tools and drafts. Voice
-needs speed. Claude Sonnet 5.5 runs the advisor loop; Claude Haiku 4.5 handles triage and the
-explainer rewrite. Every model id is a setting, and the evaluation set decides any change.
+The rules engine does the hard reasoning; the model only chooses tools and phrases answers,
+and the verifier rejects anything it did not get from a tool. That makes a small, fast model
+enough. Amazon Nova 2 Lite runs the advisor loop and the explainer; Amazon Nova Micro handles
+triage. Both are called through Bedrock's model-neutral Converse API using the US
+cross-region inference profiles, so every model is a setting, not code.
 
-**Not chosen:** fine-tuning. The verifier pins correctness regardless of the model behind it,
-and prompt caching plus a deterministic planner already keep tool calls short.
+**Traded away:** some fluency. A smaller model chooses tools less reliably, so more answers
+fall back to the verified template wording. That is safe by construction, and the evaluation
+set measures how often it happens. Larger models or fine-tuning can be tried later by
+changing configuration and re-running the evaluation.
 
 ## D7. Most answers need no model call to route
 
@@ -106,3 +110,11 @@ operational role. All of this is enforced in code in the MCP server, never by a 
 **Traded away:** speed on routine cover. One extra human step is accepted because a crew change
 moves a real person and is costly to undo. An admin-set auto-approval threshold for low-cost
 reserve callouts is a possible later addition, not part of the first build.
+
+## D12. Infrastructure as code from the first AWS resource
+
+Every AWS resource is defined in a Python CDK app from the commit that first needs it, and
+deployed as it is built. Problems with a service surface the day it is added, not in the last
+week. CDK's high-level constructs cover DynamoDB, SQS with dead-letter queues, SNS, Lambda
+event sources, Cognito, AppSync Events and AgentCore; S3 Vectors and Bedrock Guardrails use
+the lower-level CloudFormation constructs.

@@ -16,7 +16,7 @@ choosing which tools to call, and turning a verified answer into speech.
  ┌──────────────────────────────┐ ┌──────────────────────────┐ ┌──────────────────────┐
  │ Alexa+ simulator (Next.js)   │ │ Alexa Developer Console  │ │ Any MCP host         │
  │ Echo Show-style, role switch │ │ custom skill (ASK SDK,   │ │ (MCP Inspector,      │
- │ Polly voice, live cards      │ │ Lambda, progressive resp)│ │ Claude, Alexa+)      │
+ │ Polly voice, live cards      │ │ Lambda, progressive resp)│ │ VS Code, Alexa+)     │
  └──────────────┬───────────────┘ └────────────┬─────────────┘ └──────────┬───────────┘
                 │ Cognito JWT (one group per role)           │            │
                 ▼                                            ▼            │
@@ -64,11 +64,11 @@ Each stage spends a model call only when the previous one could not settle the q
 |---|---|---|
 | **Router** | 0 | Ordered regex rules classify the question and extract ids. |
 | **Semantic fallback** | 0 | Embedding match against known question intents. Borrows the closest intent, never its ids or answer. |
-| **Triage** | 0–1 (Haiku) | Classifies intent only when both stages above abstain. No tools. |
+| **Triage** | 0–1 (Nova Micro) | Classifies intent only when both stages above abstain. No tools. |
 | **Planner** | 0 | Seeds the obvious first tool calls for the intent. |
-| **Advisor** | 1–8 (Sonnet) | Chooses further tools and drafts the answer. Capped at 8 iterations. Cannot submit, approve or commit anything. |
+| **Advisor** | 1–8 (Nova 2 Lite) | Chooses further tools and drafts the answer. Capped at 8 iterations. Cannot submit, approve or commit anything. |
 | **Verifier** | 0 | Every id, number, name and rule verdict in the draft must appear in a tool result. On failure the draft is replaced by a deterministic template. |
-| **Explainer** | 0–1 (Haiku) | Rewrites the verified answer for speech. Its output is verified again. |
+| **Explainer** | 0–1 (Nova 2 Lite) | Rewrites the verified answer for speech. Its output is verified again. |
 | **PII redaction** | 0 | Removes contact and identity data at the output boundary. |
 
 Safety therefore has independent layers: Bedrock Guardrails for harmful content and prompt
@@ -113,6 +113,27 @@ reserve callout, day-off callout, deadhead, and cancellation as the explicit las
 
 Ids that do not exist are never silently corrected. A transposed id gets a "did you mean?"
 question, because acting on the wrong id dispatches the wrong person.
+
+## Flows
+
+| Flow | Path |
+|---|---|
+| Starting data | A script validates the seed week and writes it to DynamoDB. |
+| Roster upload | An admin uploads a roster file to S3. The upload event runs a loader Lambda, which validates the file with the same checks as the seed and writes it. A rejected file records its errors for the admin. |
+| Live report | A reporter or crew member reports by voice or web. The report goes to SQS, with a dead-letter queue for failures. A worker Lambda checks the reporter's role, stores the report once even if it arrives twice, and marks it REPORTED. |
+| Disruption analysis | The DynamoDB stream starts the disruption Lambda. It works out the blast radius and ranked options, marks the disruption OPTIONS_READY, and alerts the controller through SNS and the live console. |
+| Question | Any role asks by voice or chat. Router, advisor tools, verifier and explainer produce a cited answer. |
+| Decision | A controller submits a plan, a different approver approves it, legality is re-checked, and one transaction commits every assignment. The crew member is notified and the audit log updated. |
+| Search index | Rules, example questions, past cases and notes are embedded with Titan V2 into S3 Vectors. |
+| Evaluation | Gold questions and held-out cases run against the agent and are scored. |
+
+## Data store
+
+One DynamoDB table holds the whole operation: crew, certifications, duty clocks, reserves,
+flights, pairings, gates, configuration, disruptions, plans and audit events. Each item has a
+partition and sort key, and two overloaded secondary indexes serve the lookups a key cannot,
+such as flights by date or plans awaiting approval. The full key layout is documented in
+`src/crewops/store/schema.py`, which both the CDK stack and the data-access code import.
 
 ## Roles and approvals
 

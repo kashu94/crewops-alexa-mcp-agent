@@ -52,7 +52,7 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#roles-and-approvals).
               ▼                      ▼                     ▼
         ┌──────────────────────────────────────────────────────┐
         │ Assistant agent · Strands on AgentCore Runtime        │
-        │ router → advisor (Claude on Bedrock) → verifier →     │
+        │ router → advisor (Nova on Bedrock) → verifier →       │
         │ explainer · Bedrock Guardrails · AgentCore Memory     │
         └──────────────────────────┬───────────────────────────┘
                                    │ MCP (Streamable HTTP)
@@ -75,7 +75,7 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why each piece was ch
 
 | Service | Role |
 |---|---|
-| Amazon Bedrock | Claude models, Titan V2 embeddings, Guardrails |
+| Amazon Bedrock | Amazon Nova models, Titan V2 embeddings, Guardrails |
 | Amazon Bedrock AgentCore | Runtime for the agent and MCP server, Memory, Observability |
 | Amazon DynamoDB | Operational data (single table) with Streams |
 | Amazon S3 Vectors | Semantic search over rules and question intents |
@@ -95,6 +95,8 @@ src/crewops/
   domain/               Typed records shared by every layer
   ingestion/            Seed loading and validation; roster uploads and live reports later
   engine/               Legality engine: duty math, the seven rules, assessment, cost ranking
+  store/                DynamoDB table layout (data access arrives next)
+infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
 ```
@@ -113,6 +115,27 @@ cp .env.example .env     # optional: every setting has a default
 uv run pytest
 uv run ruff check .
 ```
+
+## Deploying
+
+Infrastructure is defined with the AWS CDK in Python and deployed to `us-east-1`. You need
+Node.js (22 or later recommended) and an AWS CLI profile for the target account.
+
+```bash
+aws configure --profile crewops   # once: access keys stay in ~/.aws
+cp .env.example .env              # once: names the profile, region and stage
+
+scripts/cdk.sh bootstrap          # once per account and region
+scripts/cdk.sh diff               # what would change
+scripts/cdk.sh deploy --all       # create or update the stacks
+scripts/cdk.sh destroy --all      # remove a dev stage completely
+```
+
+`scripts/cdk.sh` reads `.env`, refuses to run without a named profile, and prints the
+target account before calling the CDK CLI.
+
+The `dev` stage is disposable: destroying it deletes its data. Any other stage keeps its
+table, with point-in-time recovery and deletion protection.
 
 ## Friction log
 
