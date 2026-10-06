@@ -14,7 +14,6 @@ build/
 # Environment and secrets
 .env
 .env.*
-!.env.example
 
 # AWS / CDK
 cdk.out/
