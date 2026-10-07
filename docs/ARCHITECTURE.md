@@ -62,14 +62,22 @@ Each stage spends a model call only when the previous one could not settle the q
 
 | Stage | Model calls | Job |
 |---|---|---|
-| **Router** | 0 | Ordered regex rules classify the question and extract ids. |
-| **Semantic fallback** | 0 | Embedding match against known question intents. Borrows the closest intent, never its ids or answer. |
-| **Triage** | 0–1 (Nova Micro) | Classifies intent only when both stages above abstain. No tools. |
-| **Planner** | 0 | Seeds the obvious first tool calls for the intent. |
-| **Advisor** | 1–8 (Nova 2 Lite) | Chooses further tools and drafts the answer. Capped at 8 iterations. Cannot submit, approve or commit anything. |
-| **Verifier** | 0 | Every id, number, name and rule verdict in the draft must appear in a tool result. On failure the draft is replaced by a deterministic template. |
-| **Explainer** | 0–1 (Nova 2 Lite) | Rewrites the verified answer for speech. Its output is verified again. |
-| **PII redaction** | 0 | Removes contact and identity data at the output boundary. |
+| **Router** | 0 | Ordered regex rules classify the question; ids, dates and stations are extracted by pattern only. |
+| **Semantic fallback** | 0 | Embedding match against the example questions. Borrows the closest one's intent, never its ids or answer, and only above a similarity floor measured on paraphrases. |
+| **Triage** (planned) | 0–1 (Nova Micro) | Classifies intent only when both stages above abstain. No tools. |
+| **Premise check** | 0 | Something the question states that the roster contradicts ("FO C-1042" for a captain, an unknown station) is asked about before anything runs. |
+| **Planner** | 0 | Makes the obvious first tool calls for the intent, and the calls that follow from their results, with the caller's own role checks. |
+| **Advisor** (planned) | 1–8 (Nova 2 Lite) | Chooses further tools and drafts the answer. Capped at 8 iterations. Cannot submit, approve or commit anything. |
+| **Verifier** | 0 | Every id, number, time, name and rule verdict in the draft must appear in a tool result of the same turn. On failure the draft is replaced by the template. |
+| **Template** | 0 | The tool results as short sentences. Copied, never computed, so it always verifies. |
+| **Explainer** (planned) | 0–1 (Nova 2 Lite) | Rewrites the verified answer for speech. Its output is verified again. |
+| **PII redaction** | 0 | Removes contact and government-id data at the output boundary, after verification. |
+
+Without a model, the pipeline already answers from the rules, planner and template. On the
+38 example questions, the rules route every one to its tier, and 35 get a verified answer;
+the other 3 need the advisor and say what they need instead. A set of 38 paraphrases
+(`data/eval/paraphrases.json`) was used to widen the rules' vocabulary, so routing on it is
+not an unbiased score; a held-out set is part of the evaluation step.
 
 Safety therefore has independent layers: Bedrock Guardrails for harmful content and prompt
 injection, the verifier for unsourced claims, PII redaction for sensitive data, and role

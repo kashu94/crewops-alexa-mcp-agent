@@ -483,7 +483,9 @@ class CrewOpsTools:
             f"flight_limit_{book.flight_window_days}d": book.max_flight_hours,
             f"flight_headroom_{book.flight_window_days}d": round(book.max_flight_hours - flown, 2),
             "duty_window": f"{d_start} to {as_of}",
+            "duty_window_days": book.duty_window_days,
             "flight_window": f"{f_start} to {as_of}",
+            "flight_window_days": book.flight_window_days,
             "last_rest_ended": _iso(crew.last_rest_ended) if crew.last_rest_ended else None,
         }
 

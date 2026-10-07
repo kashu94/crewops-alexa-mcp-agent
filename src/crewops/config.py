@@ -127,6 +127,13 @@ def _float(env: Mapping[str, str], key: str, default: float) -> float:
     return value
 
 
+def _fraction(env: Mapping[str, str], key: str, default: float) -> float:
+    value = _float(env, key, default)
+    if value >= 1:
+        raise ConfigError(f"{key} must be below 1, got {value}")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     stage: str
@@ -143,6 +150,10 @@ class Settings:
 
     max_tool_iterations: int
     """Hard stop on the advisor's tool loop."""
+    router_semantic_floor: float
+    """Least cosine similarity for the router to borrow the intent of the closest example
+    question. Below it, the question goes to the triage model instead. Set from measured
+    paraphrases with ``python -m crewops.agent.calibrate``."""
     response_budget_seconds: float
     """Time the voice path has to answer. Alexa allows 8 s; the rest is margin."""
 
@@ -220,6 +231,7 @@ class Settings:
             guardrail_id=_get(env, "CREWOPS_GUARDRAIL_ID"),
             guardrail_version=_get(env, "CREWOPS_GUARDRAIL_VERSION", "DRAFT"),
             max_tool_iterations=_int(env, "CREWOPS_MAX_TOOL_ITERATIONS", 8),
+            router_semantic_floor=_fraction(env, "CREWOPS_ROUTER_SEMANTIC_FLOOR", 0.45),
             response_budget_seconds=_float(env, "CREWOPS_RESPONSE_BUDGET_SECONDS", 6.0),
         )
 

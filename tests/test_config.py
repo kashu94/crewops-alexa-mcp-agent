@@ -166,3 +166,11 @@ def test_load_env_file_rejects_garbage(tmp_path, private_environ):
     bad.write_text("this is not a setting\n")
     with pytest.raises(ConfigError, match=r"\.env:1"):
         load_env_file(bad)
+
+
+def test_router_semantic_floor():
+    assert Settings.from_env({}).router_semantic_floor == 0.45
+    assert Settings.from_env({"CREWOPS_ROUTER_SEMANTIC_FLOOR": "0.3"}).router_semantic_floor == 0.3
+    for bad in ("1", "1.5", "0", "-0.2", "high"):
+        with pytest.raises(ConfigError, match="CREWOPS_ROUTER_SEMANTIC_FLOOR"):
+            Settings.from_env({"CREWOPS_ROUTER_SEMANTIC_FLOOR": bad})

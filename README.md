@@ -101,13 +101,14 @@ src/crewops/
   search/               Hybrid keyword + semantic search over S3 Vectors
   store/                DynamoDB key layout, item conversion, reads and writes
   tools/                The tools agents call: schemas, role checks, dispatch
+  agent/                Question pipeline: entities, router, planner, verifier, templates
 infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
 ```
 
-More folders arrive as the build progresses: the agents and the MCP server inside the
-package, then the web app and the Alexa skill at the top level.
+More folders arrive as the build progresses: the MCP server inside the package, then the
+web app and the Alexa skill at the top level.
 
 ## Getting started
 
@@ -163,6 +164,7 @@ environment; a value set in the shell wins over the file. Only `AWS_PROFILE` is 
 | `CREWOPS_GUARDRAIL_VERSION` | `DRAFT` | Guardrail version |
 | `CREWOPS_MAX_TOOL_ITERATIONS` | `8` | Cap on the advisor's tool loop |
 | `CREWOPS_RESPONSE_BUDGET_SECONDS` | `6.0` | Time budget for a spoken answer |
+| `CREWOPS_ROUTER_SEMANTIC_FLOOR` | `0.45` | Least similarity for the router to borrow an example question's intent; set from `crewops.agent.calibrate` |
 
 A minimal `.env`:
 
@@ -241,6 +243,19 @@ uv run python -m crewops.analysis.run --id r-demo-0001
 
 The `dev` and `test` stages are disposable: destroying them deletes their data. Any other
 stage keeps its table, with point-in-time recovery and deletion protection.
+
+### Asking a question
+
+Answers come from the tools and are verified before they are printed. No model is called yet.
+
+```bash
+uv run python -m crewops.agent.ask "Who is on reserve at BLR on 15 Sep?"
+uv run python -m crewops.agent.ask --role crew --crew-id C-1042 "How many duty hours do I have?"
+uv run python -m crewops.agent.ask --live "C-1042 is sick, who covers?"   # live table and index
+uv run python -m crewops.agent.calibrate      # measure the router's similarity floor (live)
+```
+
+Set the floor that `calibrate` recommends as `CREWOPS_ROUTER_SEMANTIC_FLOOR` in `.env`.
 
 ## Friction log
 
