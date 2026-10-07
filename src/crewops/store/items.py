@@ -319,6 +319,15 @@ CODECS: dict[type, Codec] = {
 BY_ENTITY: dict[str, Codec] = {codec.entity: codec for codec in CODECS.values()}
 
 
+def record_dict(record: Any) -> dict[str, Any]:
+    """A record in the seed JSON's own field names (values still typed)."""
+    try:
+        codec = CODECS[type(record)]
+    except KeyError:
+        raise TypeError(f"no codec for {type(record).__name__}") from None
+    return codec.dump(record)
+
+
 def to_item(record: Any) -> dict[str, Any]:
     try:
         codec = CODECS[type(record)]

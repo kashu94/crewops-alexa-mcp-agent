@@ -137,3 +137,15 @@ Titan. Model IDs were chosen so they also work unchanged in other regions.
 
 **Not chosen:** activating the account's advanced features to lift the region policy. It is
 irreversible and removes the spend limit, for no gain this project needs.
+
+## D14. Tools answer or ask; they never guess
+
+Every tool resolves what the user named against the real data. An id that does not exist is
+an error listing the nearest real ids, never a silent correction: C-1042 and C-1024 differ by
+one transposed digit, and acting on the wrong one sends a different person to an aircraft. A
+name or flight number with several matches is a question naming them. Who may call which
+tool is decided in code from the caller's verified roles, and the model is only shown the
+tools its caller may use.
+
+**Traded away:** a turn or two of back-and-forth when the user was vague. A wrong confident
+answer costs far more than one clarifying question.

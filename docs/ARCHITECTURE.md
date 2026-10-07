@@ -187,6 +187,39 @@ question unlike anything indexed is not matched to the least-unlike example. Eva
 paraphrased and held-out questions, not the indexed gold prompts, so routing accuracy is not
 inflated by questions matching themselves.
 
+## Tools
+
+The advisor and, later, the MCP server reach the operation through 17 tools in
+`crewops.tools`. Each answers from the legality engine and the roster; none calls a model.
+
+| Tool | Answers |
+|---|---|
+| `lookup` | Rows of any entity, with filters (equality, any-of, ranges, contains), sorting, limits and group counts. The count is always computed, never left to the model |
+| `duty_clock` | One crew member's day, 7-day duty and 28-day flight hours with limits and headroom |
+| `notification_brief` | The facts a callout message needs, including an acknowledge-by time from the crew member's reachability |
+| `check_legality` | All seven rules for one crew member on one pairing, named by id, flight, or aircraft and date |
+| `find_options` | Ranked legal cover for a seat, cancellation as the baseline, and the funnel of who was excluded and why |
+| `same_pairing` | Whether two crew members, named by id or name, fly together |
+| `ripple` | Blast radius of losing crew, a flight, an aircraft window or a station window |
+| `simulate` | What a delay does to a duty day and its crew, and which legs to drop if nobody could fly it |
+| `joint_plan` | Cheapest cover for several seats at once, never one person twice |
+| `check_gate` | Gate claims, delay conflicts at a gate, occupancy and inventory |
+| `explain_rule`, `search_rules` | A rule by id, or the rules closest to a paraphrased question |
+| `suggest_crew_ids`, `suggest_pairing_ids`, `suggest_flight_nos` | Real ids near a wrong one, for the user to choose from |
+| `list_controllers`, `controller_issue_counts` | The three controller desks, and open disruptions per desk from the live store |
+
+Three rules hold for every tool:
+
+- **Never guess.** An id that does not exist returns the nearest real ones, and asks for
+  confirmation when it looks like a typo (C-1024 for C-1042). A flight number without a date,
+  or a crew member flying several pairings, returns a question naming the choices.
+- **Never raise.** `dispatch` returns an error code and a message the model can act on, so a
+  failed call never ends the turn.
+- **Check the caller first.** Arguments are checked against each tool's JSON Schema, then the
+  caller's verified roles decide what may run. Crew may ask only about themselves. Reporters
+  see gates, rules and desks. Admins see desks, issue counts and rules, not crew records.
+  The model is shown only the tools its caller may use.
+
 ## Flows
 
 | Flow | Path |

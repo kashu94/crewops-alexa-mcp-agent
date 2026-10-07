@@ -15,6 +15,7 @@ from crewops.analysis.disruption import analyse
 from crewops.domain import DataError, GateSlot, Report, ReportType
 from crewops.engine import build_world
 from crewops.engine.world import World
+from crewops.ingestion.seed import SeedData
 from crewops.store.items import from_dynamo
 from crewops.store.ops_store import OpsStore
 from crewops.store.reports import (
@@ -57,12 +58,19 @@ def unavailable_crew(
     return {crew: tuple(sorted(set(days))) for crew, days in out.items()}
 
 
+def open_disruptions(table: Any) -> list[dict[str, Any]]:
+    """Every disruption still being worked, oldest status first."""
+    return [item for status in OPEN_STATUSES for item in disruptions_with_status(table, status)]
+
+
 @dataclass(frozen=True, slots=True)
 class Operation:
     """The operation loaded once and reused for every disruption in a batch."""
 
     world: World
     gates: tuple[GateSlot, ...]
+    seed: SeedData | None = None
+    """The records the world was built from, for tools that show them as they are."""
 
     @classmethod
     def load(cls, table: Any) -> Operation:
@@ -74,11 +82,10 @@ class Operation:
         """
         seed = OpsStore(table).load_seed()
         world = build_world(seed)
-        open_items = [
-            item for status in OPEN_STATUSES for item in disruptions_with_status(table, status)
-        ]
         return cls(
-            world=replace(world, unavailable=unavailable_crew(world, open_items)), gates=seed.gates
+            world=replace(world, unavailable=unavailable_crew(world, open_disruptions(table))),
+            gates=seed.gates,
+            seed=seed,
         )
 
 

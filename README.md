@@ -100,13 +100,14 @@ src/crewops/
   analysis/             Disruption analysis, its stream Lambda and the run command
   search/               Hybrid keyword + semantic search over S3 Vectors
   store/                DynamoDB key layout, item conversion, reads and writes
+  tools/                The tools agents call: schemas, role checks, dispatch
 infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
 ```
 
-More folders arrive as the build progresses: search, tools, agents and the MCP server
-inside the package, then the web app and the Alexa skill at the top level.
+More folders arrive as the build progresses: the agents and the MCP server inside the
+package, then the web app and the Alexa skill at the top level.
 
 ## Getting started
 
