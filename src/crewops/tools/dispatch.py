@@ -57,6 +57,9 @@ class Caller:
     user_id: str
     roles: frozenset[Role]
     crew_id: str | None = None
+    """The caller's own crew id, when they are crew."""
+    desk: str | None = None
+    """The controller's desk, when they are a controller."""
 
 
 def allowed_tools(caller: Caller) -> frozenset[str]:

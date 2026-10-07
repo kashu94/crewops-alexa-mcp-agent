@@ -1,0 +1,20 @@
+{
+  "note": "The demo team. Usernames and roles only: no email, phone or password is stored here. Crew members are linked to their roster records by crew id; controllers to their desk.",
+  "members": [
+    {"username": "ananya", "name": "Ananya Iyer", "roles": ["controller"], "desk": "desk-1"},
+    {"username": "rohit", "name": "Rohit Malhotra", "roles": ["controller"], "desk": "desk-2"},
+    {"username": "divya", "name": "Divya Rao", "roles": ["controller"], "desk": "desk-3"},
+    {"username": "meera", "name": "Meera Bhatt", "roles": ["approver"]},
+    {"username": "karan", "name": "Karan Mehta", "roles": ["approver"]},
+    {"username": "farah", "name": "Farah Qureshi", "roles": ["approver"]},
+    {"username": "imran", "name": "Imran Sheikh", "roles": ["reporter"]},
+    {"username": "lakshmi", "name": "Lakshmi Hegde", "roles": ["reporter"]},
+    {"username": "nikhil", "name": "Nikhil Agarwal", "roles": ["auditor"]},
+    {"username": "priya", "name": "Priya Desai", "roles": ["admin"]},
+    {"username": "vikram", "name": "Vikram Saxena", "roles": ["super_admin"]},
+    {"username": "crew1042", "name": "A. Nair", "roles": ["crew"], "crew_id": "C-1042"},
+    {"username": "crew3310", "name": "D. Reddy", "roles": ["crew"], "crew_id": "C-3310"},
+    {"username": "crew5417", "name": "S. Krishnan", "roles": ["crew"], "crew_id": "C-5417"},
+    {"username": "crew2087", "name": "R. Iyer", "roles": ["crew"], "crew_id": "C-2087"}
+  ]
+}

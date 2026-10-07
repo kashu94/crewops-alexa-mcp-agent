@@ -90,7 +90,8 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why each piece was ch
 
 ```
 data/seed/              Sample operating week (JSON)
-data/eval/              Gold example questions and reference scenarios
+data/eval/              Gold example questions, paraphrases and reference scenarios
+data/team/              The demo team: usernames and roles, nothing private
 src/crewops/
   config.py             Runtime settings
   domain/               Typed records shared by every layer
@@ -101,7 +102,8 @@ src/crewops/
   search/               Hybrid keyword + semantic search over S3 Vectors
   store/                DynamoDB key layout, item conversion, reads and writes
   tools/                The tools agents call: schemas, role checks, dispatch
-  agent/                Question pipeline: entities, router, planner, verifier, templates
+  agent/                Question pipeline: router, planner, verifier, templates, Nova roles
+  auth/                 Sign-in: the team, token claims to caller, account sync
 infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
@@ -243,6 +245,25 @@ uv run python -m crewops.analysis.run --id r-demo-0001
 
 The `dev` and `test` stages are disposable: destroying them deletes their data. Any other
 stage keeps its table, with point-in-time recovery and deletion protection.
+
+### The demo team
+
+Sign-in uses a Cognito user pool with one group per role (the `CrewOps-<stage>-Auth` stack).
+Nobody signs themselves up, and no email or phone is stored. The team is defined in
+`data/team/demo_team.json`: three controllers (one per desk), three approvers, two
+reporters, four crew members, an auditor, an admin and a super admin. To create or update
+the accounts after deploying the stack:
+
+```bash
+uv run python -m crewops.auth.provision            # what would change
+uv run python -m crewops.auth.provision --apply    # asks for the accounts' password once
+```
+
+The password is read from `CREWOPS_TEAM_PASSWORD` in the shell, or asked for, checked against
+the pool's rules before anything changes, and never stored. Every demo account shares it, so
+treat it as a demo password only. Running the command again changes only what differs from
+the file. An account removed from the file loses its roles and profile, and `--prune`
+deletes it too.
 
 ### Asking a question
 

@@ -142,14 +142,26 @@ reserve callout, day-off callout, deadhead, and cancellation as the explicit las
 Ids that do not exist are never silently corrected. A transposed id gets a "did you mean?"
 question, because acting on the wrong id dispatches the wrong person.
 
-## Demo team (planned)
+## Demo team
 
-The demo will run with a small team, so anyone trying it can sign in as each role and see the cross-controller
-safety at work: three controllers, each owning a desk of two aircraft (VT-DXA/DXB, VT-DXC/DXD,
-VT-DXE/DXF), three approvers, two reporters, a few crew members, an auditor, an admin and a super
-admin. Logins will use addresses on the reserved `.example` domain, which can never receive mail,
-with invitation emails switched off. Where an alert should really arrive, the admin assigns a
-private address to a role.
+The demo runs with a small team, so anyone trying it can sign in as each role and see the
+cross-controller safety at work: three controllers, each owning a desk of two aircraft
+(VT-DXA/DXB, VT-DXC/DXD, VT-DXE/DXF), three approvers, two reporters, four crew members, an
+auditor, an admin and a super admin (`data/team/demo_team.json`).
+
+- **Accounts** are created by an admin command, never by sign-up. They sign in with a
+  username; no email or phone is stored, so nothing can ever be sent to them. Where an alert
+  should really arrive, the admin assigns a private address to a role (planned).
+- **Roles** are Cognito groups, which only an admin can change, and they reach the tools as
+  the caller's roles.
+- **A crew member's own crew id and a controller's desk** live in a user profile in the
+  operations table, written only by that command. They are kept out of Cognito because a
+  user can, by default, edit their own Cognito attributes.
+- **A request's identity** comes from the signed-in user's access token, whose signature
+  the front door (AgentCore's JWT authorizer) verifies. The pool and app client it was issued
+  for and its expiry are then checked again, and the groups and profile make the caller.
+- **Removing someone** from the team file takes their roles and profile away on the next run.
+  A crew login holds no other role, and nobody is both a controller and an approver.
 
 Cross-controller safety, built in stages:
 

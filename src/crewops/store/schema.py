@@ -24,6 +24,7 @@ Disruption                      DISRUPTION#id / META       STATUS#status / AT#re
 Plan                            DISRUPTION#id / PLAN#id    PLAN#status / AT#submitted
 Audit event                     DISRUPTION#id / AUDIT#ts#action
 Rejected report                 REPORT#id / REJECTED
+User profile                    USER#username / PROFILE
 ==============================  =========================  ===============================
 
 The operational records above are written by ``crewops.store.items``; disruptions, audit

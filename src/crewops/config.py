@@ -214,6 +214,11 @@ class Settings:
         return f"{self.prefix}-alerts"
 
     @property
+    def user_pool_name(self) -> str:
+        """Cognito user pool: who can sign in, and their roles as groups."""
+        return f"{self.prefix}-users"
+
+    @property
     def guardrail_name(self) -> str:
         """Bedrock Guardrail screening every question and every answer."""
         return f"{self.prefix}-guardrail"

@@ -82,10 +82,13 @@ def _print(answer, as_json: bool) -> int:
         return 0
     print(record["text"])
     route = record["route"] or {}
+    for note in record["notes"]:
+        print(f"note: {note}")
     print(
         f"\n[{route.get('intent')} via {route.get('decided_by')}"
         f"{' ' + str(route.get('matched')) if route.get('matched') else ''}; "
-        f"{record['verification'] or record['source']}]"
+        f"answer from: {record['source']}"
+        f"{'; ' + record['verification'] if record['verification'] else ''}]"
     )
     return 0
 
