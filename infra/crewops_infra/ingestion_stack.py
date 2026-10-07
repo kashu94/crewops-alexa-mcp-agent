@@ -1,8 +1,14 @@
-"""Batch ingestion: an S3 bucket for roster uploads and the Lambda that loads them.
+"""Ingestion: roster uploads (batch) and live reports (real time).
 
-Dropping a JSON file under ``uploads/`` triggers the loader. It validates the upload against
-the current operation and writes it to the table only if there are no errors. Either way it
-leaves a report under ``results/``.
+Batch: dropping a JSON file under ``uploads/`` in the roster bucket triggers the loader. It
+validates the upload against the current operation and writes it to the table only if there
+are no errors. Either way it leaves a report under ``results/``.
+
+Real time: reports are sent to an SQS queue. A worker Lambda checks the role the sender
+states and every id the report names, then stores it once as a REPORTED disruption. The
+sender is trusted to have set its identity from a verified login; when the MCP server lands,
+a queue policy will accept messages from it alone. Messages that fail
+unexpectedly are retried and, after three attempts, moved to a dead-letter queue.
 
 The function's code is the ``crewops`` package itself. Its only dependency, boto3, ships with
 the Lambda Python runtime, so no build step or Docker is needed.
@@ -15,9 +21,11 @@ from pathlib import Path
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_lambda as lambda_
+from aws_cdk import aws_lambda_event_sources as sources
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_s3_notifications as s3n
+from aws_cdk import aws_sqs as sqs
 from constructs import Construct
 
 from crewops.config import Settings
@@ -27,6 +35,15 @@ from .data_stack import DISPOSABLE_STAGES
 
 SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 RETENTION = Duration.days(90)
+WORKER_TIMEOUT = Duration.seconds(30)
+MAX_RECEIVES = 3
+
+
+def _code() -> lambda_.Code:
+    """The crewops package. boto3 ships with the Lambda runtime, so nothing else is needed."""
+    return lambda_.Code.from_asset(
+        str(SRC_DIR), exclude=["**/__pycache__", "**/__pycache__/**", "**/*.pyc"]
+    )
 
 
 class IngestionStack(Stack):
@@ -65,9 +82,7 @@ class IngestionStack(Stack):
             runtime=lambda_.Runtime.PYTHON_3_12,
             architecture=lambda_.Architecture.ARM_64,
             handler="crewops.ingestion.roster_upload.handler",
-            code=lambda_.Code.from_asset(
-                str(SRC_DIR), exclude=["**/__pycache__", "**/__pycache__/**", "**/*.pyc"]
-            ),
+            code=_code(),
             memory_size=512,
             timeout=Duration.seconds(60),
             environment={"CREWOPS_STAGE": settings.stage},
@@ -88,5 +103,55 @@ class IngestionStack(Stack):
             s3.NotificationKeyFilter(prefix=UPLOADS_PREFIX, suffix=".json"),
         )
 
+        # -- Live reports ---------------------------------------------------------
+        self.dead_letters = sqs.Queue(
+            self,
+            "IngestDeadLetters",
+            queue_name=settings.ingest_dlq,
+            encryption=sqs.QueueEncryption.SQS_MANAGED,
+            enforce_ssl=True,
+            retention_period=Duration.days(14),
+        )
+        self.queue = sqs.Queue(
+            self,
+            "IngestQueue",
+            queue_name=settings.ingest_queue,
+            encryption=sqs.QueueEncryption.SQS_MANAGED,
+            enforce_ssl=True,
+            # Several times the worker timeout, so a message is never redelivered while a
+            # worker may still be processing it.
+            visibility_timeout=Duration.seconds(WORKER_TIMEOUT.to_seconds() * 6),
+            dead_letter_queue=sqs.DeadLetterQueue(
+                queue=self.dead_letters, max_receive_count=MAX_RECEIVES
+            ),
+        )
+        self.worker = lambda_.Function(
+            self,
+            "ReportWorker",
+            description="Validates live reports and stores them once as REPORTED disruptions.",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            architecture=lambda_.Architecture.ARM_64,
+            handler="crewops.ingestion.report_worker.handler",
+            code=_code(),
+            memory_size=256,
+            timeout=WORKER_TIMEOUT,
+            environment={"CREWOPS_STAGE": settings.stage},
+            log_group=logs.LogGroup(
+                self,
+                "ReportWorkerLogs",
+                retention=logs.RetentionDays.ONE_MONTH,
+                removal_policy=RemovalPolicy.DESTROY,
+            ),
+        )
+        # Only what the worker does: look items up, query the status index, and put items
+        # (a transactional put needs dynamodb:PutItem; there is no separate action).
+        table.grant(self.worker, "dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem")
+        self.worker.add_event_source(
+            sources.SqsEventSource(self.queue, batch_size=10, report_batch_item_failures=True)
+        )
+
         CfnOutput(self, "RosterBucketName", value=self.bucket.bucket_name)
         CfnOutput(self, "RosterLoaderName", value=self.loader.function_name)
+        CfnOutput(self, "IngestQueueUrl", value=self.queue.queue_url)
+        CfnOutput(self, "IngestDeadLetterQueueUrl", value=self.dead_letters.queue_url)
+        CfnOutput(self, "ReportWorkerName", value=self.worker.function_name)

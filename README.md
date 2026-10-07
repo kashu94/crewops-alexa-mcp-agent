@@ -93,7 +93,7 @@ data/seed/              Sample operating week (JSON)
 src/crewops/
   config.py             Runtime settings
   domain/               Typed records shared by every layer
-  ingestion/            Seed loading and validation, roster uploads (S3 + Lambda)
+  ingestion/            Seed loading, roster uploads (S3 + Lambda), live reports (SQS + Lambda)
   engine/               Legality engine: duty math, the seven rules, assessment, cost ranking
   store/                DynamoDB key layout, item conversion, reads and writes
 infra/                  AWS CDK app: one stack per part of the system
@@ -192,6 +192,25 @@ replaced and new ids are added; nothing is deleted. Every upload gets a report u
 `results/` saying accepted or rejected, with the errors and any new warnings. Upload one
 file at a time: two uploads processed at the same moment are each checked against the
 operation as it was before either of them.
+
+### Sending a live report
+
+Reports go to the SQS ingest queue, where a worker Lambda validates them, checks the role
+the sender states and every id they name, and stores each one once as a REPORTED
+disruption. In the finished system only the MCP server sends reports, setting the sender
+from the user's verified login, and the queue accepts messages from it alone. Until then, a
+development command states the sender directly:
+
+```bash
+uv run python -m crewops.ingestion.send_report crew_unavailable \
+  --user u-17 --role reporter \
+  --details '{"crew_id": "C-1042", "from_date": "2026-09-15", "reason": "sick"}'
+```
+
+Report types: `crew_unavailable`, `flight_delay`, `aircraft_technical`,
+`station_disruption`, `gate_change`, `certification_lapse`. Add `--dry-run` to validate
+without sending. Crew may report only their own unavailability; auditors and admins may not
+report.
 
 The `dev` and `test` stages are disposable: destroying them deletes their data. Any other
 stage keeps its table, with point-in-time recovery and deletion protection.

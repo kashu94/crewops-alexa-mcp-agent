@@ -73,3 +73,46 @@ def test_non_dev_stage_keeps_the_bucket():
     buckets = synth("demo").find_resources("AWS::S3::Bucket")
     (bucket,) = buckets.values()
     assert bucket["DeletionPolicy"] == "Retain"
+
+
+def test_ingest_queue_with_dead_letters_after_three_tries():
+    t = synth()
+    t.has_resource_properties(
+        "AWS::SQS::Queue",
+        {
+            "QueueName": "crewops-dev-ingest",
+            "VisibilityTimeout": 180,
+            "RedrivePolicy": Match.object_like({"maxReceiveCount": 3}),
+            "SqsManagedSseEnabled": True,
+        },
+    )
+    t.has_resource_properties(
+        "AWS::SQS::Queue",
+        {"QueueName": "crewops-dev-ingest-dlq", "MessageRetentionPeriod": 14 * 24 * 3600},
+    )
+
+
+def test_report_worker_reads_the_queue_with_partial_batch_failures():
+    t = synth()
+    t.has_resource_properties(
+        "AWS::Lambda::Function",
+        {"Handler": "crewops.ingestion.report_worker.handler", "Timeout": 30},
+    )
+    t.has_resource_properties(
+        "AWS::Lambda::EventSourceMapping",
+        {"BatchSize": 10, "FunctionResponseTypes": ["ReportBatchItemFailures"]},
+    )
+
+
+def test_report_worker_gets_only_the_table_actions_it_uses():
+    t = synth()
+    policies = t.find_resources("AWS::IAM::Policy")
+    worker = next(p for k, p in policies.items() if k.startswith("ReportWorker"))
+    actions = set()
+    for statement in worker["Properties"]["PolicyDocument"]["Statement"]:
+        action = statement["Action"]
+        actions.update(action if isinstance(action, list) else [action])
+    dynamo = {a for a in actions if a.startswith("dynamodb:")}
+    assert dynamo == {"dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem"}
+    resources = str(worker["Properties"]["PolicyDocument"])
+    assert "/index/*" in resources  # the status index query is allowed too

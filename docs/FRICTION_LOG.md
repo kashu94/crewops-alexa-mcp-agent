@@ -117,3 +117,25 @@ Severity: **Blocker** (no way forward without a workaround), **High** (cost hour
 - Suggestion for Amazon: Print the running CLI's version and install path in the mismatch
   error, and document that `npx aws-cdk@2` prefers any installed 2.x over the latest
   release.
+
+### FL-004: boto3 table resource's client silently re-serializes transaction items
+
+- Date: 2026-10-06
+- Service / tool: AWS SDK for Python (boto3), Amazon DynamoDB TransactWriteItems
+- Severity: Low (caught in testing, about 30 minutes)
+- Task attempted: Write a report and its audit event in one DynamoDB transaction, using the
+  client from a `Table` resource (`table.meta.client`).
+- Steps taken:
+  1. Built the items in DynamoDB's typed wire format (`{"S": ...}`) with `TypeSerializer`,
+     as the low-level client documentation shows.
+  2. Called `table.meta.client.transact_write_items(...)`.
+- Expected: Either the wire-format items are accepted, or the error says the client expects
+  plain Python values.
+- Actual: The call failed with `TransactionCanceledException` whose cancellation reasons were
+  only `[TypeError, TypeError]`. The resource's client applies boto3's automatic type
+  conversion, so the already-typed items were converted a second time. Nothing in the error
+  points to that.
+- Workaround: Pass plain Python values to `table.meta.client` and let it convert them.
+- Suggestion for Amazon: Document clearly that a resource's `meta.client` uses the
+  high-level, auto-converting interface. Have it detect already-typed values (a dict whose
+  only key is a DynamoDB type tag) and raise an error that says so.

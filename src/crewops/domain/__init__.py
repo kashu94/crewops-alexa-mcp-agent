@@ -24,6 +24,7 @@ from crewops.domain.models import (
     parse_hhmm,
     parse_utc,
 )
+from crewops.domain.reports import Report, Reporter, ReportType, Role, authorize
 
 __all__ = [
     "AircraftType",
@@ -41,10 +42,15 @@ __all__ = [
     "PairingDay",
     "PairingSeat",
     "Rank",
+    "Report",
+    "ReportType",
+    "Reporter",
     "ReserveDuty",
     "RiskSignal",
+    "Role",
     "RosterException",
     "Rule",
+    "authorize",
     "parse_date",
     "parse_hhmm",
     "parse_utc",

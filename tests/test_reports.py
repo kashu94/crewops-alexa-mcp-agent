@@ -1,0 +1,162 @@
+"""Report parsing and the role rules. Pure, no AWS."""
+
+import pytest
+
+from crewops.domain import DataError
+from crewops.domain.reports import Report, ReportType, Role, authorize
+
+
+def report(type_="crew_unavailable", details=None, roles=("reporter",), crew_id=None, **extra):
+    doc = {
+        "report_id": "r-00000001",
+        "type": type_,
+        "reported_by": {"user_id": "u-1", "roles": list(roles), "crew_id": crew_id},
+        "reported_utc": "2026-09-15T05:00:00Z",
+        "details": details
+        if details is not None
+        else {"crew_id": "C-1042", "from_date": "2026-09-15", "reason": "sick"},
+    }
+    doc.update(extra)
+    return doc
+
+
+VALID_DETAILS = {
+    "crew_unavailable": {"crew_id": "C-1042", "from_date": "2026-09-15", "reason": "sick"},
+    "flight_delay": {"flight_id": "DX402-2026-09-15", "delay_minutes": 90},
+    "aircraft_technical": {
+        "aircraft": "VT-DXA",
+        "from_utc": "2026-09-16T06:00:00Z",
+        "to_utc": "2026-09-16T14:00:00Z",
+    },
+    "station_disruption": {
+        "station": "BLR",
+        "from_utc": "2026-09-17T08:00:00Z",
+        "to_utc": "2026-09-17T14:00:00Z",
+        "reason": "weather",
+    },
+    "gate_change": {"flight_id": "DX401-2026-09-15", "new_gate": "BLR-G4"},
+    "certification_lapse": {
+        "crew_id": "C-5417",
+        "cert_type": "recurrent_training",
+        "valid_to": "2026-09-17",
+    },
+}
+
+
+@pytest.mark.parametrize("type_", list(VALID_DETAILS))
+def test_every_type_parses_and_round_trips(type_):
+    r = Report.from_dict(report(type_, VALID_DETAILS[type_]))
+    assert r.report_type is ReportType(type_)
+    assert Report.from_dict(r.to_dict()) == r
+
+
+def test_details_are_normalised():
+    r = Report.from_dict(
+        report(details={"crew_id": " C-1042 ", "from_date": "2026-09-15", "reason": "sick"})
+    )
+    assert r.details == {
+        "crew_id": "C-1042",
+        "from_date": "2026-09-15",
+        "to_date": "2026-09-15",
+        "reason": "sick",
+    }
+
+
+@pytest.mark.parametrize(
+    ("doc", "message"),
+    [
+        (report(report_id="short"), "report_id"),
+        (report(report_id="has spaces in it"), "report_id"),
+        (report(type_="volcano"), "type: unknown"),
+        (report(roles=()), "roles: expected a non-empty list"),
+        (report(roles=("pilot",)), "unknown role"),
+        (report(reported_utc="2026-09-15T05:00:00"), "no timezone"),
+        (
+            report(details={"crew_id": "C-1", "from_date": "2026-09-15", "reason": "bored"}),
+            "reason",
+        ),
+        (
+            report(
+                details={
+                    "crew_id": "C-1",
+                    "from_date": "2026-09-15",
+                    "to_date": "2026-09-14",
+                    "reason": "sick",
+                }
+            ),
+            "before from_date",
+        ),
+        (report("flight_delay", {"flight_id": "X", "delay_minutes": 0}), "1 to 1440"),
+        (report("flight_delay", {"flight_id": "X", "delay_minutes": 1.5}), "whole number"),
+        (report("flight_delay", {"flight_id": "X", "delay_minutes": True}), "whole number"),
+        (
+            report(
+                "aircraft_technical",
+                {
+                    "aircraft": "A",
+                    "from_utc": "2026-09-16T06:00:00Z",
+                    "to_utc": "2026-09-16T05:00:00Z",
+                },
+            ),
+            "after from_utc",
+        ),
+        (
+            report(
+                "station_disruption",
+                {
+                    "station": "Bengaluru",
+                    "from_utc": "2026-09-17T08:00:00Z",
+                    "to_utc": "2026-09-17T14:00:00Z",
+                    "reason": "x",
+                },
+            ),
+            "3-letter",
+        ),
+        (
+            report(
+                "certification_lapse",
+                {"crew_id": "C-1", "cert_type": "visa", "valid_to": "2026-09-17"},
+            ),
+            "cert_type: unknown",
+        ),
+        (report(narrative="x" * 1001), "narrative"),
+        (report(details=[]), "details: expected an object"),
+    ],
+)
+def test_bad_reports_are_refused_with_the_field_named(doc, message):
+    with pytest.raises(DataError, match=message):
+        Report.from_dict(doc)
+
+
+@pytest.mark.parametrize("role", ["reporter", "controller", "approver"])
+def test_operational_roles_may_report_anything(role):
+    for type_, details in VALID_DETAILS.items():
+        assert authorize(Report.from_dict(report(type_, details, roles=(role,)))) is None
+
+
+@pytest.mark.parametrize("role", ["auditor", "admin", "super_admin"])
+def test_observers_and_admins_may_not_report(role):
+    reason = authorize(Report.from_dict(report(roles=(role,))))
+    assert reason and "may not file reports" in reason
+
+
+def test_crew_may_report_only_their_own_unavailability():
+    own = report(roles=("crew",), crew_id="C-1042")
+    assert authorize(Report.from_dict(own)) is None
+
+    someone_else = report(roles=("crew",), crew_id="C-2087")
+    assert "their own" in authorize(Report.from_dict(someone_else))
+
+    no_id = report(roles=("crew",))
+    assert "no crew id" in authorize(Report.from_dict(no_id))
+
+    other_type = report(
+        "flight_delay", VALID_DETAILS["flight_delay"], roles=("crew",), crew_id="C-1042"
+    )
+    assert "their own" in authorize(Report.from_dict(other_type))
+
+
+def test_any_operational_role_wins_over_others():
+    mixed = report(roles=("admin", "controller"))
+    assert authorize(Report.from_dict(mixed)) is None
+    assert Role.ADMIN in Report.from_dict(mixed).reported_by.roles

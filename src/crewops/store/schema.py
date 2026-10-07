@@ -20,14 +20,16 @@ Flight                          FLIGHT#id / META           DATE#yyyy-mm-dd / DEP
 Pairing (days and crew seats)   PAIRING#id / META          AIRCRAFT#tail / DATE#first-day
 Gate slot                       GATE#gate / SLOT#start#id  FLIGHT#id / GATE
 Rule, cost table                CONFIG / RULE#id, COSTS
-Disruption                      DISRUPTION#id / META       STATUS#status / AT#reported
+Disruption                      DISRUPTION#id / META       STATUS#status / AT#reported#id
 Plan                            DISRUPTION#id / PLAN#id    PLAN#status / AT#submitted
-Audit event                     DISRUPTION#id / AUDIT#ts
-Idempotency marker (expires)    REQUEST#key / SEEN
+Audit event                     DISRUPTION#id / AUDIT#ts#action
+Rejected report                 REPORT#id / REJECTED
 ==============================  =========================  ===============================
 
-The operational records above are written by ``crewops.store.items``. Disruptions, plans,
-audit events and idempotency markers arrive with the features that create them. ``gsi2`` is
+The operational records above are written by ``crewops.store.items``; disruptions, audit
+events and rejected reports by ``crewops.store.reports``. A disruption is stored exactly once
+by a conditional write on its id, so no separate idempotency marker is needed. Plans arrive
+with the approval flow. ``gsi2`` is
 reserved for a second overloaded view (for example a controller's desk) so it can be added
 without recreating the table.
 """
