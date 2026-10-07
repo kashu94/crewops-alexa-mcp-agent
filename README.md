@@ -265,6 +265,22 @@ treat it as a demo password only. Running the command again changes only what di
 the file. An account removed from the file loses its roles and profile, and `--prune`
 deletes it too.
 
+### Plans and approvals
+
+A controller submits cover for a disruption on their desk, and a different person with the
+approver role approves it, which re-checks legality and commits the roster in one step:
+
+```bash
+uv run python -m crewops.plans.desk --as rohit queue
+uv run python -m crewops.plans.desk --as rohit submit r-demo-0001
+uv run python -m crewops.plans.desk --as meera approve r-demo-0001 <plan id>
+uv run python -m crewops.plans.desk --as meera show r-demo-0001     # plans and audit trail
+uv run python -m crewops.plans.desk --as rohit close r-demo-0002 --reason "DX589 cancelled"
+```
+
+This is an operator's tool, acting as the named team member with your AWS credentials; people
+reach the same rules through the assistant, signed in.
+
 ### Asking a question
 
 Answers come from the tools and are verified before they are printed. Offline, no model is

@@ -77,12 +77,18 @@ class SeatAnalysis:
     options: OptionsResult | None
     """None when the pairing has already started and can no longer be re-crewed."""
     note: str = ""
+    delay_hours: float = 0.0
+    """The schedule the options were judged against: a delayed day needs cover legal for
+    the day as it will now run, and approval re-checks against the same."""
+    delay_date: date | None = None
 
     def to_dict(self) -> dict[str, Any]:
         doc: dict[str, Any] = {
             "pairing_id": self.seat.pairing_id,
             "role": self.seat.role.value,
             "crew_out": self.crew_out,
+            "delay_hours": self.delay_hours,
+            "delay_date": self.delay_date.isoformat() if self.delay_date else None,
             "impact": {
                 "affected_dates": [d.isoformat() for d in self.impact.affected_dates],
                 "uncovered_flights": list(self.impact.uncovered_flights),
@@ -205,8 +211,8 @@ def _seat_for(
     try:
         options = find_options(world, seat.pairing_id, seat.role, delay_hours, delay_date)
     except AlreadyStarted as exc:
-        return SeatAnalysis(seat, crew_out, impact, None, str(exc))
-    return SeatAnalysis(seat, crew_out, impact, options)
+        return SeatAnalysis(seat, crew_out, impact, None, str(exc), delay_hours, delay_date)
+    return SeatAnalysis(seat, crew_out, impact, options, "", delay_hours, delay_date)
 
 
 def _crew_label(world: World, crew_id: str) -> str:

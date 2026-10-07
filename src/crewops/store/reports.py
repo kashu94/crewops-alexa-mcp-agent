@@ -21,8 +21,10 @@ from crewops.domain.reports import REPORT_ID_RE, Report
 from crewops.store import schema
 from crewops.store.items import from_dynamo, to_dynamo
 from crewops.store.schema import SEPARATOR as S
+from crewops.store.versions import bump_version
 
 STATUS_REPORTED = "REPORTED"
+TAKES_CREW_OUT = frozenset({"crew_unavailable", "certification_lapse"})
 
 
 class StoreOutcome(StrEnum):
@@ -71,10 +73,20 @@ def store_report(table: Any, report: Report, received: datetime) -> StoreOutcome
 
     Uses the table resource's client, which converts plain Python values itself, so items
     are passed as plain dicts (no floats: report details hold only strings and integers).
+
+    A report that takes a crew member out (unavailable, or a lapsed certificate) also moves
+    their roster version on, so a plan being approved for them at the same moment is refused
+    and checked again rather than committed on a roster that no longer holds.
     """
+    out = report.details.get("crew_id") if report.report_type.value in TAKES_CREW_OUT else None
+    bump = []
+    if out:
+        update = bump_version(out)["Update"]
+        bump = [{"Update": {"TableName": table.name, **update}}]
     try:
         table.meta.client.transact_write_items(
             TransactItems=[
+                *bump,
                 {
                     "Put": {
                         "TableName": table.name,

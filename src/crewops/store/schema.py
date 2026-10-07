@@ -25,14 +25,15 @@ Plan                            DISRUPTION#id / PLAN#id    PLAN#status / AT#subm
 Audit event                     DISRUPTION#id / AUDIT#ts#action
 Rejected report                 REPORT#id / REJECTED
 User profile                    USER#username / PROFILE
+Roster version                  CREW#id / ROSTER_VERSION
 ==============================  =========================  ===============================
 
 The operational records above are written by ``crewops.store.items``; disruptions, audit
-events and rejected reports by ``crewops.store.reports``. A disruption is stored exactly once
-by a conditional write on its id, so no separate idempotency marker is needed. Plans arrive
-with the approval flow. ``gsi2`` is
-reserved for a second overloaded view (for example a controller's desk) so it can be added
-without recreating the table.
+events and rejected reports by ``crewops.store.reports``; plans and their decisions by
+``crewops.store.plans``; user profiles by ``crewops.store.users``. A disruption is stored
+exactly once by a conditional write on its id, so no separate idempotency marker is needed.
+``gsi2`` is reserved for a second overloaded view (for example a controller's desk), so it
+can be added without recreating the table.
 """
 
 from __future__ import annotations

@@ -29,8 +29,12 @@ from crewops.store.reports import (
 
 log = logging.getLogger(__name__)
 
-OPEN_STATUSES = (STATUS_REPORTED, STATUS_OPTIONS_READY)
-"""Disruptions still being worked: their crew are out until resolved."""
+OPEN_STATUSES = (STATUS_REPORTED, STATUS_OPTIONS_READY, "SUBMITTED")
+"""Disruptions still being worked: counted at their controllers' desks."""
+UNAVAILABLE_STATUSES = (*OPEN_STATUSES, "COMMITTED", "CLOSED")
+"""Disruptions whose crew are out on their dates. A committed or closed one still counts:
+the crew member is still sick (or still lacks the certificate), whatever was done about
+their seats."""
 
 
 def unavailable_crew(
@@ -58,6 +62,12 @@ def unavailable_crew(
     return {crew: tuple(sorted(set(days))) for crew, days in out.items()}
 
 
+def unavailable_items(table: Any) -> list[dict[str, Any]]:
+    return [
+        item for status in UNAVAILABLE_STATUSES for item in disruptions_with_status(table, status)
+    ]
+
+
 def open_disruptions(table: Any) -> list[dict[str, Any]]:
     """Every disruption still being worked, oldest status first."""
     return [item for status in OPEN_STATUSES for item in disruptions_with_status(table, status)]
@@ -83,7 +93,7 @@ class Operation:
         seed = OpsStore(table).load_seed()
         world = build_world(seed)
         return cls(
-            world=replace(world, unavailable=unavailable_crew(world, open_disruptions(table))),
+            world=replace(world, unavailable=unavailable_crew(world, unavailable_items(table))),
             gates=seed.gates,
             seed=seed,
         )

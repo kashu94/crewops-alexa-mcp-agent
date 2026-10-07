@@ -167,10 +167,13 @@ Cross-controller safety, built in stages:
 
 - Already in place: crew reported unavailable in one open disruption are excluded from every
   other disruption's options on those dates, with the reason naming that report.
-- Planned with the approval flow: when two open disruptions want the same crew member, both
-  controllers see the contention and which desk holds the other; once a plan is approved, its
-  crew drop out of every other disruption's options; and approval re-checks legality, so a plan
-  whose crew were committed elsewhere in the meantime becomes STALE instead of double-booking.
+- When a plan wants a crew member that another open plan, or another disruption's
+  recommendation, also wants, the controller is told, with the other plan's desk.
+- Approving a plan writes the roster itself, so its crew are busy in every later answer, and a
+  crew member covered for stays unavailable on those dates.
+- Approval re-checks legality against the roster as it is then, so a plan whose crew were
+  committed elsewhere, or reported unavailable, in the meantime becomes STALE instead of
+  double-booking.
 
 ## Notifications (planned)
 
@@ -305,19 +308,40 @@ departure, so the agent turns it into a delay and checks the knock-on effect.
 ### Plan lifecycle
 
 ```
-REPORTED ─► OPTIONS_READY ─► SUBMITTED ─► APPROVED ─► COMMITTED
-(reporter)  (disruption      (controller)  (approver)  (one DynamoDB
-             agent)               │            │        transaction)
-                                  │            └─► REJECTED: back to the controller, with a reason
-                                  ├─► WITHDRAWN by the controller
-                                  └─► STALE if the roster changed before approval
+REPORTED ─► OPTIONS_READY ─► SUBMITTED ─────────────► COMMITTED
+(reporter)  (disruption   │  (controller)  approved:   (one DynamoDB transaction;
+             analysis)    │       │        APPROVED +   the audit records both)
+                          │       │        COMMITTED
+                          │       ├─► REJECTED by an approver, with a reason ─┐
+                          │       ├─► WITHDRAWN by the controller             ├─► back to
+                          │       └─► STALE if the roster changed             ┘   OPTIONS_READY
+                          └─► CLOSED by a controller, with a reason, when nothing can be covered
 ```
 
 Approving is the commit. When the approver approves, the system re-checks legality and writes
-every assignment in one DynamoDB transaction in the same request. No person commits separately,
-and the auditor only reads.
+every assignment in one DynamoDB transaction in the same request: each affected pairing's crew
+(only if it is still exactly the crew the plan was made against), the plan, the disruption and
+the audit events. No person commits separately, and the auditor only reads. A rejected,
+withdrawn or stale plan sends the disruption back to OPTIONS_READY for a new plan.
 
-Rules enforced in code, in the MCP server:
+A disruption belongs to every desk whose aircraft it touches, and any of those controllers
+may plan it. A seat is a pairing, a role and the crew member being replaced; each chosen
+cover must be a legal option when submitted, and the default is the analysis's
+recommendation (its joint plan when several seats compete). A seat with no legal cover, or
+already started, is listed in the plan as uncovered and must be acknowledged; a disruption
+with nothing coverable is closed with a reason instead.
+
+Each crew member a commit moves has a roster version that the commit bumps, conditioned on
+the version read before the re-check; storing a report that takes someone out bumps it too.
+So two approvals, or an approval and a sick report, touching the same person at the same
+moment cannot both succeed: the later one is checked again and becomes STALE.
+
+Known limits: a committed plan does not move flight times, so a cover chosen for a delayed
+day is afterwards judged against the published schedule; and a roster upload that replaces
+a pairing can overwrite a committed change (uploads are an admin action).
+
+Rules enforced in code (`crewops.plans`; the MCP server will call it with the signed-in
+caller):
 
 - **Four eyes.** The approver must be a different person from the submitter.
 - **Re-check at approval.** Legality and crew availability are evaluated again when the plan is
