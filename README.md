@@ -94,7 +94,9 @@ src/crewops/
   config.py             Runtime settings
   domain/               Typed records shared by every layer
   ingestion/            Seed loading, roster uploads (S3 + Lambda), live reports (SQS + Lambda)
-  engine/               Legality engine: duty math, the seven rules, assessment, cost ranking
+  engine/               Legality engine: duty math, the seven rules, assessment, cost ranking,
+                        blast radius, delay effects, joint plans
+  analysis/             From a report to impact, legality effects and ranked options
   store/                DynamoDB key layout, item conversion, reads and writes
 infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests

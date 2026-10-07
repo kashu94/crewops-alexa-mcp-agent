@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import date
 from enum import StrEnum
 
 from crewops.domain import Rank
@@ -181,8 +182,18 @@ def _resilience(world: World, a: Assessment, role: Rank, base: str) -> float:
     return 100.0 if pool <= 0 else round(100.0 * (pool - 1) / pool, 1)
 
 
-def find_options(world: World, pairing_id: str, role: Rank | str) -> OptionsResult:
-    """Every legal way to fill ``role`` on ``pairing_id``, cheapest first."""
+def find_options(
+    world: World,
+    pairing_id: str,
+    role: Rank | str,
+    delay_hours: float = 0.0,
+    delay_date: date | None = None,
+) -> OptionsResult:
+    """Every legal way to fill ``role`` on ``pairing_id``, cheapest first.
+
+    With a delay, candidates are judged against the delayed schedule: whoever covers the
+    seat has to fly the day as it will now run, not as it was planned.
+    """
     role = Rank(role)
     pairing = world.pairing(pairing_id)
     first_report = world.days_of(pairing_id)[0].report_utc
@@ -197,7 +208,7 @@ def find_options(world: World, pairing_id: str, role: Rank | str) -> OptionsResu
         key=lambda c: c.crew_id,
     )
 
-    assessed = [assess(world, c.crew_id, pairing_id) for c in pool]
+    assessed = [assess(world, c.crew_id, pairing_id, delay_hours, delay_date) for c in pool]
     legal = [a for a in assessed if a.legal]
     illegal = [a for a in assessed if not a.legal]
 

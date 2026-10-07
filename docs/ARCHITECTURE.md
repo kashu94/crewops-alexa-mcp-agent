@@ -125,6 +125,21 @@ reserve callout, day-off callout, deadhead, and cancellation as the explicit las
 Ids that do not exist are never silently corrected. A transposed id gets a "did you mean?"
 question, because acting on the wrong id dispatches the wrong person.
 
+## Disruption analysis
+
+Every report becomes a decision-ready analysis, computed by the engine with no model call:
+
+| Report | What the analysis works out |
+|---|---|
+| Crew unavailable, certification lapse | The seats that person holds on the affected days, each with its blast radius (uncovered flights, later flights of the trip at risk, passengers) and ranked legal options. Several seats get a joint plan that never gives one person two seats. |
+| Flight delay, aircraft fault | What the delay does to that duty day: its new duty period against the limit, which rostered crew stop being legal and why, and, when the day is too long for anyone, the fewest trailing legs that must come off this crew and what cancelling them costs. |
+| Station closure | Every flight departing or landing in the closure, delayed to reopening plus a 30-minute turnaround, and the same delay effects for each affected duty day. |
+| Gate change | Whether the new gate is free for the flight's boarding window, or which flight holds it. |
+
+A trip that has already started is reported as such rather than re-crewed. Covering only the
+trailing legs of a delayed day with a fresh crew (a split duty) is not costed yet; the analysis
+names the legs and the cancellation cost instead.
+
 ## Flows
 
 | Flow | Path |

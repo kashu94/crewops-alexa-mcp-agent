@@ -15,6 +15,7 @@ required report time is unavailable, not a cheaper option.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import date
 
 from crewops.engine.duty import DutyDay
 from crewops.engine.rules import (
@@ -35,7 +36,7 @@ class Assessment:
     verdicts: tuple[RuleVerdict, ...]
     positioning: Positioning | None
     delay_hours: float
-    """The what-if delay applied to the first departure."""
+    """The what-if delay applied to one duty day (the first unless another was given)."""
     on_reserve: bool
     """On call that day with a window covering the required report time."""
     days: tuple[DutyDay, ...]
@@ -79,7 +80,13 @@ def _intra_pairing_rest(days: list[DutyDay], world: World) -> list[RuleVerdict]:
     return out
 
 
-def assess(world: World, crew_id: str, pairing_id: str, delay_hours: float = 0.0) -> Assessment:
+def assess(
+    world: World,
+    crew_id: str,
+    pairing_id: str,
+    delay_hours: float = 0.0,
+    delay_date: date | None = None,
+) -> Assessment:
     """Evaluate all seven rules for one crew member on every day of one pairing."""
     if delay_hours < 0:
         raise ValueError("delay_hours cannot be negative")
@@ -108,7 +115,14 @@ def assess(world: World, crew_id: str, pairing_id: str, delay_hours: float = 0.0
             days[0] = days[0].shifted(positioning.delay_hours)
 
     if delay_hours:
-        days[0] = days[0].delayed(delay_hours)
+        # A what-if delay stretches one duty day: the first by default, or the day given.
+        index = 0
+        if delay_date is not None:
+            matching = [i for i, d in enumerate(days) if d.date == delay_date]
+            if not matching:
+                raise ValueError(f"{pairing_id} has no duty day on {delay_date}")
+            index = matching[0]
+        days[index] = days[index].delayed(delay_hours)
 
     verdicts = evaluate(
         crew,
