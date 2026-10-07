@@ -20,9 +20,9 @@ anyone hears it.
 - **Answers crew-control questions by voice.** Lookups ("who is on reserve at BLR?"),
   replacements ("who covers P-2291?"), legality ("is C-2087 legal for P-2291?") and
   consequences ("both A320 captains are sick, what's the joint plan?").
-- **Reacts to disruptions on its own.** A sick call or an incident goes onto a queue. A
-  disruption agent works out the blast radius and legal, cost-ranked options, then alerts the
-  controller before they ask.
+- **Reacts to disruptions on its own.** A sick call or an incident goes onto a queue. The
+  disruption analysis works out the blast radius and legal, cost-ranked options before the
+  controller asks (the live console view is planned).
 - **Remembers across sessions.** "Alexa, anything waiting for me?" brings back pending work
   hours later: a plan to review for a controller, a plan to sign off for an approver.
 - **Four-eyes on every crew change.** One person reports, a controller picks a plan, a different
@@ -63,7 +63,7 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#roles-and-approvals).
         Legality engine (pure Python)    S3 Vectors + Titan V2
                     │
                     ▼
-        DynamoDB ──Streams──► disruption agent (Lambda) ──► SNS / live console
+        DynamoDB ──Streams──► disruption analysis (Lambda) ──► live console
                     ▲
         SQS ingestion (live reports) · S3 roster uploads (batch)
 ```
@@ -80,7 +80,7 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why each piece was ch
 | Amazon DynamoDB | Operational data (single table) with Streams |
 | Amazon S3 Vectors | Semantic search over rules and question intents |
 | Amazon SQS + AWS Lambda | Real-time disruption ingestion and background agents |
-| Amazon SNS | Outbound alerts to controllers and approvers |
+| Amazon SNS | Optional email alerts, assigned to roles by the admin |
 | AWS AppSync Events | Live updates to the console |
 | Amazon Cognito | Sign-in, with one group per role |
 | Amazon Polly | Spoken answers in the simulator |
@@ -96,7 +96,7 @@ src/crewops/
   ingestion/            Seed loading, roster uploads (S3 + Lambda), live reports (SQS + Lambda)
   engine/               Legality engine: duty math, the seven rules, assessment, cost ranking,
                         blast radius, delay effects, joint plans
-  analysis/             From a report to impact, legality effects and ranked options
+  analysis/             Disruption analysis, its stream Lambda and the run command
   store/                DynamoDB key layout, item conversion, reads and writes
 infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests
@@ -213,6 +213,17 @@ Report types: `crew_unavailable`, `flight_delay`, `aircraft_technical`,
 `station_disruption`, `gate_change`, `certification_lapse`. Add `--dry-run` to validate
 without sending. Crew may report only their own unavailability; auditors and admins may not
 report.
+
+### Disruption analysis
+
+Each new disruption is analysed automatically from the table's change stream and stored as
+OPTIONS_READY. Disruptions reported before that existed, or whose analysis was parked after
+a failure, can be analysed on demand; it is safe to run repeatedly:
+
+```bash
+uv run python -m crewops.analysis.run --pending
+uv run python -m crewops.analysis.run --id r-demo-0001
+```
 
 The `dev` and `test` stages are disposable: destroying them deletes their data. Any other
 stage keeps its table, with point-in-time recovery and deletion protection.

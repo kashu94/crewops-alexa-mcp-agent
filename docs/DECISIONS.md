@@ -21,7 +21,7 @@ The web app is the one exception (D9).
 
 The data is relational in shape, but small: 150 crew, 39 pairings, one operating week. The
 rules engine loads what it needs with a few key lookups and evaluates in memory, so joins are
-not needed at query time. Streams give the event-driven disruption agent for free.
+not needed at query time. Streams give the event-driven disruption analysis for free.
 
 **Traded away:** ad-hoc SQL. Every access pattern is designed up front.
 
@@ -54,7 +54,7 @@ instead; it caches the fixed prompt and tool definitions, never answers.
 
 AgentCore Runtime hosts MCP servers over Streamable HTTP, validates Cognito tokens, and bills
 only for active compute. Memory and Observability come with it. Lambda runs the short,
-event-triggered jobs: the SQS worker, the roster loader and the disruption agent.
+event-triggered jobs: the SQS worker, the roster loader and the disruption analysis.
 
 **Fallback:** the MCP server is stateless between requests, so it can move to Lambda behind a
 Function URL without code changes if AgentCore blocks progress.
@@ -97,8 +97,9 @@ real Alexa voice as a second channel. A standard MCP host proves the server foll
 ## D10. Real-time through events, not polling
 
 Reports go to SQS (with a dead-letter queue), a worker stores them, and DynamoDB Streams wake
-the disruption agent. AppSync Events pushes updates to the console over WebSockets. SNS sends
-outbound alerts only. Kinesis is unnecessary at this volume.
+the disruption analysis. AppSync Events pushes updates to the console over WebSockets. SNS is
+used only for optional email alerts that the admin assigns to roles; nothing depends on them.
+Kinesis is unnecessary at this volume.
 
 ## D11. Agents recommend; people decide, with four eyes
 

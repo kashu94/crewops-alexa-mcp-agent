@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 
 from aws_cdk import App, Environment, Tags
+from crewops_infra.analysis_stack import AnalysisStack
 from crewops_infra.data_stack import DataStack
 from crewops_infra.ingestion_stack import IngestionStack
 
@@ -26,6 +27,13 @@ def main() -> None:
     IngestionStack(
         app,
         f"CrewOps-{settings.stage}-Ingestion",
+        settings=settings,
+        table=data.table,
+        env=env,
+    )
+    AnalysisStack(
+        app,
+        f"CrewOps-{settings.stage}-Analysis",
         settings=settings,
         table=data.table,
         env=env,

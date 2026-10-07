@@ -19,7 +19,7 @@ from botocore.exceptions import ClientError
 
 from crewops.domain.reports import REPORT_ID_RE, Report
 from crewops.store import schema
-from crewops.store.items import from_dynamo
+from crewops.store.items import from_dynamo, to_dynamo
 from crewops.store.schema import SEPARATOR as S
 
 STATUS_REPORTED = "REPORTED"
@@ -181,3 +181,107 @@ def disruptions_with_status(table: Any, status: str = STATUS_REPORTED) -> list[d
         if "LastEvaluatedKey" not in page:
             return items
         kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+# --------------------------------------------------------------------------
+# Analysis results
+# --------------------------------------------------------------------------
+
+STATUS_OPTIONS_READY = "OPTIONS_READY"
+ANALYSIS_ACTOR = "system:analysis"
+
+
+class AnalysisOutcome(StrEnum):
+    STORED = "stored"
+    ALREADY_ANALYSED = "already_analysed"
+    MISSING = "missing"
+
+
+ANALYSIS_FAILED = "ANALYSIS_FAILED"
+
+
+def record_analysis_failure(table: Any, disruption_id: str, reason: str, at: datetime) -> None:
+    """Note on the disruption's audit trail that it could not be analysed, and why.
+
+    The disruption stays REPORTED, so it can be analysed again (``--pending``) once the
+    cause is fixed. Recorded once per attempt time; reasons are cut to a fixed size.
+    """
+    when = _iso(at)
+    table.put_item(
+        Item={
+            schema.PK: disruption_pk(disruption_id),
+            schema.SK: f"AUDIT{S}{when}{S}{ANALYSIS_FAILED}",
+            "entity": "audit_event",
+            "disruption_id": disruption_id,
+            "action": ANALYSIS_FAILED,
+            "actor": ANALYSIS_ACTOR,
+            "reason": reason[:MAX_STORED_REASON],
+            "at": when,
+        }
+    )
+
+
+def store_analysis(
+    table: Any, disruption_id: str, analysis: dict[str, Any], analysed: datetime
+) -> AnalysisOutcome:
+    """Attach an analysis to a REPORTED disruption and move it to OPTIONS_READY, once.
+
+    The update and its audit event are one transaction, conditioned on the disruption still
+    being REPORTED. A retried or duplicated trigger therefore cannot analyse twice or
+    overwrite a later status: the second attempt is refused and reported as already done.
+    Floats in the analysis are converted for DynamoDB, which has no float type.
+    """
+    at = _iso(analysed)
+    try:
+        table.meta.client.transact_write_items(
+            TransactItems=[
+                {
+                    "Update": {
+                        "TableName": table.name,
+                        "Key": {schema.PK: disruption_pk(disruption_id), schema.SK: "META"},
+                        "UpdateExpression": (
+                            "SET #status = :ready, #gsi1pk = :index, #analysis = :analysis, "
+                            "#analysed = :at"
+                        ),
+                        "ConditionExpression": "#status = :reported",
+                        "ExpressionAttributeNames": {
+                            "#status": "status",
+                            "#gsi1pk": schema.GSI1_PK,
+                            "#analysis": "analysis",
+                            "#analysed": "analysed_utc",
+                        },
+                        "ExpressionAttributeValues": {
+                            ":ready": STATUS_OPTIONS_READY,
+                            ":reported": STATUS_REPORTED,
+                            ":index": f"STATUS{S}{STATUS_OPTIONS_READY}",
+                            ":analysis": to_dynamo(analysis),
+                            ":at": at,
+                        },
+                    }
+                },
+                {
+                    "Put": {
+                        "TableName": table.name,
+                        "Item": {
+                            schema.PK: disruption_pk(disruption_id),
+                            schema.SK: f"AUDIT{S}{at}{S}{STATUS_OPTIONS_READY}",
+                            "entity": "audit_event",
+                            "disruption_id": disruption_id,
+                            "action": STATUS_OPTIONS_READY,
+                            "actor": ANALYSIS_ACTOR,
+                            "at": at,
+                        },
+                    }
+                },
+            ]
+        )
+    except ClientError as exc:
+        reasons = exc.response.get("CancellationReasons") or []
+        if exc.response.get("Error", {}).get("Code") == "TransactionCanceledException" and any(
+            r.get("Code") == "ConditionalCheckFailed" for r in reasons
+        ):
+            if get_disruption(table, disruption_id) is None:
+                return AnalysisOutcome.MISSING
+            return AnalysisOutcome.ALREADY_ANALYSED
+        raise
+    return AnalysisOutcome.STORED

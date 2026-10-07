@@ -20,6 +20,7 @@ from datetime import date
 from crewops.engine.duty import DutyDay
 from crewops.engine.rules import (
     BASE,
+    QUAL,
     REST,
     RuleVerdict,
     blocking,
@@ -132,6 +133,16 @@ def assess(
         positioned=positioning is not None or rostered_here,
     )
     verdicts += _intra_pairing_rest(days, world)
+
+    # Someone reported unavailable in another open disruption cannot cover these dates,
+    # whatever the roster says. Shown as a qualification failure: "not available to fly".
+    duty_dates = {d.date for d in days}
+    for when, report_id in world.unavailable.get(crew_id, ()):
+        if when in duty_dates:
+            verdicts.append(
+                fail(QUAL, f"reported unavailable on {when} (report {report_id})", date=when)
+            )
+            break
 
     reserves = world.reserves.get(crew_id, ())
     rostered = [r for r in reserves if first.date in r.dates]

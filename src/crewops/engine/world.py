@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 
 from crewops.domain import CostTable, Flight, Pairing, ReserveDuty
 from crewops.engine.duty import DutyDay, hours_between
@@ -57,6 +57,9 @@ class World:
     seniority: Mapping[str, int]
     """Years of service. Shown, never ranked on."""
     risk: Mapping[str, float]
+    unavailable: Mapping[str, tuple[tuple[date, str], ...]] = field(default_factory=dict)
+    """Crew reported unavailable in open disruptions: crew id -> (date, report id) pairs.
+    Empty for the published roster; filled in when analysing live disruptions."""
     """Provided disruption-risk score. Shown, never changes legality or rank."""
 
     def state(self, crew_id: str) -> CrewState:

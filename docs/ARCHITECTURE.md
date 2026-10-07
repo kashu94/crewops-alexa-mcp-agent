@@ -48,10 +48,10 @@ choosing which tools to call, and turning a verified answer into speech.
         DynamoDB (single table) ──Streams──┐
                 ▲                          ▼
  INGESTION      │          ┌────────────────────────────────────┐
- ┌──────────────┴─────────┐│ DISRUPTION AGENT (Lambda)          │
+ ┌──────────────┴─────────┐│ DISRUPTION ANALYSIS (Lambda)       │
  │ Live: report → SQS     ││ runs on its own when data changes: │
  │  (+DLQ) → worker Lambda││ ripple → cost-ranked options       │
- │ Batch: roster to S3 →  ││ → OPTIONS_READY → SNS + AppSync    │
+ │ Batch: roster to S3 →  ││ → OPTIONS_READY → live console     │
  │  loader Lambda         │└────────────────────────────────────┘
  └────────────────────────┘
 ```
@@ -125,6 +125,32 @@ reserve callout, day-off callout, deadhead, and cancellation as the explicit las
 Ids that do not exist are never silently corrected. A transposed id gets a "did you mean?"
 question, because acting on the wrong id dispatches the wrong person.
 
+## Demo team (planned)
+
+The demo will run with a small team, so anyone trying it can sign in as each role and see the cross-controller
+safety at work: three controllers, each owning a desk of two aircraft (VT-DXA/DXB, VT-DXC/DXD,
+VT-DXE/DXF), three approvers, two reporters, a few crew members, an auditor, an admin and a super
+admin. Logins will use addresses on the reserved `.example` domain, which can never receive mail,
+with invitation emails switched off. Where an alert should really arrive, the admin assigns a
+private address to a role.
+
+Cross-controller safety, built in stages:
+
+- Already in place: crew reported unavailable in one open disruption are excluded from every
+  other disruption's options on those dates, with the reason naming that report.
+- Planned with the approval flow: when two open disruptions want the same crew member, both
+  controllers see the contention and which desk holds the other; once a plan is approved, its
+  crew drop out of every other disruption's options; and approval re-checks legality, so a plan
+  whose crew were committed elsewhere in the meantime becomes STALE instead of double-booking.
+
+## Notifications (planned)
+
+Alerts will be optional and managed by the admin, never hard-coded: on the admin's
+Notifications page an email address is subscribed to a role (controllers receive "options ready", approvers
+"plan waiting for approval") through an SNS topic with a per-role filter. AWS asks each address
+to confirm before anything is delivered. Only the admin role can add addresses, with a daily
+cap, so a public demo cannot be used to send mail to strangers.
+
 ## Disruption analysis
 
 Every report becomes a decision-ready analysis, computed by the engine with no model call:
@@ -136,7 +162,9 @@ Every report becomes a decision-ready analysis, computed by the engine with no m
 | Station closure | Every flight departing or landing in the closure, delayed to reopening plus a 30-minute turnaround, and the same delay effects for each affected duty day. |
 | Gate change | Whether the new gate is free for the flight's boarding window, or which flight holds it. |
 
-A trip that has already started is reported as such rather than re-crewed. Covering only the
+A trip that has already started is reported as such rather than re-crewed. Crew taken out by
+other open disruptions (reported unavailable, or a reported certificate lapse) are excluded on
+the dates those reports cover, so two disruptions never recommend the same absent person. Covering only the
 trailing legs of a delayed day with a fresh crew (a split duty) is not costed yet; the analysis
 names the legs and the cancellation cost instead.
 
@@ -147,7 +175,7 @@ names the legs and the cancellation cost instead.
 | Starting data | A script validates the seed week and writes it to DynamoDB. |
 | Roster upload | An admin uploads a JSON file under `uploads/` in the roster bucket. The upload event runs a loader Lambda, which merges it over the current operation, validates the whole result with the same checks as the seed, and writes the uploaded records only if there are no errors. Every upload gets an accepted or rejected report under `results/`. |
 | Live report | A reporter or crew member reports by voice or web. The report goes to the SQS ingest queue. A worker Lambda validates it, checks the role the sender states (set by the MCP server from the user's verified login) and that every id it names exists, then stores it once as a REPORTED disruption with its first audit event, in one transaction conditioned on the id being new, so a redelivered message is a no-op. A report that fails a check is recorded as rejected and not retried; only unexpected failures are retried, moving to a dead-letter queue after three attempts. |
-| Disruption analysis | The DynamoDB stream starts the disruption Lambda. It works out the blast radius and ranked options, marks the disruption OPTIONS_READY, and alerts the controller through SNS and the live console. |
+| Disruption analysis | The DynamoDB stream, filtered to newly inserted disruptions, starts the analysis Lambda. It loads the operation, works out the blast radius, delay effects and ranked options (see Disruption analysis above), and stores them, moving the disruption from REPORTED to OPTIONS_READY with an audit event in one transaction, conditioned on it still being REPORTED, so a retried trigger cannot analyse twice. A disruption whose stored report cannot be analysed is recorded as ANALYSIS_FAILED; other failures are retried, then noted in a dead-letter queue. Either way it stays REPORTED and `crewops.analysis.run --pending` analyses it again. (Planned: the console updates live through AppSync Events; optional email alerts assigned by the admin.) |
 | Question | Any role asks by voice or chat. Router, advisor tools, verifier and explainer produce a cited answer. |
 | Decision | A controller submits a plan, a different approver approves it, legality is re-checked, and one transaction commits every assignment. The crew member is notified and the audit log updated. |
 | Search index | Rules, example questions, past cases and notes are embedded with Titan V2 into S3 Vectors. |
@@ -179,9 +207,9 @@ they submitted.
 ### What can be reported
 
 Reporters and controllers can report any of these. Crew can report only their own
-unavailability. Every report goes through the same queue and wakes the disruption agent.
+unavailability. Every report goes through the same queue and wakes the disruption analysis.
 
-| Event | Example | What the disruption agent does |
+| Event | Example | What the disruption analysis does |
 |---|---|---|
 | Crew unavailable | "C-1042 is sick for tomorrow" | Uncovered flights, then legal cost-ranked replacements |
 | Flight delay | "DX402 is delayed 90 minutes" | Re-checks duty period and rest for everyone on the pairing; finds breaches and cover |
@@ -213,7 +241,7 @@ Rules enforced in code, in the MCP server:
 - **Four eyes.** The approver must be a different person from the submitter.
 - **Re-check at approval.** Legality and crew availability are evaluated again when the plan is
   approved. If anything changed since submission, the plan becomes STALE instead of committing.
-- **Agents never decide.** The advisor and the disruption agent only prepare options. Submit,
+- **Agents never decide.** The advisor and the disruption analysis only prepare options. Submit,
   approve and reject require a signed-in person with the right role.
 - **Admins configure, they do not operate.** Admin and super admin cannot submit or approve
   plans unless they also hold that role. Every role change is audited.
@@ -222,8 +250,8 @@ Rules enforced in code, in the MCP server:
 ## Demo flow
 
 1. A crew member says "I'm sick tomorrow". The report goes through SQS and is stored.
-2. DynamoDB Streams starts the disruption agent. It computes legal, cost-ranked options and
-   alerts the controller through SNS and the live console.
+2. DynamoDB Streams starts the disruption analysis. It computes legal, cost-ranked options,
+   marks the disruption OPTIONS_READY, and the controller's console updates live.
 3. The controller asks "Alexa, what are my options for P-2291?", picks the recommended reserve
    and says "Submit it". The plan waits for approval.
 4. Hours later, in a new session, the approver asks "Alexa, anything waiting for me?".
@@ -245,5 +273,5 @@ Alexa allows 8 seconds. The configured budget is 6 seconds, leaving margin.
 | Guardrail check on output | 100–200 ms |
 | Polly speech | ~200 ms |
 
-Slow plans are precomputed by the disruption agent, and the Alexa skill uses a progressive
+Slow plans are precomputed by the disruption analysis, and the Alexa skill uses a progressive
 response ("checking crew legality…") while the agent works.
