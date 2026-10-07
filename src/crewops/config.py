@@ -127,6 +127,20 @@ def _float(env: Mapping[str, str], key: str, default: float) -> float:
     return value
 
 
+def _guardrail_version(env: Mapping[str, str]) -> str:
+    """A guardrail is always pinned to a published version: the editable draft could change
+    under a running service without a deploy."""
+    version = _get(env, "CREWOPS_GUARDRAIL_VERSION")
+    if _get(env, "CREWOPS_GUARDRAIL_ID") and not version:
+        raise ConfigError(
+            "CREWOPS_GUARDRAIL_VERSION must be set with CREWOPS_GUARDRAIL_ID: use the "
+            "guardrail stack's GuardrailVersionNumber output"
+        )
+    if version and version.upper() == "DRAFT":
+        raise ConfigError("CREWOPS_GUARDRAIL_VERSION must be a published version, not DRAFT")
+    return version or ""
+
+
 def _fraction(env: Mapping[str, str], key: str, default: float) -> float:
     value = _float(env, key, default)
     if value >= 1:
@@ -200,6 +214,11 @@ class Settings:
         return f"{self.prefix}-alerts"
 
     @property
+    def guardrail_name(self) -> str:
+        """Bedrock Guardrail screening every question and every answer."""
+        return f"{self.prefix}-guardrail"
+
+    @property
     def guardrails_enabled(self) -> bool:
         return self.guardrail_id is not None
 
@@ -229,7 +248,7 @@ class Settings:
             embedding_model_id=_get(env, "CREWOPS_EMBEDDING_MODEL_ID", DEFAULT_EMBEDDING_MODEL),
             embedding_dimensions=dims,
             guardrail_id=_get(env, "CREWOPS_GUARDRAIL_ID"),
-            guardrail_version=_get(env, "CREWOPS_GUARDRAIL_VERSION", "DRAFT"),
+            guardrail_version=_guardrail_version(env),
             max_tool_iterations=_int(env, "CREWOPS_MAX_TOOL_ITERATIONS", 8),
             router_semantic_floor=_fraction(env, "CREWOPS_ROUTER_SEMANTIC_FLOOR", 0.45),
             response_budget_seconds=_float(env, "CREWOPS_RESPONSE_BUDGET_SECONDS", 6.0),

@@ -529,6 +529,59 @@ def _completeness(text: str, ev: Evidence) -> list[Claim]:
     return out
 
 
+NO_COVER_RE = re.compile(
+    r"\b(?:nobody|no one|no-one|no crew(?: member)?|none of (?:them|the crew))\b[^.;!?\n]{0,40}"
+    r"\b(?:legal|cover|covers|available|free|can|could|is able)\b"
+    r"|\bno (?:legal|eligible|available|free|suitable)\b[^.;!?\n]{0,30}"
+    r"\b(?:cover|crew|option|reserve|candidate|captain|officer|one|replacement)s?\b"
+    r"|\b(?:cannot|can't|can not) be (?:re-?)?(?:covered|crewed|staffed)\b",
+    re.I,
+)
+CANCEL_ADVICE_RE = re.compile(
+    r"\b(?:cancel|scrap|drop)\b(?!\w)(?!\s+(?:instead|costs?|would cost))"
+    r"|\bcancelling (?:it|them|the|P-|DX)\b(?![^.;!?\n]{0,15}\bcosts?\b)",
+    re.I,
+)
+"""Advice to cancel, as opposed to quoting what cancelling would cost."""
+
+
+def _no_cover(text: str, trace: Sequence[TraceEntry]) -> list[Claim]:
+    """ "Nobody can cover", "cancel it": verdicts with no id or number in them. Each needs a
+    result that says so: cover searched and none found, a seat a joint plan left unfilled, or
+    legs a delay forces off. The absence of a contradicting result is not enough."""
+    out = []
+    evidence = any(
+        e.ok
+        and isinstance(e.result, dict)
+        and (
+            (e.tool == "find_options" and not e.result.get("legal_options"))
+            or (e.tool == "joint_plan" and e.result.get("unfilled"))
+            or (e.tool == "simulate" and e.result.get("legs_to_drop"))
+        )
+        for e in trace
+    )
+    if evidence:
+        return out
+    for pattern, kind in ((NO_COVER_RE, "no_cover"), (CANCEL_ADVICE_RE, "cancel_advice")):
+        if m := pattern.search(text):
+            out.append(Claim(kind, m.group(0)))
+    return out
+
+
+def keeps_every_fact(original: str, rewrite: str) -> bool:
+    """``rewrite`` has exactly the ids, times and numbers of ``original``: a rewording may
+    change the words, never drop a fact or bring in another (re-verifying alone would allow
+    any fact found elsewhere in the results)."""
+
+    def ids(text: str) -> set[str]:
+        return {normalise_clock(i) or i for i in _ids(text)}
+
+    def values(text: str) -> set[float]:
+        return {round(v, 2) for _, v in numbers_in(text)}
+
+    return ids(original) == ids(rewrite) and values(original) == values(rewrite)
+
+
 def verify(text: str, trace: Sequence[TraceEntry]) -> Verification:
     """Check an answer against the tool results that produced it."""
     trace = list(trace)
@@ -555,6 +608,7 @@ def verify(text: str, trace: Sequence[TraceEntry]) -> Verification:
     claims += _uncovered(text, trace)
     claims += _headcount(text, ev)
     claims += _completeness(text, ev)
+    claims += _no_cover(text, trace)
     unsupported = [c for c in claims if not c.supported]
     return Verification(ok=bool(trace) and not unsupported, claims=claims, unsupported=unsupported)
 

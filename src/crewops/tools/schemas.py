@@ -349,6 +349,27 @@ TOOL_NAMES = frozenset(t["name"] for t in TOOL_SCHEMAS)
 SCHEMA_BY_NAME = {t["name"]: t["input_schema"] for t in TOOL_SCHEMAS}
 
 
+MODEL_KEYWORDS = frozenset({"type", "description", "properties", "required", "enum", "items"})
+"""The JSON Schema subset sent to a model. Bounds, patterns and "no extra fields" are enforced
+by ``validate_args`` before any call, so a model that ignores or rejects those keywords still
+cannot get past them; the model only needs to know the shape and the id formats."""
+
+
+def for_model(schema: dict[str, Any]) -> dict[str, Any]:
+    """``schema`` reduced to ``MODEL_KEYWORDS``, an id pattern folded into the description."""
+    out: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key == "properties":
+            out[key] = {name: for_model(spec) for name, spec in value.items()}
+        elif key == "items":
+            out[key] = for_model(value)
+        elif key in MODEL_KEYWORDS:
+            out[key] = value
+    if "pattern" in schema and "description" not in schema:
+        out["description"] = f"Format: {schema['pattern']}"
+    return out
+
+
 def bedrock_tool_config(names: frozenset[str] | set[str] | None = None) -> dict[str, Any]:
     """The ``toolConfig`` for Bedrock's Converse API, limited to ``names`` when given."""
     return {
@@ -357,7 +378,7 @@ def bedrock_tool_config(names: frozenset[str] | set[str] | None = None) -> dict[
                 "toolSpec": {
                     "name": t["name"],
                     "description": t["description"],
-                    "inputSchema": {"json": t["input_schema"]},
+                    "inputSchema": {"json": for_model(t["input_schema"])},
                 }
             }
             for t in TOOL_SCHEMAS

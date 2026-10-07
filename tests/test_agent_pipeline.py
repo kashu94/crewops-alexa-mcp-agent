@@ -99,53 +99,57 @@ def test_crew_see_only_their_own_records(pipeline):
     assert "Your role doesn't give access" in roster.text and roster.trace == []
 
 
-def test_a_verified_model_draft_is_used():
-    def drafter(question, route, trace, run):
-        return "D. Reddy (C-3310) is the cheapest cover at ₹18,500."
+UNPLANNED = "Which single flight leg has the most seats at risk if cancelled, and why?"
+"""No planned call answers this one, so the drafter is consulted."""
+SEATS = {"entity": "flights", "sort_by": "seats", "sort_desc": True, "limit": 3}
 
-    p = Pipeline(tools(), Router(vocab(), examples()), drafter=drafter)
-    answer = p.answer("C-1042 is sick, who covers?", CONTROLLER)
+
+def model_pipeline(drafter):
+    return Pipeline(tools(), Router(vocab(), examples()), drafter=drafter)
+
+
+def test_a_verified_model_draft_is_used():
+    def drafter(question, route, trace, run, allowed):
+        run("lookup", SEATS)
+        return "DX401 on 2026-09-14 has the most seats at risk: 162."
+
+    answer = model_pipeline(drafter).answer(UNPLANNED, CONTROLLER)
     assert answer.source == "model" and answer.verification.ok
 
 
-def test_an_unverified_draft_falls_back_to_the_template():
-    def drafter(question, route, trace, run):
-        return "C-9999 will cover it for ₹1,000."
+def test_an_unverified_draft_falls_back():
+    def drafter(question, route, trace, run, allowed):
+        run("lookup", SEATS)
+        return "DX999 has 400 seats at risk."
 
-    p = Pipeline(tools(), Router(vocab(), examples()), drafter=drafter)
-    answer = p.answer("C-1042 is sick, who covers?", CONTROLLER)
-    assert answer.source == "template" and "C-9999" not in answer.text
-    assert "D. Reddy (C-3310)" in answer.text and "model draft rejected" in answer.notes[0]
+    answer = model_pipeline(drafter).answer(UNPLANNED, CONTROLLER)
+    assert answer.source == "template" and "DX999" not in answer.text
+    assert "model draft rejected" in answer.notes[0]
 
 
 def test_a_failing_model_never_costs_the_answer():
-    def drafter(question, route, trace, run):
+    def drafter(question, route, trace, run, allowed):
         raise TimeoutError
 
-    p = Pipeline(tools(), Router(vocab(), examples()), drafter=drafter)
-    answer = p.answer("C-1042 is sick, who covers?", CONTROLLER)
-    assert answer.source == "template" and answer.verification.ok
-    assert "TimeoutError" in answer.notes[0]
+    answer = model_pipeline(drafter).answer(UNPLANNED, CONTROLLER)
+    assert answer.source == "clarify" and "TimeoutError" in answer.notes[0]
 
 
 def test_drafter_tool_calls_count_as_evidence():
-    def drafter(question, route, trace, run):
+    def drafter(question, route, trace, run, allowed):
         extra = run("duty_clock", {"crew_id": "C-3310"})
         return f"C-3310 has {extra.result['duty_hours_7d']} duty hours this week."
 
-    p = Pipeline(tools(), Router(vocab(), examples()), drafter=drafter)
-    answer = p.answer("C-1042 is sick, who covers?", CONTROLLER)
+    answer = model_pipeline(drafter).answer(UNPLANNED, CONTROLLER)
     assert answer.source == "model" and answer.trace[-1].tool == "duty_clock"
 
 
 def test_answer_record_is_redacted():
-    def drafter(question, route, trace, run):
-        return "Call D. Reddy (C-3310) on +91 98765 43210."
+    from crewops.agent.pipeline import Answer
 
-    p = Pipeline(tools(), Router(vocab(), examples()), drafter=drafter)
-    answer = p.answer("C-1042 is sick, who covers?", CONTROLLER)
-    record = answer.to_dict()
-    assert "98765" not in str(record)
+    answer = Answer("q", "Call ops on +91 98765 43210.", None, notes=["mail a@b.example"])
+    record = str(answer.to_dict())
+    assert "98765" not in record and "a@b.example" not in record
 
 
 def test_empty_and_long_questions(pipeline):
@@ -202,13 +206,13 @@ def test_first_person_crew_questions(pipeline, question):
 def test_drafter_cannot_add_unrecorded_evidence():
     seen = {}
 
-    def drafter(question, route, trace, run):
+    def drafter(question, route, trace, run, allowed):
         seen["forbidden"] = run("lookup", {"entity": "crew"}).error_code
         return "C-1042 is sick."
 
     me = Caller("u-crew", frozenset({Role.CREW}), crew_id="C-1042")
     p = Pipeline(tools(), Router(vocab(), examples()), drafter=drafter)
-    p.answer("How many duty hours do I have?", me)
+    p.answer("Which crew have 45 or more duty hours in the 7 days ending 2026-09-15?", me)
     assert seen["forbidden"] == "FORBIDDEN"
 
 

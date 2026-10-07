@@ -161,7 +161,7 @@ environment; a value set in the shell wins over the file. Only `AWS_PROFILE` is 
 | `CREWOPS_EMBEDDING_MODEL_ID` | `amazon.titan-embed-text-v2:0` | Embeddings for search |
 | `CREWOPS_EMBEDDING_DIMENSIONS` | `512` | 256, 512 or 1024 |
 | `CREWOPS_GUARDRAIL_ID` | none | Bedrock guardrail, once deployed |
-| `CREWOPS_GUARDRAIL_VERSION` | `DRAFT` | Guardrail version |
+| `CREWOPS_GUARDRAIL_VERSION` | none | Published guardrail version; required with the id |
 | `CREWOPS_MAX_TOOL_ITERATIONS` | `8` | Cap on the advisor's tool loop |
 | `CREWOPS_RESPONSE_BUDGET_SECONDS` | `6.0` | Time budget for a spoken answer |
 | `CREWOPS_ROUTER_SEMANTIC_FLOOR` | `0.45` | Least similarity for the router to borrow an example question's intent; set from `crewops.agent.calibrate` |
@@ -246,13 +246,25 @@ stage keeps its table, with point-in-time recovery and deletion protection.
 
 ### Asking a question
 
-Answers come from the tools and are verified before they are printed. No model is called yet.
+Answers come from the tools and are verified before they are printed. Offline, no model is
+called. With `--live`, the Nova models triage, advise and reword, the guardrail screens the
+question and the answer once `CREWOPS_GUARDRAIL_ID` is set, and the tokens used are printed.
 
 ```bash
 uv run python -m crewops.agent.ask "Who is on reserve at BLR on 15 Sep?"
 uv run python -m crewops.agent.ask --role crew --crew-id C-1042 "How many duty hours do I have?"
-uv run python -m crewops.agent.ask --live "C-1042 is sick, who covers?"   # live table and index
+uv run python -m crewops.agent.ask --live "C-1042 is sick, who covers?"   # live, with models
+uv run python -m crewops.agent.ask --live --no-model "C-1042 is sick, who covers?"
 uv run python -m crewops.agent.calibrate      # measure the router's similarity floor (live)
+```
+
+The guardrail is its own stack. After deploying it, copy its two outputs into `.env`. A
+change to the guardrail publishes a new version number and keeps the old one, so update
+`CREWOPS_GUARDRAIL_VERSION` after such a deploy:
+
+```bash
+CREWOPS_GUARDRAIL_ID=<GuardrailId output>
+CREWOPS_GUARDRAIL_VERSION=<GuardrailVersionNumber output>
 ```
 
 Set the floor that `calibrate` recommends as `CREWOPS_ROUTER_SEMANTIC_FLOOR` in `.env`.

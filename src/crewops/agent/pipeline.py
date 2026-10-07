@@ -14,17 +14,18 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from crewops.agent.entities import Vocabulary
-from crewops.agent.intents import Intent
+from crewops.agent.intents import Intent, Tier
 from crewops.agent.pii import redact, redact_text
 from crewops.agent.planner import MISSING, ToolCall, false_premise, followup_calls, seed_calls
 from crewops.agent.render import render
 from crewops.agent.router import Route, Router
-from crewops.agent.verifier import Verification, verify
+from crewops.agent.verifier import Verification, keeps_every_fact, verify
 from crewops.tools import Caller, CrewOpsTools, TraceEntry, allowed_tools, dispatch
 from crewops.tools.errors import AMBIGUOUS_QUERY, NEEDS_CONFIRMATION
 
@@ -41,10 +42,15 @@ MAX_FOLLOWUP_ROUNDS = 3
 
 ToolRunner = Callable[[str, dict[str, Any]], TraceEntry]
 """(tool name, arguments) -> the recorded call, run for the signed-in caller."""
-Drafter = Callable[[str, Route, list[TraceEntry], ToolRunner], str]
-"""(question, route, trace so far, run a tool) -> draft answer. The model advisor plugs in
-here. Its only way to a tool is the runner it is given, so every call it makes goes through
-the caller's role checks and lands in the trace the draft is verified against."""
+Drafter = Callable[[str, Route, list[TraceEntry], ToolRunner, frozenset[str]], str]
+"""(question, route, trace so far, run a tool, tools the caller may use) -> draft answer.
+The model advisor plugs in here. Its only way to a tool is the runner it is given, so every
+call it makes goes through the caller's role checks and lands in the trace the draft is
+verified against. An empty draft means "no answer": the template is used."""
+Polisher = Callable[[str, str], str]
+"""(question, verified answer) -> the same answer reworded for speech. Verified again."""
+Screen = Callable[[str], str | None]
+"""text -> the message to give instead when it is blocked, or None when it passes."""
 
 
 @dataclass(slots=True)
@@ -55,7 +61,8 @@ class Answer:
     trace: list[TraceEntry] = field(default_factory=list)
     verification: Verification | None = None
     source: str = "template"
-    """template, model, clarify (a question back) or refused."""
+    """template, explained (the template reworded for speech), model, clarify (a question
+    back) or refused."""
     awaiting: str | None = None
     """confirmation (an id, name or premise to confirm) or detail (something missing)."""
     notes: list[str] = field(default_factory=list)
@@ -84,11 +91,19 @@ class Pipeline:
         router: Router,
         *,
         drafter: Drafter | None = None,
+        polisher: Polisher | None = None,
+        screen_question: Screen | None = None,
+        screen_answer: Screen | None = None,
+        budget_seconds: float = 6.0,
     ) -> None:
         self.tools = tools
         self.router = router
         self.vocab: Vocabulary = router.vocab
         self.drafter = drafter
+        self.polisher = polisher
+        self.screen_question = screen_question
+        self.screen_answer = screen_answer
+        self.budget_seconds = budget_seconds
 
     @classmethod
     def offline(cls, tools: CrewOpsTools, examples: Mapping[str, str]) -> Pipeline:
@@ -96,6 +111,7 @@ class Pipeline:
         return cls(tools, Router(Vocabulary.from_world(tools.world), examples))
 
     def answer(self, question: str, caller: Caller) -> Answer:
+        started = time.monotonic()
         question = (question or "").strip()
         if not question:
             return Answer(
@@ -108,6 +124,17 @@ class Pipeline:
                 None,
                 source="refused",
             )
+
+        screening_note = ""
+        if self.screen_question is not None:
+            try:
+                if blocked := self.screen_question(question):
+                    return Answer(question, blocked, None, source="refused")
+            except Exception as exc:
+                # Fail open: the verifier, role checks and redaction still stand, and an
+                # unreachable screening service must not take the desk offline.
+                log.exception("question screening failed")
+                screening_note = f"question screening unavailable ({type(exc).__name__})"
 
         route = self.router.route(question)
         if (
@@ -127,7 +154,7 @@ class Pipeline:
         if premise := false_premise(question, route.entities, self.tools, self.vocab, may_see):
             return Answer(question, premise, route, source="clarify", awaiting="confirmation")
 
-        notes: list[str] = []
+        notes: list[str] = [screening_note] if screening_note else []
         trace: list[TraceEntry] = []
         planned = seed_calls(route, question, self.vocab, self.tools)
         trace += self._run(planned, caller, allowed, notes)
@@ -137,7 +164,11 @@ class Pipeline:
                 break
             trace += self._run(more, caller, allowed, notes)
 
-        if self.drafter is not None and allowed:
+        # The model is consulted only when the planned calls produced nothing usable. When
+        # they did, the template says exactly what they returned, and nothing a model could
+        # add (a conclusion with no id or number in it) can slip past the verifier.
+        wants_model = not any(e.ok for e in trace)
+        if self.drafter is not None and allowed and wants_model:
 
             def run(name: str, args: dict[str, Any]) -> TraceEntry:
                 entry = dispatch(self.tools, caller, name, args)
@@ -145,17 +176,25 @@ class Pipeline:
                 return entry
 
             try:
-                draft = self.drafter(question, route, list(trace), run)
+                draft = self.drafter(question, route, list(trace), run, allowed)
                 checked = verify(draft, trace)
-                if checked.ok:
-                    return self._finish(question, draft, route, trace, checked, "model", notes)
-                # The unsourced values go to the log only: they may be anything the model wrote.
-                log.info("model draft rejected: %s", checked.summary())
-                kinds = sorted({c.kind for c in checked.unsupported})
-                notes.append(
-                    f"model draft rejected: {len(checked.unsupported)} unsourced claim(s) "
-                    f"({', '.join(kinds)})"
+                sourced = any(
+                    c.supported and c.kind in ("identifier", "number") for c in checked.claims
                 )
+                if not draft.strip():
+                    notes.append("model gave no complete answer within its budget")
+                elif checked.ok and sourced:
+                    return self._finish(question, draft, route, trace, checked, "model", notes)
+                elif checked.ok:
+                    notes.append("model draft stated no sourced fact; not used")
+                else:
+                    # The unsourced values go to the log only: they may be anything.
+                    log.info("model draft rejected: %s", checked.summary())
+                    kinds = sorted({c.kind for c in checked.unsupported})
+                    notes.append(
+                        f"model draft rejected: {len(checked.unsupported)} unsourced claim(s) "
+                        f"({', '.join(kinds)})"
+                    )
             except Exception as exc:  # a model failure must never cost the user an answer
                 log.exception("drafter failed")
                 notes.append(f"model unavailable ({type(exc).__name__}); template used")
@@ -175,6 +214,23 @@ class Pipeline:
         if not checked.ok:  # a template bug: still say only what the tools said, and log it
             log.error("template failed verification: %s", checked.summary())
             notes.append(checked.summary())
+        elif (
+            self.polisher is not None
+            and route.tier >= Tier.REPLACEMENT
+            and all(e.ok for e in trace)
+            and time.monotonic() - started < self.budget_seconds / 2
+        ):
+            # Only judgement answers are reworded: they read worst as templates. Lookups are
+            # lists, already plain. Skipped when half the time budget is gone.
+            try:
+                spoken = self.polisher(question, text)
+                again = verify(spoken, trace)
+                if spoken.strip() and again.ok and keeps_every_fact(text, spoken):
+                    return self._finish(question, spoken, route, trace, again, "explained", notes)
+                notes.append("rewording dropped or changed a fact; template used")
+            except Exception as exc:
+                log.exception("explainer failed")
+                notes.append(f"rewording unavailable ({type(exc).__name__}); template used")
         return self._finish(question, text, route, trace, checked, "template", notes)
 
     # ------------------------------------------------------------------
@@ -206,7 +262,15 @@ class Pipeline:
             awaiting = "confirmation"
         elif AMBIGUOUS_QUERY in codes:
             awaiting = "detail"
-        return Answer(question, redact_text(text), route, trace, checked, source, awaiting, notes)
+        text = redact_text(text)
+        if self.screen_answer is not None:
+            try:
+                if blocked := self.screen_answer(text):
+                    return Answer(question, blocked, route, trace, checked, "refused", None, notes)
+            except Exception as exc:
+                log.exception("answer screening failed")
+                notes.append(f"answer screening unavailable ({type(exc).__name__})")
+        return Answer(question, text, route, trace, checked, source, awaiting, notes)
 
     def _nothing_ran(self, route: Route, planned: list[ToolCall], allowed: frozenset[str]) -> str:
         """Why nothing was checked: never an empty answer, which would sound like "all clear"."""

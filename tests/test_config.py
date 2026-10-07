@@ -34,6 +34,7 @@ def test_overrides_are_applied():
             "CREWOPS_ADVISOR_MODEL_ID": "apac.amazon.nova-pro-v1:0",
             "CREWOPS_EMBEDDING_DIMENSIONS": "1024",
             "CREWOPS_GUARDRAIL_ID": "gr-123",
+            "CREWOPS_GUARDRAIL_VERSION": "3",
             "CREWOPS_RESPONSE_BUDGET_SECONDS": "5.5",
         }
     )
@@ -99,6 +100,7 @@ def test_load_env_file_applies_values_without_overriding_shell(tmp_path, private
         "CREWOPS_STAGE=demo\n"
         "export AWS_REGION='eu-west-1'\n"
         'CREWOPS_GUARDRAIL_ID="gr-1"\n'
+        "CREWOPS_GUARDRAIL_VERSION=1\n"
         "CREWOPS_MAX_TOOL_ITERATIONS=5  # inline comment\n"
         "AWS_PROFILE=fromfile\n"
     )
@@ -174,3 +176,12 @@ def test_router_semantic_floor():
     for bad in ("1", "1.5", "0", "-0.2", "high"):
         with pytest.raises(ConfigError, match="CREWOPS_ROUTER_SEMANTIC_FLOOR"):
             Settings.from_env({"CREWOPS_ROUTER_SEMANTIC_FLOOR": bad})
+
+
+def test_guardrail_is_pinned_to_a_published_version():
+    s = Settings.from_env({"CREWOPS_GUARDRAIL_ID": "gr-1", "CREWOPS_GUARDRAIL_VERSION": "2"})
+    assert s.guardrails_enabled and s.guardrail_version == "2"
+    with pytest.raises(ConfigError, match="CREWOPS_GUARDRAIL_VERSION must be set"):
+        Settings.from_env({"CREWOPS_GUARDRAIL_ID": "gr-1"})
+    with pytest.raises(ConfigError, match="not DRAFT"):
+        Settings.from_env({"CREWOPS_GUARDRAIL_ID": "gr-1", "CREWOPS_GUARDRAIL_VERSION": "DRAFT"})

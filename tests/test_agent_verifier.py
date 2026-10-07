@@ -1,5 +1,7 @@
 """The verifier: every claim in an answer must come from this turn's tool results."""
 
+import pytest
+
 from crewops.agent.verifier import normalise_clock, verify
 from crewops.tools import TraceEntry
 
@@ -216,3 +218,43 @@ def test_third_round_findings():
     )
     assert verify("C-1042 cannot fly P-2291, so D. Reddy (C-3310) can cover it.", [out]).ok
     assert verify("C-2087 breaches RULE-DUTY-02 on Tuesday the 15th.", [LEGALITY]).ok
+
+
+FOUND = entry("find_options", {"pairing_id": "P-2291", "legal_options": 4, "options": []})
+NONE_FOUND = entry("find_options", {"pairing_id": "P-2291", "legal_options": 0, "options": []})
+
+
+@pytest.mark.parametrize(
+    "draft",
+    [
+        "Nobody can cover P-2291; cancel it.",
+        "There is no legal reserve for P-2291, so cancel it.",
+        "For P-2291 no crew is free.",
+        "P-2291 cannot be covered.",
+        "For P-2291, cancel rather than call anyone out.",
+    ],
+)
+def test_no_cover_and_cancel_verdicts_need_evidence(draft):
+    assert not verify(draft, [FOUND]).ok
+    other = entry("lookup", {"entity": "pairings", "count": 1, "rows": [{"pairing_id": "P-2291"}]})
+    assert not verify(draft, [other]).ok  # no search for cover at all is not evidence either
+    assert verify(draft, [NONE_FOUND]).ok
+
+
+def test_quoting_the_cost_of_cancelling_is_not_advice():
+    trace = [
+        entry(
+            "find_options",
+            {"pairing_id": "P-2291", "legal_options": 4, "cancellation": {"cost_inr": 1500000}},
+        )
+    ]
+    assert verify("For P-2291, cancelling instead costs ₹1,500,000.", trace).ok
+
+
+def test_a_rewording_may_neither_drop_nor_add_a_fact():
+    from crewops.agent.verifier import keeps_every_fact
+
+    original = "D. Reddy (C-3310) covers P-2291 for ₹18,500."
+    assert keeps_every_fact(original, "For ₹18,500, D. Reddy (C-3310) covers P-2291.")
+    assert not keeps_every_fact(original, "D. Reddy (C-3310) covers it.")
+    assert not keeps_every_fact(original, original + " Or C-1526 for ₹24,000.")

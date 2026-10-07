@@ -3,11 +3,13 @@
     uv run python -m crewops.agent.ask "Who is on reserve at BLR on 15 Sep?"
     uv run python -m crewops.agent.ask --role crew --crew-id C-1042 "How many duty hours do I have?"
     uv run python -m crewops.agent.ask --live "Who covers C-1042?"
+    uv run python -m crewops.agent.ask --live --no-model "Who covers C-1042?"
 
 Without ``--live`` it answers from the seed files, with no AWS calls. With ``--live`` it reads
-the operation from DynamoDB (so open disruptions count) and uses the intents index for the
-router's semantic stage, with the AWS profile from ``.env``. No model is called yet; answers
-are the verified renderings of tool results.
+the operation from DynamoDB (so open disruptions count), uses the intents index for the
+router's semantic stage, and calls the Nova models (triage, advisor, explainer) and the
+guardrail when ``CREWOPS_GUARDRAIL_ID`` is set; ``--no-model`` leaves the models out. The
+AWS profile comes from ``.env``.
 """
 
 from __future__ import annotations
@@ -27,11 +29,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--crew-id", help="the caller's own crew id, for the crew role")
     parser.add_argument("--live", action="store_true", help="read the live table and index")
     parser.add_argument("--json", action="store_true", help="print the full answer record")
+    parser.add_argument(
+        "--no-model", action="store_true", help="with --live: rules and templates only"
+    )
     args = parser.parse_args(argv)
 
-    from crewops.agent.entities import Vocabulary
     from crewops.agent.pipeline import Pipeline
-    from crewops.agent.router import Router
     from crewops.config import Settings, load_env_file
     from crewops.engine import build_world
     from crewops.ingestion.seed import default_seed_dir, load_seed
@@ -44,39 +47,32 @@ def main(argv: list[str] | None = None) -> int:
     if not args.live:
         seed = load_seed()
         pipeline = Pipeline.offline(CrewOpsTools(build_world(seed), seed), examples)
-    else:
-        load_env_file()
-        profile = os.environ.get("AWS_PROFILE")
-        if not profile or profile == "default":
-            print("Set AWS_PROFILE (for example in .env) to a named profile.", file=sys.stderr)
-            return 1
-        from botocore.exceptions import BotoCoreError, ClientError
+        return _print(pipeline.answer(args.question, caller), args.json)
 
-        from crewops.search.index import clients
-        from crewops.search.vectors import INTENTS, VectorSearch, titan_embedder
-        from crewops.store.ops_store import table_for
+    load_env_file()
+    profile = os.environ.get("AWS_PROFILE")
+    if not profile or profile == "default":
+        print("Set AWS_PROFILE (for example in .env) to a named profile.", file=sys.stderr)
+        return 1
+    from botocore.exceptions import BotoCoreError, ClientError
 
-        settings = Settings.from_env()
-        try:
-            bedrock, s3vectors = clients(settings)
-            embed = titan_embedder(
-                bedrock, settings.embedding_model_id, settings.embedding_dimensions
-            )
-            search = VectorSearch(s3vectors, settings.vector_bucket, embed)
-            tools = CrewOpsTools.load(table_for(settings), search)
-            router = Router(
-                Vocabulary.from_world(tools.world),
-                examples,
-                search=lambda q: search.search(INTENTS, q, top_k=1),
-                floor=settings.router_semantic_floor,
-            )
-            answer = Pipeline(tools, router).answer(args.question, caller)
-        except (ClientError, BotoCoreError) as exc:
-            print(f"AWS error: {exc}", file=sys.stderr)
-            return 1
-        return _print(answer, args.json)
+    from crewops.agent.service import build
+    from crewops.store.ops_store import table_for
 
-    return _print(pipeline.answer(args.question, caller), args.json)
+    settings = Settings.from_env()
+    try:
+        live = build(settings, table_for(settings), models=not args.no_model)
+        answer, used = live.ask(args.question, caller)
+    except (ClientError, BotoCoreError) as exc:
+        print(f"AWS error: {exc}", file=sys.stderr)
+        return 1
+    code = _print(answer, args.json)
+    if used["calls"]:
+        print(
+            f"[models: {used['calls']} calls, {used['input_tokens']} tokens in, "
+            f"{used['output_tokens']} out]"
+        )
+    return code
 
 
 def _print(answer, as_json: bool) -> int:

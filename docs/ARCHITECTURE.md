@@ -21,7 +21,7 @@ choosing which tools to call, and turning a verified answer into speech.
                 │ Cognito JWT (one group per role)           │            │
                 ▼                                            ▼            │
  ┌─────────────────────────────────────────────────────────────┐          │
- │ ASSISTANT AGENT  (Strands · AgentCore Runtime)               │          │
+ │ ASSISTANT AGENT  (AgentCore Runtime)                         │          │
  │  Bedrock Guardrails on input                                 │          │
  │  router → [triage] → planner → advisor tool loop → verifier  │          │
  │  → explainer → PII redaction → Bedrock Guardrails on output  │          │
@@ -59,21 +59,30 @@ choosing which tools to call, and turning a verified answer into speech.
 ## The answer pipeline
 
 Each stage spends a model call only when the previous one could not settle the question.
+The one exception is the explainer, which rewords an already-settled judgement answer for
+speech and is discarded unless it keeps every fact.
 
 | Stage | Model calls | Job |
 |---|---|---|
+| **Guardrail on input** | 0 | Bedrock Guardrails screens the question for harmful content and prompt attacks. |
 | **Router** | 0 | Ordered regex rules classify the question; ids, dates and stations are extracted by pattern only. |
 | **Semantic fallback** | 0 | Embedding match against the example questions. Borrows the closest one's intent, never its ids or answer, and only above a similarity floor measured on paraphrases. |
-| **Triage** (planned) | 0–1 (Nova Micro) | Classifies intent only when both stages above abstain. No tools. |
+| **Triage** | 0–1 (Nova Micro) | Classifies intent only when both stages above abstain. No tools. A reply it cannot parse means a lookup. |
 | **Premise check** | 0 | Something the question states that the roster contradicts ("FO C-1042" for a captain, an unknown station) is asked about before anything runs. |
 | **Planner** | 0 | Makes the obvious first tool calls for the intent, and the calls that follow from their results, with the caller's own role checks. |
-| **Advisor** (planned) | 1–8 (Nova 2 Lite) | Chooses further tools and drafts the answer. Capped at 8 iterations. Cannot submit, approve or commit anything. |
+| **Advisor** | 0–9 (Nova 2 Lite) | Consulted only when the planned calls produced nothing usable (the question named no exact ids, or every planned call failed). It sees the planned results as its own earlier calls, calls more through the caller's role checks, and drafts the answer, which must state at least one sourced fact. At most 8 rounds of tool calls, with the time budget checked before each model call; each call has one attempt and a firm timeout. Only a finished reply counts: a cut-off or filtered one is no answer. Cannot submit, approve or commit anything. |
 | **Verifier** | 0 | Every id, number, time, name and rule verdict in the draft must appear in a tool result of the same turn. On failure the draft is replaced by the template. |
 | **Template** | 0 | The tool results as short sentences. Copied, never computed, so it always verifies. |
-| **Explainer** (planned) | 0–1 (Nova 2 Lite) | Rewrites the verified answer for speech. Its output is verified again. |
+| **Explainer** | 0–1 (Nova 2 Lite) | Rewrites a judgement answer (tier 2 and 3) for speech, while half the time budget remains. The rewrite must pass the verifier and keep every id, time and number of the template, or the template stands. |
 | **PII redaction** | 0 | Removes contact and government-id data at the output boundary, after verification. |
+| **Guardrail on output** | 0 | Bedrock Guardrails screens the final answer. |
 
-Without a model, the pipeline already answers from the rules, planner and template. On the
+Every model call has a fallback that still answers: a failed or unverifiable draft gives
+the template, a failed triage gives a lookup, and an unreachable guardrail is logged and
+skipped, since the verifier, role checks and redaction do not depend on it. Tests run every
+model role against a scripted stand-in for Bedrock, so they cost nothing.
+
+Without any model, the pipeline answers from the rules, planner and template. On the
 38 example questions, the rules route every one to its tier, and 35 get a verified answer;
 the other 3 need the advisor and say what they need instead. A set of 38 paraphrases
 (`data/eval/paraphrases.json`) was used to widen the rules' vocabulary, so routing on it is
@@ -322,7 +331,12 @@ Rules enforced in code, in the MCP server:
 
 ## Latency budget (voice path)
 
-Alexa allows 8 seconds. The configured budget is 6 seconds, leaving margin.
+Alexa allows 8 seconds. The configured budget is 6 seconds. Each model call has one attempt
+and a timeout: 3 seconds for triage, embeddings and guardrail screening, the response
+budget for the advisor and explainer. The advisor starts no call once the budget is spent,
+and the explainer none after half of it. A call started just inside the budget can still
+run to its timeout, so the worst case is longer than 8 seconds; the Alexa skill covers it
+with a progressive response, and the template answer stands whenever a model is late.
 
 | Step | Typical |
 |---|---|

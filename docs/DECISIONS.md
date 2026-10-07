@@ -53,14 +53,18 @@ disruption, never a past answer, so stale crew or costs can never leak into a li
 A cache would need a VPC and NAT for no latency gain, since DynamoDB already answers in
 milliseconds and model calls take seconds. A semantic answer cache is dangerous here:
 "C-1042 sick on P-2291" and "C-1024 sick on P-2219" embed almost identically, so a cached
-answer could send the wrong person to the wrong aircraft. Bedrock prompt caching is used
-instead; it caches the fixed prompt and tool definitions, never answers.
+answer could send the wrong person to the wrong aircraft. If caching is added, it will be
+Bedrock prompt caching of the fixed prompt and tool definitions, never of answers.
 
-## D5. AgentCore Runtime with Strands for the agent and MCP server
+## D5. AgentCore Runtime for the agent and MCP server
 
 AgentCore Runtime hosts MCP servers over Streamable HTTP, validates Cognito tokens, and bills
 only for active compute. Memory and Observability come with it. Lambda runs the short,
 event-triggered jobs: the SQS worker, the roster loader and the disruption analysis.
+
+The advisor's tool loop is a short Converse loop in this repository rather than an agent
+framework. Every tool call it makes goes through the caller's role checks, the round limit
+and a time check before each model call, and its answer through the verifier.
 
 **Fallback:** the MCP server is stateless between requests, so it can move to Lambda behind a
 Function URL without code changes if AgentCore blocks progress.
