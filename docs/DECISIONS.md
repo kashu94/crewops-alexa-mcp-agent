@@ -42,6 +42,12 @@ unusual question to a known intent. Exact lookups by crew, pairing or rule id st
 Embeddings are 512-dimensional: enough for short rule texts and questions, at half the storage
 of 1024.
 
+Search is hybrid: S3 Vectors provides semantic similarity, and BM25 keyword scoring runs in
+Python over the same documents (each index is under a hundred documents, so a query sees all
+of them). Keywords catch exact terms such as rule ids and flight numbers that embeddings blur;
+embeddings catch paraphrases that share no words. The scenario index returns only the kind of
+disruption, never a past answer, so stale crew or costs can never leak into a live answer.
+
 ## D4. No Redis and no semantic answer cache
 
 A cache would need a VPC and NAT for no latency gain, since DynamoDB already answers in

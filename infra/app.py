@@ -13,6 +13,7 @@ from aws_cdk import App, Environment, Tags
 from crewops_infra.analysis_stack import AnalysisStack
 from crewops_infra.data_stack import DataStack
 from crewops_infra.ingestion_stack import IngestionStack
+from crewops_infra.search_stack import SearchStack
 
 from crewops.config import Settings, load_env_file
 
@@ -38,6 +39,7 @@ def main() -> None:
         table=data.table,
         env=env,
     )
+    SearchStack(app, f"CrewOps-{settings.stage}-Search", settings=settings, env=env)
 
     Tags.of(app).add("project", "crewops")
     Tags.of(app).add("stage", settings.stage)

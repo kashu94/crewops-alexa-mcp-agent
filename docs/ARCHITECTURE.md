@@ -41,7 +41,7 @@ choosing which tools to call, and turning a verified answer into speech.
                 ▼                                             ▼
  ┌──────────────────────────────┐              ┌─────────────────────────────┐
  │ LEGALITY ENGINE (pure Python)│              │ S3 Vectors + Titan V2        │
- │ 7 rules · duty math · cost   │              │ rules · intent examples      │
+ │ 7 rules · duty math · cost   │              │ rules · intents · scenarios  │
  │ candidates · ripple · joint  │              └─────────────────────────────┘
  └──────────────┬───────────────┘
                 ▼
@@ -168,6 +168,25 @@ the dates those reports cover, so two disruptions never recommend the same absen
 trailing legs of a delayed day with a fresh crew (a split duty) is not costed yet; the analysis
 names the legs and the cancellation cost instead.
 
+## Search
+
+Three small S3 Vectors indexes, each queried with a hybrid score: semantic similarity from
+Titan Text Embeddings V2, and BM25 keyword scoring over the same documents, each rescaled to
+0-1 and blended half and half. If one side carries no signal (a paraphrase sharing no words
+with any document), it is dropped rather than allowed to cap the score.
+
+| Index | Documents | Used for |
+|---|---|---|
+| `rules` | The seven legality rules | A legality question that names no rule id |
+| `intents` | The 38 gold example questions, with crew, pairing, flight, aircraft and date ids masked | The router's fallback: an unusual phrasing is matched to the closest example question, and the router maps that question to its intent. Never its ids or answer |
+| `scenarios` | The six reference scenarios | Classifying what kind of disruption a free-text description is. Only the kind is returned, never that scenario's answer |
+
+The blended score is relative within an index, so every hit also carries its absolute
+semantic similarity. The router (planned) will require a minimum similarity as well, so a
+question unlike anything indexed is not matched to the least-unlike example. Evaluations score
+paraphrased and held-out questions, not the indexed gold prompts, so routing accuracy is not
+inflated by questions matching themselves.
+
 ## Flows
 
 | Flow | Path |
@@ -178,7 +197,7 @@ names the legs and the cancellation cost instead.
 | Disruption analysis | The DynamoDB stream, filtered to newly inserted disruptions, starts the analysis Lambda. It loads the operation, works out the blast radius, delay effects and ranked options (see Disruption analysis above), and stores them, moving the disruption from REPORTED to OPTIONS_READY with an audit event in one transaction, conditioned on it still being REPORTED, so a retried trigger cannot analyse twice. A disruption whose stored report cannot be analysed is recorded as ANALYSIS_FAILED; other failures are retried, then noted in a dead-letter queue. Either way it stays REPORTED and `crewops.analysis.run --pending` analyses it again. (Planned: the console updates live through AppSync Events; optional email alerts assigned by the admin.) |
 | Question | Any role asks by voice or chat. Router, advisor tools, verifier and explainer produce a cited answer. |
 | Decision | A controller submits a plan, a different approver approves it, legality is re-checked, and one transaction commits every assignment. The crew member is notified and the audit log updated. |
-| Search index | Rules, example questions, past cases and notes are embedded with Titan V2 into S3 Vectors. |
+| Search index | The rules, the gold example questions and past scenarios are embedded with Titan Text Embeddings V2 into three S3 Vectors indexes (`crewops.search.index`). Queries blend keyword (BM25) and semantic scores. |
 | Evaluation | Gold questions and held-out cases run against the agent and are scored. |
 
 ## Data store

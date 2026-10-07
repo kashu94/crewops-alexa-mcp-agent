@@ -78,7 +78,7 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why each piece was ch
 | Amazon Bedrock | Amazon Nova models, Titan V2 embeddings, Guardrails |
 | Amazon Bedrock AgentCore | Runtime for the agent and MCP server, Memory, Observability |
 | Amazon DynamoDB | Operational data (single table) with Streams |
-| Amazon S3 Vectors | Semantic search over rules and question intents |
+| Amazon S3 Vectors | Hybrid search over rules, example questions and past scenarios |
 | Amazon SQS + AWS Lambda | Real-time disruption ingestion and background agents |
 | Amazon SNS | Optional email alerts, assigned to roles by the admin |
 | AWS AppSync Events | Live updates to the console |
@@ -90,6 +90,7 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why each piece was ch
 
 ```
 data/seed/              Sample operating week (JSON)
+data/eval/              Gold example questions and reference scenarios
 src/crewops/
   config.py             Runtime settings
   domain/               Typed records shared by every layer
@@ -97,6 +98,7 @@ src/crewops/
   engine/               Legality engine: duty math, the seven rules, assessment, cost ranking,
                         blast radius, delay effects, joint plans
   analysis/             Disruption analysis, its stream Lambda and the run command
+  search/               Hybrid keyword + semantic search over S3 Vectors
   store/                DynamoDB key layout, item conversion, reads and writes
 infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests
@@ -213,6 +215,17 @@ Report types: `crew_unavailable`, `flight_delay`, `aircraft_technical`,
 `station_disruption`, `gate_change`, `certification_lapse`. Add `--dry-run` to validate
 without sending. Crew may report only their own unavailability; auditors and admins may not
 report.
+
+### Search indexes
+
+After the first deploy, embed the rules, example questions and scenarios into S3 Vectors, and
+try a query:
+
+```bash
+uv run python -m crewops.search.index --dry-run   # count documents, no AWS calls
+uv run python -m crewops.search.index             # embed with Titan V2 and store
+uv run python -m crewops.search.index --index rules --query "how much rest does a pilot need"
+```
 
 ### Disruption analysis
 
