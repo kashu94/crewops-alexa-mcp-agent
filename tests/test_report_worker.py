@@ -217,3 +217,20 @@ def test_report_from_the_future_is_refused(table):
     assert outcome.status == "rejected" and "ahead of the time it arrived" in outcome.reason
     small_skew = report(report_id="r-skewok01", reported_utc="2026-09-15T05:04:00Z")
     assert handle(table, small_skew).status == "stored"
+
+
+def test_resend_with_a_new_timestamp_is_a_duplicate(table):
+    # A client resending a report stamps it again; that is still the same report.
+    assert handle(table, report()).status == "stored"
+    restamped = report(reported_utc="2026-09-15T05:00:45Z")
+    assert handle(table, restamped).status == "duplicate"
+    assert rejections_for(table, "r-00000001") == []
+    stored = get_disruption(table, "r-00000001")
+    assert stored["report"]["reported_utc"] == "2026-09-15T05:00:00Z"  # first copy kept
+
+
+def test_resend_with_changed_details_is_still_a_conflict(table):
+    assert handle(table, report()).status == "stored"
+    changed = report(details={"crew_id": "C-1042", "from_date": "2026-09-15", "reason": "fatigue"})
+    outcome = handle(table, changed)
+    assert outcome.status == "rejected" and "different report" in outcome.reason

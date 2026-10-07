@@ -142,9 +142,25 @@ def rejections_for(table: Any, report_id: str) -> list[dict[str, Any]]:
     ).get("Items", [])
 
 
+RESEND_IGNORED_FIELDS = frozenset({"reported_utc"})
+"""A sender resending a report usually stamps it again, so the time may differ."""
+
+
 def same_report(stored: dict[str, Any], report: Report) -> bool:
-    """Whether a stored disruption holds exactly this report (a genuine resend)."""
-    return from_dynamo(stored.get("report")) == report.to_dict()
+    """Whether a stored disruption holds this report: a genuine resend, not a reused id.
+
+    Type, sender, details and narrative must match exactly. The report time may differ,
+    because a client that resends usually stamps the message again; the first stored copy
+    keeps its original time.
+    """
+
+    def essence(doc: Any) -> dict[str, Any]:
+        doc = dict(doc or {})
+        for name in RESEND_IGNORED_FIELDS:
+            doc.pop(name, None)
+        return doc
+
+    return essence(from_dynamo(stored.get("report"))) == essence(report.to_dict())
 
 
 def get_disruption(table: Any, report_id: str) -> dict[str, Any] | None:
