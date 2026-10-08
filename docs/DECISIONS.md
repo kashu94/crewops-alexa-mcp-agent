@@ -62,6 +62,11 @@ AgentCore Runtime hosts MCP servers over Streamable HTTP, validates Cognito toke
 only for active compute. Memory and Observability come with it. Lambda runs the short,
 event-triggered jobs: the SQS worker, the roster loader and the disruption analysis.
 
+The MCP server is a FastMCP server (the official MCP Python SDK) in stateless streamable
+HTTP mode, deployed as an AgentCore code package rather than a container, so no Docker is
+needed. AgentCore's JWT authorizer admits only the team pool's access tokens; the server
+verifies the token again and acts as that user.
+
 The advisor's tool loop is a short Converse loop in this repository rather than an agent
 framework. Every tool call it makes goes through the caller's role checks, the round limit
 and a time check before each model call, and its answer through the verifier.

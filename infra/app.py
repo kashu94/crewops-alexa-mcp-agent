@@ -8,6 +8,7 @@ profile named in ``.env`` (``AWS_PROFILE``); access keys stay in ``~/.aws``, nev
 from __future__ import annotations
 
 import os
+import sys
 
 from aws_cdk import App, Environment, Tags
 from crewops_infra.analysis_stack import AnalysisStack
@@ -15,6 +16,7 @@ from crewops_infra.auth_stack import AuthStack
 from crewops_infra.data_stack import DataStack
 from crewops_infra.guardrail_stack import GuardrailStack
 from crewops_infra.ingestion_stack import IngestionStack
+from crewops_infra.mcp_stack import PACKAGE, McpStack
 from crewops_infra.search_stack import SearchStack
 
 from crewops.config import Settings, load_env_file
@@ -27,7 +29,7 @@ def main() -> None:
     env = Environment(account=os.environ.get("CDK_DEFAULT_ACCOUNT"), region=settings.aws_region)
 
     data = DataStack(app, f"CrewOps-{settings.stage}-Data", settings=settings, env=env)
-    IngestionStack(
+    ingestion = IngestionStack(
         app,
         f"CrewOps-{settings.stage}-Ingestion",
         settings=settings,
@@ -42,8 +44,27 @@ def main() -> None:
         env=env,
     )
     SearchStack(app, f"CrewOps-{settings.stage}-Search", settings=settings, env=env)
-    GuardrailStack(app, f"CrewOps-{settings.stage}-Guardrail", settings=settings, env=env)
-    AuthStack(app, f"CrewOps-{settings.stage}-Auth", settings=settings, env=env)
+    guardrail = GuardrailStack(
+        app, f"CrewOps-{settings.stage}-Guardrail", settings=settings, env=env
+    )
+    auth = AuthStack(app, f"CrewOps-{settings.stage}-Auth", settings=settings, env=env)
+    if (PACKAGE / "main.py").exists():
+        McpStack(
+            app,
+            f"CrewOps-{settings.stage}-Mcp",
+            settings=settings,
+            table=data.table,
+            queue=ingestion.queue,
+            auth=auth,
+            guardrail=guardrail,
+            env=env,
+        )
+    else:
+        print(
+            "Note: the MCP stack is left out until its package is built "
+            "(uv run python -m crewops.mcp.package).",
+            file=sys.stderr,
+        )
 
     Tags.of(app).add("project", "crewops")
     Tags.of(app).add("stage", settings.stage)

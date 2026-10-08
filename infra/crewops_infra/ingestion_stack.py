@@ -6,9 +6,10 @@ are no errors. Either way it leaves a report under ``results/``.
 
 Real time: reports are sent to an SQS queue. A worker Lambda checks the role the sender
 states and every id the report names, then stores it once as a REPORTED disruption. The
-sender is trusted to have set its identity from a verified login; when the MCP server lands,
-a queue policy will accept messages from it alone. Messages that fail
-unexpectedly are retried and, after three attempts, moved to a dead-letter queue.
+sender is trusted to have set its identity from a verified login, so the queue's policy
+refuses messages from anyone but the MCP server (which sets it from the verified token) and
+the operator ARNs listed in ``CREWOPS_QUEUE_SENDERS``. Messages that fail unexpectedly are
+retried and, after three attempts, moved to a dead-letter queue.
 
 The function's code is the ``crewops`` package itself. Its only dependency, boto3, ships with
 the Lambda Python runtime, so no build step or Docker is needed.
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_dynamodb as dynamodb
+from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_lambda_event_sources as sources
 from aws_cdk import aws_logs as logs
@@ -124,6 +126,22 @@ class IngestionStack(Stack):
             dead_letter_queue=sqs.DeadLetterQueue(
                 queue=self.dead_letters, max_receive_count=MAX_RECEIVES
             ),
+        )
+        # One policy document per queue, so this rule lives here, beside enforce_ssl's. The
+        # server's role is named, not referenced, so the queue does not depend on the MCP stack.
+        senders = [
+            f"arn:{self.partition}:iam::{self.account}:role/{settings.mcp_runtime_role}",
+            *settings.queue_senders,
+        ]
+        self.queue.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="OnlyTheMcpServerSendsReports",
+                effect=iam.Effect.DENY,
+                principals=[iam.AnyPrincipal()],
+                actions=["sqs:SendMessage"],
+                resources=[self.queue.queue_arn],
+                conditions={"ArnNotEquals": {"aws:PrincipalArn": senders}},
+            )
         )
         self.worker = lambda_.Function(
             self,

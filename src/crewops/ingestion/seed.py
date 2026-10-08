@@ -11,6 +11,7 @@ are oddities the engine is built to tolerate, reported so they are never a surpr
 from __future__ import annotations
 
 import json
+import os
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -53,7 +54,10 @@ SEED_FILES = (
 
 
 def default_seed_dir() -> Path:
-    """``data/seed`` at the repository root."""
+    """``data/seed`` at the repository root, or under ``CREWOPS_DATA_DIR`` when set (the
+    deployed MCP server, whose package keeps the data beside the code)."""
+    if root := os.environ.get("CREWOPS_DATA_DIR"):
+        return Path(root) / "seed"
     return Path(__file__).resolve().parents[3] / "data" / "seed"
 
 

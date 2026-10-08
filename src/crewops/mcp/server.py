@@ -1,0 +1,213 @@
+"""The MCP server, as AgentCore Runtime hosts it: stateless streamable HTTP on
+``0.0.0.0:8000/mcp``.
+
+Every tool call is made as the signed-in user. AgentCore's authorizer admits only access
+tokens from the team's Cognito pool and app client and passes the ``Authorization`` header
+through; the server verifies that token again and builds the caller from the token's groups
+and the user's profile. A request without a valid token does nothing.
+
+Run locally (``python -m crewops.mcp.server``) it serves the same tools on the same port,
+on 127.0.0.1 only, still requiring tokens from the configured pool.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+import anyio
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
+from mcp.types import ToolAnnotations
+
+from crewops.auth.identity import AuthError, caller_from_claims
+from crewops.auth.tokens import TokenVerifier, bearer
+from crewops.mcp.api import ApiError, CrewOpsApi
+from crewops.tools import Caller
+
+log = logging.getLogger(__name__)
+
+INSTRUCTIONS = """\
+CrewOps answers airline crew-control questions from the live roster, with every figure
+checked against the legality engine. Use `ask` for questions in plain words ("who covers
+C-1042 tomorrow?"). Use `my_queue` for what is waiting for the signed-in person. Plans are
+submitted by a controller and approved by a different person; approving commits the roster.
+The tools available depend on the signed-in user's role."""
+
+READ = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
+COMMIT = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)
+
+
+class Gate:
+    """Turns a request into a ``Caller``, or refuses it."""
+
+    def __init__(self, verifier: TokenVerifier, profiles: Any) -> None:
+        self.verifier = verifier
+        self.profiles = profiles
+
+    def caller(self, ctx: Context) -> Caller:
+        request = getattr(ctx.request_context, "request", None)
+        header = request.headers.get("authorization") if request is not None else None
+        try:
+            claims = self.verifier.claims(bearer(header))
+            return caller_from_claims(
+                claims,
+                self.profiles,
+                issuer=self.verifier.issuer,
+                client_id=self.verifier.client_id,
+            )
+        except AuthError as exc:
+            raise ToolError(f"UNAUTHORIZED: {exc}") from None
+
+
+def build_server(
+    api: CrewOpsApi, gate: Gate, *, host: str = "127.0.0.1", port: int = 8000
+) -> FastMCP:
+    mcp = FastMCP(
+        "CrewOps",
+        instructions=INSTRUCTIONS,
+        host=host,
+        port=port,
+        stateless_http=True,
+    )
+
+    async def run(ctx: Context, call: Any) -> Any:
+        """Sign-in check and the call, on a worker thread: both block (key fetch, DynamoDB,
+        Bedrock), and the event loop must stay free for other requests and health pings."""
+
+        def work() -> Any:
+            try:
+                return call(gate.caller(ctx))
+            except ToolError:
+                raise
+            except ApiError as exc:
+                raise ToolError(f"{exc.code}: {exc.message}") from None
+            except Exception:
+                log.exception("MCP tool call failed")
+                raise ToolError("INTERNAL: something went wrong; it has been logged") from None
+
+        return await anyio.to_thread.run_sync(work)
+
+    @mcp.tool(annotations=READ)
+    async def ask(question: str, ctx: Context) -> dict:
+        """Ask a crew-control question in plain words. The answer is built from the live
+        roster and the legality engine, and every fact in it is checked before it is given.
+        `awaiting` says when the answer is a question back (which id, which date)."""
+        return await run(ctx, lambda c: api.ask(c, question))
+
+    @mcp.tool(annotations=READ)
+    async def my_queue(ctx: Context) -> list:
+        """What is waiting for the signed-in person: plans to decide (approver), disruptions
+        on their desk ready for a plan, and their plans sent back (controller)."""
+        return await run(ctx, lambda c: api.queue(c))
+
+    @mcp.tool(annotations=READ)
+    async def show_disruption(disruption_id: str, ctx: Context) -> dict:
+        """A disruption's status, analysis summary, plans and audit trail."""
+        return await run(ctx, lambda c: api.show(c, disruption_id))
+
+    @mcp.tool(annotations=WRITE)
+    async def report_disruption(
+        report_type: str, details: dict, ctx: Context, narrative: str = ""
+    ) -> dict:
+        """Report a disruption. report_type is one of crew_unavailable, flight_delay,
+        aircraft_technical, station_disruption, gate_change, certification_lapse. details
+        depend on the type, e.g. crew_unavailable: {"crew_id": "C-1042", "from_date":
+        "2026-09-15", "to_date": "2026-09-16", "reason": "sick"}. Crew may report only
+        their own unavailability. It is analysed automatically."""
+        return await run(ctx, lambda c: api.report(c, report_type, details, narrative))
+
+    @mcp.tool(annotations=WRITE)
+    async def submit_plan(
+        disruption_id: str,
+        ctx: Context,
+        choices: dict | None = None,
+        note: str = "",
+        accept_uncovered: bool = False,
+    ) -> dict:
+        """Controller: submit cover for a disruption on your desk. By default the analysis's
+        recommendation; choices overrides a seat, e.g. {"P-2291/Captain": "C-1526"}. A
+        different approver must approve it."""
+        return await run(
+            ctx, lambda c: api.submit(c, disruption_id, choices, note, accept_uncovered)
+        )
+
+    @mcp.tool(annotations=COMMIT)
+    async def approve_plan(disruption_id: str, plan_id: str, ctx: Context) -> dict:
+        """Approver: approve a plan you did not submit. Legality is checked again, and the
+        roster is changed in one step; a plan whose roster changed meanwhile comes back
+        STALE instead."""
+        return await run(ctx, lambda c: api.approve(c, disruption_id, plan_id))
+
+    @mcp.tool(annotations=WRITE)
+    async def reject_plan(disruption_id: str, plan_id: str, reason: str, ctx: Context) -> dict:
+        """Approver: send a plan back to its controller, saying why."""
+        return await run(ctx, lambda c: api.reject(c, disruption_id, plan_id, reason))
+
+    @mcp.tool(annotations=WRITE)
+    async def withdraw_plan(
+        disruption_id: str, plan_id: str, ctx: Context, reason: str = ""
+    ) -> dict:
+        """Controller: withdraw a plan you submitted that is still awaiting a decision."""
+        return await run(ctx, lambda c: api.withdraw(c, disruption_id, plan_id, reason))
+
+    @mcp.tool(annotations=WRITE)
+    async def close_disruption(disruption_id: str, reason: str, ctx: Context) -> dict:
+        """Controller: close a disruption that has no coverable seat, saying what was done
+        instead (for example, the flights were cancelled)."""
+        return await run(ctx, lambda c: api.close(c, disruption_id, reason))
+
+    @mcp.tool(annotations=READ)
+    async def list_crew_tools(ctx: Context) -> list:
+        """The deterministic crew-operations tools the signed-in person may call directly
+        with `crew_tool`, with their input schemas."""
+        return await run(ctx, lambda c: api.list_tools(c))
+
+    @mcp.tool(annotations=READ)
+    async def crew_tool(name: str, ctx: Context, arguments: dict | None = None) -> dict:
+        """Call one deterministic tool by name (see `list_crew_tools`) with JSON arguments,
+        e.g. name="find_options", arguments={"crew_id": "C-1042"}. Structured data, no
+        model involved."""
+        return await run(ctx, lambda c: api.run_tool(c, name, arguments))
+
+    return mcp
+
+
+def from_environment(host: str = "127.0.0.1") -> FastMCP:
+    """The deployed server: settings from the environment the stack sets."""
+    import boto3
+
+    from crewops.agent.service import build
+    from crewops.config import Settings
+    from crewops.store.ops_store import table_for
+    from crewops.store.users import get_profile
+
+    settings = Settings.from_env()
+    if not (settings.issuer and settings.user_pool_client_id and settings.ingest_queue_url):
+        raise SystemExit(
+            "CREWOPS_USER_POOL_ID, CREWOPS_USER_POOL_CLIENT_ID and CREWOPS_INGEST_QUEUE_URL "
+            "must be set"
+        )
+    table = table_for(settings)
+    sqs = boto3.Session(region_name=settings.aws_region).client("sqs")
+
+    def send(report: dict) -> None:
+        sqs.send_message(QueueUrl=settings.ingest_queue_url, MessageBody=json.dumps(report))
+
+    api = CrewOpsApi(table, lambda: build(settings, table), send)
+    gate = Gate(
+        TokenVerifier(settings.issuer, settings.user_pool_client_id),
+        lambda username: get_profile(table, username),
+    )
+    return build_server(api, gate, host=host)
+
+
+def main(host: str = "127.0.0.1") -> None:
+    logging.basicConfig(level=logging.INFO)
+    from_environment(host).run(transport="streamable-http")
+
+
+if __name__ == "__main__":
+    main()

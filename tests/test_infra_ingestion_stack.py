@@ -1,5 +1,7 @@
 """Synthesize the ingestion stack locally (no AWS access) and check what it would create."""
 
+import json
+
 import pytest
 
 pytest.importorskip("aws_cdk")
@@ -14,8 +16,11 @@ from crewops.config import Settings  # noqa: E402
 ENV = Environment(account="111111111111", region="ap-southeast-2")
 
 
-def synth(stage: str = "dev") -> Template:
-    settings = Settings.from_env({"CREWOPS_STAGE": stage})
+OPERATOR = "arn:aws:iam::111111111111:user/crewops-deployer"
+
+
+def synth(stage: str = "dev", senders: str = "") -> Template:
+    settings = Settings.from_env({"CREWOPS_STAGE": stage, "CREWOPS_QUEUE_SENDERS": senders})
     app = App()
     data = DataStack(app, "Data", settings=settings, env=ENV)
     ingestion = IngestionStack(app, "Ingestion", settings=settings, table=data.table, env=ENV)
@@ -116,3 +121,33 @@ def test_report_worker_gets_only_the_table_actions_it_uses():
     assert dynamo == {"dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem"}
     resources = str(worker["Properties"]["PolicyDocument"])
     assert "/index/*" in resources  # the status index query is allowed too
+
+
+def test_one_queue_policy_keeps_tls_and_admits_only_the_server_and_operators():
+    template = synth(senders=OPERATOR)
+    policies = [
+        p
+        for p in template.find_resources("AWS::SQS::QueuePolicy").values()
+        if "IngestQueue" in json.dumps(p["Properties"]["Queues"])
+        and "DeadLetters" not in json.dumps(p["Properties"]["Queues"])
+    ]
+    (policy,) = policies
+    by_sid = {s.get("Sid"): s for s in policy["Properties"]["PolicyDocument"]["Statement"]}
+    tls = [s for s in by_sid.values() if "aws:SecureTransport" in json.dumps(s)]
+    assert tls and tls[0]["Effect"] == "Deny"
+    deny = by_sid["OnlyTheMcpServerSendsReports"]
+    assert deny["Effect"] == "Deny" and deny["Action"] == "sqs:SendMessage"
+    allowed = json.dumps(deny["Condition"]["ArnNotEquals"]["aws:PrincipalArn"])
+    assert ":role/crewops-dev-mcp-runtime" in allowed and OPERATOR in allowed
+
+
+def test_without_operators_only_the_server_may_send():
+    policies = synth().find_resources("AWS::SQS::QueuePolicy").values()
+    (deny,) = [
+        s
+        for p in policies
+        for s in p["Properties"]["PolicyDocument"]["Statement"]
+        if s.get("Sid") == "OnlyTheMcpServerSendsReports"
+    ]
+    allowed = json.dumps(deny["Condition"]["ArnNotEquals"]["aws:PrincipalArn"])
+    assert ":role/crewops-dev-mcp-runtime" in allowed and ":user/" not in allowed

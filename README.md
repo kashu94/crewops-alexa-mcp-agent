@@ -103,14 +103,16 @@ src/crewops/
   store/                DynamoDB key layout, item conversion, reads and writes
   tools/                The tools agents call: schemas, role checks, dispatch
   agent/                Question pipeline: router, planner, verifier, templates, Nova roles
-  auth/                 Sign-in: the team, token claims to caller, account sync
+  auth/                 Sign-in: the team, token checks, claims to caller, account sync
+  plans/                Plans and approvals, with the four-eyes rules
+  mcp/                  The MCP server for AgentCore, its package builder and a client
 infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
 ```
 
-More folders arrive as the build progresses: the MCP server inside the package, then the
-web app and the Alexa skill at the top level.
+More folders arrive as the build progresses: the web app and the Alexa skill at the top
+level.
 
 ## Getting started
 
@@ -167,6 +169,7 @@ environment; a value set in the shell wins over the file. Only `AWS_PROFILE` is 
 | `CREWOPS_MAX_TOOL_ITERATIONS` | `8` | Cap on the advisor's tool loop |
 | `CREWOPS_RESPONSE_BUDGET_SECONDS` | `6.0` | Time budget for a spoken answer |
 | `CREWOPS_ROUTER_SEMANTIC_FLOOR` | `0.45` | Least similarity for the router to borrow an example question's intent; set from `crewops.agent.calibrate` |
+| `CREWOPS_QUEUE_SENDERS` | none | IAM ARNs, besides the MCP server, allowed to send reports to the queue (comma-separated) |
 
 A minimal `.env`:
 
@@ -206,9 +209,11 @@ operation as it was before either of them.
 
 Reports go to the SQS ingest queue, where a worker Lambda validates them, checks the role
 the sender states and every id they name, and stores each one once as a REPORTED
-disruption. In the finished system only the MCP server sends reports, setting the sender
-from the user's verified login, and the queue accepts messages from it alone. Until then, a
-development command states the sender directly:
+disruption. Only the MCP server may send reports (it sets the sender from the user's
+verified login): the queue's policy refuses everyone else, unless their IAM ARN is listed in
+`CREWOPS_QUEUE_SENDERS` when the ingestion stack is deployed. To keep using this development
+command, which states the sender directly, list your own IAM user's ARN there; do the same
+before moving messages back from the dead-letter queue, since that sends them again as you:
 
 ```bash
 uv run python -m crewops.ingestion.send_report crew_unavailable \
@@ -280,6 +285,38 @@ uv run python -m crewops.plans.desk --as rohit close r-demo-0002 --reason "DX589
 
 This is an operator's tool, acting as the named team member with your AWS credentials; people
 reach the same rules through the assistant, signed in.
+
+### The MCP server
+
+The assistant is served over MCP from AgentCore Runtime, signed in with the team's accounts.
+AgentCore runs code packages on Linux ARM64 and does not install dependencies, so the
+package is built first (it downloads ARM64 wheels; no Docker needed), then deployed:
+
+```bash
+uv run python -m crewops.mcp.package            # builds build/mcp_server
+scripts/cdk.sh deploy CrewOps-dev-Ingestion CrewOps-dev-Mcp
+```
+
+Until the package is built, the CDK app leaves the MCP stack out and says so, so the other
+stacks deploy from a fresh clone. The CDK zips the package on the machine that deploys it.
+If the server fails to start after a deploy from Windows (AgentCore expects Linux file
+permissions, which a Windows zip may not carry), build and deploy this stack from Linux,
+macOS or WSL with the repository on the Linux filesystem.
+
+Then call it as any team member, the way an MCP host would (it asks for the password):
+
+```bash
+uv run python -m crewops.mcp.client --as rohit tools
+uv run python -m crewops.mcp.client --as rohit ask "Who covers C-1042 on 15 Sep?"
+uv run python -m crewops.mcp.client --as rohit my_queue
+uv run python -m crewops.mcp.client --as crew1042 report_disruption \
+  '{"report_type": "crew_unavailable", "details": {"crew_id": "C-1042", "from_date": "2026-09-18", "reason": "sick"}}'
+```
+
+Its tools: `ask` (the full verified answer pipeline), `my_queue`, `show_disruption`,
+`report_disruption`, the plan actions (`submit_plan`, `approve_plan`, `reject_plan`,
+`withdraw_plan`, `close_disruption`), and `list_crew_tools` / `crew_tool` for the
+deterministic tools directly. What each user may do depends on their role.
 
 ### Asking a question
 

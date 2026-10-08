@@ -221,7 +221,7 @@ inflated by questions matching themselves.
 
 ## Tools
 
-The advisor and, later, the MCP server reach the operation through 17 tools in
+The advisor and the MCP server reach the operation through 17 tools in
 `crewops.tools`. Each answers from the legality engine and the roster; none calls a model.
 
 | Tool | Answers |
@@ -251,6 +251,30 @@ Three rules hold for every tool:
   caller's verified roles decide what may run. Crew may ask only about themselves. Reporters
   see gates, rules and desks. Admins see desks, issue counts and rules, not crew records.
   The model is shown only the tools its caller may use.
+
+## MCP server
+
+Everything a person does goes through one MCP server on AgentCore Runtime (stateless
+streamable HTTP, a code package on Linux ARM64, billed per second while a session runs).
+
+- **Front door.** AgentCore's JWT authorizer admits only access tokens from the team's
+  Cognito pool and web client, and passes the `Authorization` header through.
+- **Second check.** The server verifies the token's signature and claims again, then builds
+  the caller from the token's groups and the user's profile. A tool call without a valid
+  token does nothing.
+- **Tools.** `ask` runs the full answer pipeline; `my_queue`, `show_disruption` and the
+  plan actions call `crewops.plans`; `report_disruption` checks a report and queues it with
+  the sender taken from the token; `list_crew_tools` and `crew_tool` give the deterministic
+  tools directly. Every one applies the caller's role.
+- **Only the server reports.** The ingest queue's policy (set in the ingestion stack, beside
+  its TLS rule) refuses `SendMessage` from anyone but the server's fixed-name role and
+  operator ARNs listed in `CREWOPS_QUEUE_SENDERS`. So a report the server sends names the
+  signed-in user; only a listed operator can state a sender directly.
+- **Errors.** A failure the server did not expect is logged and reaches the caller as
+  `INTERNAL`, with no detail. A disruption someone may not read is reported as not found,
+  the same as a missing one.
+- **Freshness.** The server keeps one loaded operation for up to a minute and reloads it
+  after any plan action it handles; plan actions always read the live roster.
 
 ## Flows
 
@@ -340,7 +364,7 @@ Known limits: a committed plan does not move flight times, so a cover chosen for
 day is afterwards judged against the published schedule; and a roster upload that replaces
 a pairing can overwrite a committed change (uploads are an admin action).
 
-Rules enforced in code (`crewops.plans`; the MCP server will call it with the signed-in
+Rules enforced in code (`crewops.plans`, which the MCP server calls with the signed-in
 caller):
 
 - **Four eyes.** The approver must be a different person from the submitter.

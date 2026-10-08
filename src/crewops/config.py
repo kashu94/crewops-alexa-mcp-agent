@@ -141,6 +141,15 @@ def _guardrail_version(env: Mapping[str, str]) -> str:
     return version or ""
 
 
+def _senders(env: Mapping[str, str]) -> tuple[str, ...]:
+    raw = _get(env, "CREWOPS_QUEUE_SENDERS") or ""
+    senders = tuple(s.strip() for s in raw.split(",") if s.strip())
+    for arn in senders:
+        if not re.match(r"^arn:aws[a-z-]*:iam::\d{12}:(user|role)/[\w+=,.@/-]+$", arn):
+            raise ConfigError(f"CREWOPS_QUEUE_SENDERS: {arn!r} is not an IAM user or role ARN")
+    return senders
+
+
 def _fraction(env: Mapping[str, str], key: str, default: float) -> float:
     value = _float(env, key, default)
     if value >= 1:
@@ -168,6 +177,16 @@ class Settings:
     """Least cosine similarity for the router to borrow the intent of the closest example
     question. Below it, the question goes to the triage model instead. Set from measured
     paraphrases with ``python -m crewops.agent.calibrate``."""
+
+    user_pool_id: str | None
+    """The Cognito pool and app client whose access tokens the MCP server accepts. Set on
+    the deployed server by the stack; read from the auth stack by the local commands."""
+    user_pool_client_id: str | None
+    ingest_queue_url: str | None
+    """Where the MCP server sends reports."""
+    queue_senders: tuple[str, ...]
+    """IAM principal ARNs, besides the MCP server, allowed to send reports straight to the
+    queue (an operator testing with ``send_report``). Empty: only the server."""
     response_budget_seconds: float
     """Time the voice path has to answer. Alexa allows 8 s; the rest is margin."""
 
@@ -214,6 +233,24 @@ class Settings:
         return f"{self.prefix}-alerts"
 
     @property
+    def issuer(self) -> str | None:
+        """The ``iss`` claim of the pool's tokens."""
+        if not self.user_pool_id:
+            return None
+        return f"https://cognito-idp.{self.aws_region}.amazonaws.com/{self.user_pool_id}"
+
+    @property
+    def mcp_runtime_name(self) -> str:
+        """AgentCore runtime names allow letters, digits and underscores only."""
+        return f"crewops_{self.stage.replace('-', '_')}_mcp"
+
+    @property
+    def mcp_runtime_role(self) -> str:
+        """The MCP server's execution role. Fixed, so the ingest queue's policy can name it
+        without depending on the MCP stack."""
+        return f"{self.prefix}-mcp-runtime"
+
+    @property
     def user_pool_name(self) -> str:
         """Cognito user pool: who can sign in, and their roles as groups."""
         return f"{self.prefix}-users"
@@ -256,6 +293,10 @@ class Settings:
             guardrail_version=_guardrail_version(env),
             max_tool_iterations=_int(env, "CREWOPS_MAX_TOOL_ITERATIONS", 8),
             router_semantic_floor=_fraction(env, "CREWOPS_ROUTER_SEMANTIC_FLOOR", 0.45),
+            user_pool_id=_get(env, "CREWOPS_USER_POOL_ID"),
+            user_pool_client_id=_get(env, "CREWOPS_USER_POOL_CLIENT_ID"),
+            ingest_queue_url=_get(env, "CREWOPS_INGEST_QUEUE_URL"),
+            queue_senders=_senders(env),
             response_budget_seconds=_float(env, "CREWOPS_RESPONSE_BUDGET_SECONDS", 6.0),
         )
 

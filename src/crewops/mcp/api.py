@@ -1,0 +1,217 @@
+"""What the MCP server can do for a signed-in caller, independent of the MCP plumbing.
+
+Every operation takes the ``Caller`` made from the request's verified token, never anything
+the user typed about themselves. Questions go through the full answer pipeline (rules,
+tools, verifier, models); plans through ``crewops.plans`` with its four-eyes rules; reports
+onto the ingest queue with the sender's identity set here; and the deterministic tools
+through the same role-checked dispatch the advisor uses.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+import uuid
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
+from typing import Any
+
+from crewops.domain import DataError, Report, Role, authorize
+from crewops.plans.service import PlanError, Plans
+from crewops.plans.service import summary as plan_summary
+from crewops.store import plans as plan_store
+from crewops.store.items import from_dynamo
+from crewops.store.reports import get_disruption
+from crewops.tools import TOOL_SCHEMAS, Caller, allowed_tools, dispatch
+from crewops.tools.errors import INTERNAL
+
+CACHE_SECONDS = 60.0
+"""How long one loaded operation answers questions before it is read again. Plan actions
+on this server reload it at once; changes made elsewhere show within this time."""
+READERS = frozenset({Role.CONTROLLER, Role.APPROVER, Role.AUDITOR, Role.ADMIN, Role.SUPER_ADMIN})
+
+
+class ApiError(Exception):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
+        self.message = message
+
+
+class CrewOpsApi:
+    def __init__(
+        self,
+        table: Any,
+        live_factory: Callable[[], Any],
+        send: Callable[[dict[str, Any]], None],
+        *,
+        plans: Plans | None = None,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        cache_seconds: float = CACHE_SECONDS,
+    ) -> None:
+        """``live_factory`` builds the answer pipeline over the current operation
+        (``agent.service.build``); ``send`` puts a report on the ingest queue."""
+        self.table = table
+        self.live_factory = live_factory
+        self.send = send
+        self.plans = plans or Plans(table)
+        self.clock = clock
+        self.cache_seconds = cache_seconds
+        self._live: Any = None
+        self._loaded = 0.0
+        self._loading = threading.Lock()
+        # The pipeline keeps per-question state (model usage, the advisor's last run), so
+        # one question at a time uses it; tool calls run on other threads meanwhile.
+        self._asking = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Questions and tools
+    # ------------------------------------------------------------------
+
+    def live(self) -> Any:
+        with self._loading:
+            if self._live is None or time.monotonic() - self._loaded > self.cache_seconds:
+                self._live = self.live_factory()
+                self._loaded = time.monotonic()
+            return self._live
+
+    def invalidate(self) -> None:
+        with self._loading:
+            self._live = None
+
+    def ask(self, caller: Caller, question: str) -> dict[str, Any]:
+        live = self.live()
+        with self._asking:
+            answer, usage = live.ask(question, caller)
+        record = answer.to_dict()
+        return {
+            "answer": record["text"],
+            "verified": record["verified"],
+            "source": record["source"],
+            "awaiting": record["awaiting"],
+            "intent": (record["route"] or {}).get("intent"),
+            "notes": record["notes"],
+            "model_calls": usage.get("calls", 0),
+        }
+
+    def list_tools(self, caller: Caller) -> list[dict[str, Any]]:
+        allowed = allowed_tools(caller)
+        return [
+            {"name": t["name"], "description": t["description"], "input_schema": t["input_schema"]}
+            for t in TOOL_SCHEMAS
+            if t["name"] in allowed
+        ]
+
+    def run_tool(self, caller: Caller, name: str, arguments: Mapping[str, Any] | None) -> dict:
+        entry = dispatch(self.live().pipeline.tools, caller, name, dict(arguments or {}))
+        out = entry.to_dict()
+        if entry.error_code == INTERNAL:  # logged by dispatch; the caller sees no internals
+            out["error"] = "the tool failed unexpectedly; it has been logged"
+        return out
+
+    # ------------------------------------------------------------------
+    # Reports
+    # ------------------------------------------------------------------
+
+    def report(
+        self,
+        caller: Caller,
+        report_type: str,
+        details: Mapping[str, Any],
+        narrative: str = "",
+    ) -> dict[str, Any]:
+        """Check a report now (so the reporter hears about a mistake at once), then queue it.
+        Who sent it comes from the token, never from the request."""
+        doc = {
+            "report_id": f"r-{uuid.uuid4().hex[:12]}",
+            "type": report_type,
+            "reported_by": {
+                "user_id": caller.user_id,
+                "roles": sorted(r.value for r in caller.roles),
+                "crew_id": caller.crew_id,
+            },
+            "reported_utc": self.clock().astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "details": dict(details),
+            "narrative": narrative,
+        }
+        try:
+            report = Report.from_dict(doc)
+        except DataError as exc:
+            raise ApiError("INVALID", str(exc)) from None
+        if reason := authorize(report):
+            raise ApiError("FORBIDDEN", reason)
+        self.send(report.to_dict())
+        return {
+            "report_id": report.report_id,
+            "status": "queued",
+            "note": "It is checked against the roster and analysed within a minute.",
+        }
+
+    # ------------------------------------------------------------------
+    # Plans
+    # ------------------------------------------------------------------
+
+    def queue(self, caller: Caller) -> list[dict[str, Any]]:
+        return self.plans.queue(caller)
+
+    def show(self, caller: Caller, disruption_id: str) -> dict[str, Any]:
+        item = get_disruption(self.table, disruption_id)
+        report = from_dynamo((item or {}).get("report") or {})
+        own = (report.get("reported_by") or {}).get("user_id") == caller.user_id
+        # Someone who may not read it is told the same as when it does not exist, so ids
+        # cannot be probed.
+        if item is None or not (caller.roles & READERS or own):
+            raise ApiError("NOT_FOUND", f"no disruption {disruption_id} that you may read")
+        analysis = from_dynamo(item.get("analysis") or {})
+        return {
+            "disruption_id": disruption_id,
+            "status": item["status"],
+            "summary": analysis.get("summary", ""),
+            "plans": [
+                {"status": p["status"], **plan_summary(p)}
+                for p in plan_store.plans_for(self.table, disruption_id)
+            ],
+            "audit": [
+                {k: e.get(k) for k in ("at", "action", "actor", "plan_id", "reason") if e.get(k)}
+                for e in plan_store.audit_trail(self.table, disruption_id)
+            ],
+        }
+
+    def _plan_action(self, action: Callable[..., Any], *args: Any) -> dict[str, Any]:
+        try:
+            out = action(*args)
+        except PlanError as exc:
+            raise ApiError(exc.code, exc.message) from None
+        self.invalidate()  # the roster may have changed: answer from the new one
+        result = {"status": out.status}
+        if "plan_id" in out.plan:
+            result |= plan_summary(out.plan)
+        if out.warnings:
+            result["contention"] = list(out.warnings)
+        if out.reasons:
+            result["reasons"] = list(out.reasons)
+        return result
+
+    def submit(
+        self,
+        caller: Caller,
+        disruption_id: str,
+        choices: Mapping[str, str] | None = None,
+        note: str = "",
+        accept_uncovered: bool = False,
+    ) -> dict[str, Any]:
+        return self._plan_action(
+            self.plans.submit, caller, disruption_id, dict(choices or {}), note, accept_uncovered
+        )
+
+    def approve(self, caller: Caller, disruption_id: str, plan_id: str) -> dict[str, Any]:
+        return self._plan_action(self.plans.approve, caller, disruption_id, plan_id)
+
+    def reject(self, caller: Caller, disruption_id: str, plan_id: str, reason: str) -> dict:
+        return self._plan_action(self.plans.reject, caller, disruption_id, plan_id, reason)
+
+    def withdraw(self, caller: Caller, disruption_id: str, plan_id: str, reason: str = "") -> dict:
+        return self._plan_action(self.plans.withdraw, caller, disruption_id, plan_id, reason)
+
+    def close(self, caller: Caller, disruption_id: str, reason: str) -> dict[str, Any]:
+        return self._plan_action(self.plans.close, caller, disruption_id, reason)

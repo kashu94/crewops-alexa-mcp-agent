@@ -19,9 +19,13 @@ infra = [
   "aws-cdk-lib>=2.272,<3",
   "constructs>=10,<11",
 ]
+server = [
+  "mcp>=1.20,<2",
+  "pyjwt[crypto]>=2.10",
+]
 
 [tool.uv]
-default-groups = ["dev", "infra"]
+default-groups = ["dev", "infra", "server"]
 
 [build-system]
 requires = ["hatchling"]
