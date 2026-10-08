@@ -341,6 +341,21 @@ def test_client_shows_results_as_json():
     assert _parsed(['{"a": 1}', '{"b": 2}']) == [{"a": 1}, {"b": 2}]
     assert _parsed(["plain words"]) == "plain words"
     assert _parsed([]) == []
+    assert _parsed(['{"a": 1}'], as_list=True) == [{"a": 1}]
+
+
+def test_the_client_knows_which_tools_return_lists(api):
+    import inspect
+
+    from crewops.mcp.client import LIST_TOOLS
+
+    server = build_server(api, Gate(VERIFIER, lambda u: None))
+    returns_list = {
+        t.name
+        for t in server._tool_manager.list_tools()
+        if inspect.signature(t.fn).return_annotation in (list, "list")
+    }
+    assert returns_list == LIST_TOOLS
 
 
 def test_packaged_entry_point_finds_its_data():

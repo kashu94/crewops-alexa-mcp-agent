@@ -9,7 +9,8 @@ Only two things carry over, both deterministic, and both noted on the answer:
 * **He or she.** A question that refers to one person without naming one, right after a
   turn about exactly one crew member, is about that crew member, unless it speaks of the
   asker ("I", "my"), of several people ("reserves", "crew") or of a plan's decision ("has
-  she approved it?"), where the pronoun may mean someone else. "They" is never carried: it
+  she approved it?"), or names a role beside the pronoun ("her captain"), where the pronoun
+  may mean someone else. "They" is never carried: it
   is as often plural as singular. "That pairing" and "that flight" work the same way.
 
 Nothing else is remembered or inferred. The carried ids go through the same role checks as
@@ -35,6 +36,12 @@ NOT_THE_LAST_PERSON_RE = re.compile(
     re.I,
 )
 """Questions where "he" or "she" may well be someone other than the last crew member."""
+POSSESSIVE_ROLE_RE = re.compile(
+    r"\b(his|her)\s+(captain|first officer|co-?pilot|purser|senior cabin crew|cabin crew|"
+    r"crew|colleague|replacement|cover|reserve)\b",
+    re.I,
+)
+""""Her captain" is someone else: the person named by the role, not the one asked about."""
 PAIRING_RE = re.compile(r"\b(that|this|the same) (pairing|trip)\b", re.I)
 FLIGHT_RE = re.compile(r"\b(that|this|the same) flight\b", re.I)
 
@@ -144,6 +151,7 @@ def carry_ids(question: str, entities: Any, previous: Turn | None) -> list[str]:
         and not entities.names
         and PERSON_RE.search(question)
         and not NOT_THE_LAST_PERSON_RE.search(question)
+        and not POSSESSIVE_ROLE_RE.search(question)
     ):
         entities.crew_ids.append(previous.crew_ids[0])
         notes.append(f"read as {previous.crew_ids[0]}, from your previous question")

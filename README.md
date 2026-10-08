@@ -94,7 +94,7 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why each piece was ch
 
 ```
 data/seed/              Sample operating week (JSON)
-data/eval/              Gold example questions, paraphrases and reference scenarios
+data/eval/              Gold questions, paraphrases, reference scenarios and the held-out set
 data/team/              The demo team: usernames and roles, nothing private
 src/crewops/
   config.py             Runtime settings
@@ -376,12 +376,45 @@ CREWOPS_GUARDRAIL_VERSION=<GuardrailVersionNumber output>
 
 Set the floor that `calibrate` recommends as `CREWOPS_ROUTER_SEMANTIC_FLOOR` in `.env`.
 
+### Evaluation
+
+`data/eval/heldout.json` was written after the router rules were final and is never used to
+change them. It rewords each of the 38 gold questions (same ids and dates, so the two
+answers can be compared) and adds behaviour cases: off-topic questions, what each role may
+see, questions back, follow-ups and prompt injection. Scoring is deterministic; no model
+judges another.
+
+```bash
+uv run python -m crewops.agent.evaluate                       # offline, free
+uv run python -m crewops.agent.evaluate --live --json build/evals/live.json
+```
+
+`--live` asks 99 questions (each rewording with its gold question, and both turns of each
+follow-up), each with several Bedrock calls, billed per token, and prints the calls and
+tokens used. It reads the deployed table, so live agreement compares two live answers, not
+fixed ones. Offline results, with no model and no semantic stage (rules and templates
+only):
+
+| Measure | Offline |
+|---|---|
+| Rewordings whose answer states at least 80% of the gold answer's facts | 25 of 38 |
+| Rewordings routed to the gold question's intent | 25 of 38 |
+| Mean recall of the gold answer's facts | 0.72 |
+| Off-topic questions that ran no tool | 7 of 8 |
+| Role, question-back, follow-up and injection cases | 12 of 12 |
+| Answers failing an independent re-verification against their tool results | 0 |
+| Answers showing a redaction marker (personal data reached them) | 0 |
+
+The rewordings the rules miss are what the semantic stage and the triage model are for;
+the live run measures them.
+
 ## Friction log
 
 Problems hit while building are recorded as they happened in
-[docs/FRICTION_LOG.md](docs/FRICTION_LOG.md), in three groups: the Amazon ecosystem (Alexa,
-Bedrock and Nova, AgentCore, MCP), the AWS backend infrastructure, and the core software
-stack and local tooling.
+[docs/FRICTION_LOG.md](docs/FRICTION_LOG.md), in four groups: the Amazon ecosystem (Alexa,
+Bedrock and Nova, AgentCore, MCP), the AWS backend infrastructure, the core software stack
+and local tooling, and the bugs that tests, reviews and live runs found in our own code,
+with how each was fixed.
 
 ## License
 

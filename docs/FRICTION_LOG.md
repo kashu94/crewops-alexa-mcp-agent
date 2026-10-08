@@ -5,13 +5,22 @@ with the real error text. Entries are grouped by where the problem was:
 
 1. **Amazon ecosystem:** Alexa, Amazon Bedrock and Nova, AgentCore, and the Model Context
    Protocol (MCP) server and SDK.
-2. **AWS backend infrastructure:** accounts, CDK, DynamoDB, SQS, Lambda, streams.
-3. **Core software stack and local tooling:** Python, uv, Node, test tooling.
+2. **AWS backend infrastructure:** accounts, CDK, Cognito, DynamoDB, SQS, SNS, AppSync,
+   Lambda, streams, the AWS SDK.
+3. **Core software stack and local tooling:** Python, uv, Node, moto and other test
+   tooling.
+4. **Our own code:** every significant bug that tests, reviews, reference data or live runs
+   found in what we wrote, and how it was fixed: the legality engine, the question pipeline,
+   auth and plans, ingestion and search, the MCP server, evaluation, and the docs.
 
-Entry numbers run in the order the problems happened, across all three groups.
+Entry numbers run in the order the entries were written, across all four groups. Entries
+FL-020 onwards were written on 2026-10-08 from the build's full record (review reports,
+failing test output and live runs), for problems found and fixed since 2026-10-06.
 
 Severity: **Blocker** (no way forward without a workaround), **High** (cost hours),
-**Medium** (cost under an hour), **Low** (annoyance).
+**Medium** (cost under an hour), **Low** (annoyance). For our own code (section 4), severity
+is the harm the bug would have done had it shipped: **High** means a wrong answer, a
+security gap or lost data.
 
 ## Template
 
@@ -19,7 +28,6 @@ Severity: **Blocker** (no way forward without a workaround), **High** (cost hour
 ### FL-NNN: <short title>
 
 - Date:
-- Area: Amazon ecosystem | AWS backend infrastructure | Core software stack
 - Service / tool:
 - Severity:
 - Task attempted:
@@ -28,6 +36,20 @@ Severity: **Blocker** (no way forward without a workaround), **High** (cost hour
 - Actual: (exact error text, screenshot in docs/friction/ if useful)
 - Workaround:
 - Suggestion: (for Amazon, or for the tool's maintainers)
+```
+
+Entries in section 4 are about our own code, so they use a shorter form:
+
+```
+### FL-NNN: <short title>
+
+- Date:
+- Where: (the part of the system)
+- Found by: (review, failing test, reference data, live run)
+- Severity:
+- What went wrong: (the exact wrong output or error)
+- Cause:
+- Fix:
 ```
 
 ## 1. Amazon ecosystem (Alexa, Bedrock and Nova, AgentCore, MCP)
@@ -115,7 +137,121 @@ Severity: **Blocker** (no way forward without a workaround), **High** (cost hour
 - Suggestion: A Converse option to constrain a rewrite to the numbers and ids in the input
   (grounded rewording) would make the explainer usable more often.
 
-## 2. AWS backend infrastructure (accounts, CDK, DynamoDB, SQS, Lambda)
+### FL-011: An MCP tool that returns `dict` arrives as escaped JSON text
+
+- Date: 2026-10-08
+- Service / tool: MCP Python SDK (`mcp` 1.30, FastMCP), streamable HTTP client
+- Severity: Low (about 15 minutes)
+- Task attempted: Call the deployed `ask` tool (declared `-> dict`) from the command-line
+  client and print the result.
+- Steps taken:
+  1. The client printed `structuredContent` when present, otherwise the text items.
+  2. Called `ask` on the deployed server.
+- Expected: A tool declared to return a dictionary returns it as structured content.
+- Actual: `structuredContent` was empty, and the result was one text item holding the JSON,
+  printed as `["{\n  \"answer\": \"C-1042 is not rostered on any pairing this week...`.
+- Workaround: The client parses each text item as JSON before printing.
+- Suggestion: Return structured content for any JSON-serialisable return value, or say in
+  the FastMCP documentation which return annotations produce it.
+
+### FL-012: The advisor model filled in a missing detail instead of asking
+
+- Date: 2026-10-08
+- Service / tool: Amazon Bedrock, Amazon Nova 2 Lite (`global.amazon.nova-2-lite-v1:0`),
+  Converse API with tools
+- Severity: Medium (found in the first live test of follow-up questions)
+- Task attempted: Ask "Who can cover P-2291 on 15 Sep?" as a controller, without saying
+  which seat. Offline, the pipeline asks "Which seat needs cover on P-2291?".
+- Steps taken:
+  1. Ran the question on the deployed MCP server, where Nova 2 Lite is the advisor when the
+     planned tool calls produce nothing.
+  2. Replied "Captain" in the same conversation.
+- Expected: The advisor asks which seat. Its instructions tell it to ask the user, never
+  pick, when an id is ambiguous; the same caution was expected for a missing seat.
+- Actual: The answer (`"source": "model"`, verified) began "The cheapest legal option to
+  cover the Captain seat on pairing P-2291 on 15 Sep is...". The model chose the Captain
+  seat itself. Every fact in it was sourced, so the verifier passed it. The reply
+  "Captain" then had no question to answer and listed 28 captains.
+- Workaround: The pipeline now asks which seat itself, before any model is consulted,
+  whenever cover is asked for without a seat or a person.
+- Suggestion: A Converse option, or documented prompt pattern, that makes Nova ask a
+  clarifying question when a tool's required context is missing, rather than choosing a
+  value.
+
+### FL-013: AgentCore Memory's `blob` payload is called binary but is a JSON document
+
+- Date: 2026-10-08
+- Service / tool: Amazon Bedrock AgentCore Memory, boto3 `bedrock-agentcore` client
+- Severity: Low (about 30 minutes)
+- Task attempted: Store each conversation turn's structured context next to its
+  conversational text in `CreateEvent`, and read it back with `ListEvents`.
+- Steps taken:
+  1. Read the payload shape in the SDK's service model: `blob` is documented as "The binary
+     content of the payload." but is typed as a JSON document, not bytes.
+  2. Compared with AWS's own integrations, which store a JSON string and parse it on read.
+- Expected: One documented form for `blob` (bytes, a string or a JSON value) and how it
+  comes back from `ListEvents`.
+- Actual: The description and the type disagree, and the read-back form is not documented.
+  Request validation accepts a dictionary, so a mismatch would only show as memory that
+  silently never returns anything.
+- Workaround: Store the context as a JSON string and accept either a string or an object
+  when reading.
+- Suggestion: Document `blob` as what it is, with a round-trip example, and say in which
+  order `ListEvents` returns events.
+
+### FL-020: Bedrock model ids that look right but cannot be invoked here
+
+- Date: 2026-10-06
+- Service / tool: Amazon Bedrock model ids and inference profiles
+- Severity: Medium (the first model call would have failed)
+- Task attempted: Configure the router, advisor and explainer model ids.
+- Steps taken: The first defaults were bare model ids of another model family; after the
+  switch to Nova, `.env` held the `us.` inference profiles (`us.amazon.nova-micro-v1:0`,
+  `us.amazon.nova-2-lite-v1:0`).
+- Expected: A model id that is listed for the model works in the project's region.
+- Actual: The first family accepts on-demand calls only through an inference profile, so its
+  bare ids could not be invoked; the `us.` profiles are bound to US regions, so they do not
+  work from the project's Sydney home region either. Nova 2 Lite has no in-region id there
+  at all.
+- Workaround: `amazon.nova-micro-v1:0` in-region and `global.amazon.nova-2-lite-v1:0`; a
+  live Nova call was then confirmed.
+- Suggestion: Show, per region, which id form each model accepts, next to the model id
+  itself.
+
+### FL-021: A guardrail change never published a new version
+
+- Date: 2026-10-07
+- Service / tool: Amazon Bedrock Guardrails, AWS CloudFormation
+  (`AWS::Bedrock::GuardrailVersion`)
+- Severity: Medium (found in review)
+- Task attempted: Publish a new guardrail version whenever the guardrail's filters change.
+- Steps taken: Defined a `CfnGuardrailVersion` beside the `CfnGuardrail`.
+- Expected: A filter change produces a new version.
+- Actual: `CfnGuardrailVersion` has only `guardrail_identifier` and `description`, and
+  neither changes when the filters change, so CloudFormation sees no change and any filter
+  edit silently has no effect.
+- Workaround: The version's description carries a fingerprint of the guardrail configuration
+  (`Configuration <sha256>`), so every change publishes a version. The app requires a
+  numbered version and refuses DRAFT.
+- Suggestion: Re-publish a guardrail version when its guardrail changes, or document the
+  pattern.
+
+### FL-022: Replacing a guardrail version deleted the one the running app used
+
+- Date: 2026-10-07
+- Service / tool: Amazon Bedrock Guardrails, AWS CloudFormation
+- Severity: Low (found in review)
+- Task attempted: Redeploy the guardrail stack while the app is pinned to the current
+  version number.
+- Steps taken: Changed the configuration so a new version was created.
+- Expected: The old version stays until nothing uses it.
+- Actual: CloudFormation creates the new version and then deletes the old one. A running app
+  still pinned to the old number gets errors, so screening fails open until it is updated.
+- Workaround: `apply_removal_policy(RemovalPolicy.RETAIN)` on the version; old versions are
+  kept.
+- Suggestion: Retain replaced guardrail versions by default, or warn in the deploy output.
+
+## 2. AWS backend infrastructure (accounts, CDK, Cognito, DynamoDB, SQS, SNS, AppSync, Lambda, SDK)
 
 ### FL-001: Project account denies CDK outside its home region, with no hint why
 
@@ -181,7 +317,8 @@ Severity: **Blocker** (no way forward without a workaround), **High** (cost hour
   confirmation prompt, which cost time.
 - Workaround: Ran the same deploy from another machine on a different network; it finished
   in under two minutes.
-- Suggestion for Amazon: Apply request timeouts with retries to every SDK call the CLI makes.
+- Suggestion for Amazon: Apply request timeouts with retries to every SDK call the CLI
+  makes.
   After 30 seconds without a response, print the operation being waited on, for example
   "waiting for CloudFormation CreateChangeSet". Add a `--timeout` option.
 
@@ -223,7 +360,8 @@ Severity: **Blocker** (no way forward without a workaround), **High** (cost hour
   2. Called `table.meta.client.transact_write_items(...)`.
 - Expected: Either the wire-format items are accepted, or the error says the client expects
   plain Python values.
-- Actual: The call failed with `TransactionCanceledException` whose cancellation reasons were
+- Actual: The call failed with `TransactionCanceledException` whose cancellation reasons
+  were
   only `[TypeError, TypeError]`. The resource's client applies boto3's automatic type
   conversion, so the already-typed items were converted a second time. Nothing in the error
   points to that.
@@ -254,7 +392,156 @@ Severity: **Blocker** (no way forward without a workaround), **High** (cost hour
 - Suggestion: Warn at synth when two `QueuePolicy` (or `TopicPolicy`, `BucketPolicy`)
   resources target the same resource, and point to `add_to_resource_policy`.
 
-## 3. Core software stack and local tooling (Python, uv, Node)
+### FL-014: AppSync Events handler docs omit what `ctx.identity` holds
+
+- Date: 2026-10-08
+- Service / tool: AWS AppSync Events, channel namespace handlers (APPSYNC_JS)
+- Severity: Low (about 20 minutes)
+- Task attempted: Let only staff roles subscribe to the live console channel, by checking
+  the subscriber's Cognito groups in an `onSubscribe` handler.
+- Steps taken:
+  1. Read the Event API pages on writing handlers, the handler overview and authorization.
+  2. None defines the `ctx` object or the fields of `ctx.identity` for Cognito user pools.
+  3. Found `ctx.identity.groups` and `ctx.identity.username` only in examples elsewhere.
+- Expected: A context reference for Events handlers, as AppSync GraphQL has for resolvers.
+- Actual: The handler pages show `util.unauthorized()` with a placeholder check
+  (`somethingNotValid()`), and no page lists the identity fields.
+- Workaround: Used `ctx.identity.groups`, refusing when it is missing (the safe direction),
+  and test the handler under Node with stand-in identities.
+- Suggestion: Add a `ctx` reference to the AppSync Events developer guide, with the
+  identity shape for each authorization type.
+
+### FL-015: An AWS call from Windows failed only after a long wait, with no cause
+
+- Date: 2026-10-07
+- Service / tool: AWS SDK for Python (botocore) on Windows, Amazon DynamoDB
+- Severity: Medium (live testing deferred to another day)
+- Task attempted: Ask a live question from the Windows laptop:
+  `uv run python -m crewops.agent.ask --live "Which single flight leg has the most seats at
+  risk if cancelled, and why?"`.
+- Steps taken:
+  1. Ran the command; it waited a long time, then failed.
+  2. Checked for proxy settings (`Get-ChildItem env: | Where-Object Name -match 'proxy'`
+     returned nothing).
+  3. Retried; one attempt answered, but late. A diagnostic script then hung in a TLS read.
+- Expected: A quick, specific error (DNS, TLS handshake or read timeout).
+- Actual: `AWS error: Could not connect to the endpoint URL:
+  "https://dynamodb.ap-southeast-2.amazonaws.com/"` after the wait. The message is the same
+  whatever failed, so a stalled Wi-Fi connection looked like a wrong endpoint.
+- Workaround: Waited for a better connection and continued later.
+- Suggestion: Say which step failed (name resolution, connect, TLS or read) and after how
+  long, and expose a single "fail fast" setting for interactive commands.
+
+### FL-023: CDK's default Cognito app client turns on OAuth with a placeholder callback
+
+- Date: 2026-10-07
+- Service / tool: AWS CDK `cognito.UserPoolClient`, Amazon Cognito
+- Severity: Medium (caught by a synth test)
+- Task attempted: Create an app client for username and password sign-in only.
+- Steps taken: Added the client with `auth_flows` and no OAuth settings; ran the stack test.
+- Expected: No OAuth flows unless asked for.
+- Actual: `Template has 1 resources with type AWS::Cognito::UserPoolClient, but none match
+  as expected`; the client had `"AllowedOAuthFlows": ["implicit", "code"]`,
+  `"AllowedOAuthFlowsUserPoolClient": true` and `"CallbackURLs": ["https://example.com"]`.
+- Workaround: `disable_o_auth=True`.
+- Suggestion: Leave OAuth off unless `o_auth` is configured, or warn when the callback is
+  the placeholder.
+
+### FL-024: An empty `WriteAttributes` lets users write every standard attribute
+
+- Date: 2026-10-07
+- Service / tool: Amazon Cognito app clients, AWS CDK
+- Severity: Medium (found in review)
+- Task attempted: Stop users editing their own Cognito attributes, so no email or phone can
+  be stored.
+- Steps taken: Left the client's write attributes unset; the template had
+  `"WriteAttributes": []`.
+- Expected: An empty list means nothing is writable.
+- Actual: Cognito treats a client with no write attributes as able to write all standard
+  attributes, so "no email or phone is stored" would not hold.
+- Workaround: `WriteAttributes = ["locale"]`, pinned by a test.
+- Suggestion: Make an explicit empty list mean "none", or reject it with a message.
+
+### FL-025: Cognito pool names are not unique, so lookup by name can pick a stale pool
+
+- Date: 2026-10-07
+- Service / tool: Amazon Cognito user pools
+- Severity: Low (found in review)
+- Task attempted: Find the team's pool from the provisioning command.
+- Steps taken: Listed pools and took the first with the expected name.
+- Expected: One pool per name.
+- Actual: Names are not unique, and retained stages leave old pools behind, so the command
+  could provision users into the wrong pool.
+- Workaround: Read the pool id from the auth stack's output; refuse with both ids when a
+  name is ambiguous.
+- Suggestion: Offer unique pool names, or a tag-based lookup in the CLI.
+
+### FL-026: A password Cognito refuses left accounts stuck mid-creation
+
+- Date: 2026-10-07
+- Service / tool: Amazon Cognito `admin_create_user` / `admin_set_user_password`
+- Severity: High (found in review)
+- Task attempted: Create the demo team's accounts with a shared password.
+- Steps taken: Checked passwords locally with "any non-alphanumeric" as a symbol, then
+  created each user and set the password.
+- Expected: A password the local check accepts is accepted by Cognito, or nothing is
+  created.
+- Actual: `'Abcdefghijk1£'`, `'Abcdefghijk1é'` and `' Abcdefghijk1'` passed locally;
+  `admin_create_user` succeeded and `admin_set_user_password` failed, leaving the user in
+  FORCE_CHANGE_PASSWORD with a temporary password nobody had (messages are suppressed).
+  Reruns never repaired it.
+- Workaround: Cognito's own symbol set, ASCII only, no leading or trailing space, 12-256
+  characters; the command now sets a password for users stuck in FORCE_CHANGE_PASSWORD or
+  RESET_REQUIRED and re-enables disabled members.
+- Suggestion: Validate the password before creating the user, or create both in one call.
+
+### FL-027: One SNS email subscription per topic means one address cannot take two filters
+
+- Date: 2026-10-08
+- Service / tool: Amazon SNS email subscriptions with filter policies
+- Severity: Medium (found in review from known SNS behaviour; not reproduced live)
+- Task attempted: Subscribe one address to two roles' alerts with different filter policies.
+- Steps taken: Subscribed the same email twice with `FilterPolicy` `{"role":
+  ["controller"]}` and `{"role": ["approver"]}`.
+- Expected: Two subscriptions, or one with both roles.
+- Actual: The second Subscribe is refused ("Subscription already exists with different
+  attributes"); it reached the admin as INTERNAL, after a daily slot had been counted.
+- Workaround: One role per address, refused clearly; the daily slot is given back when SNS
+  refuses.
+- Suggestion: Say in the Subscribe documentation that an endpoint holds one subscription per
+  topic.
+
+### FL-028: SNS subscription actions and unconfirmed subscriptions
+
+- Date: 2026-10-08
+- Service / tool: Amazon SNS, IAM
+- Severity: Medium (found in review; not reproduced live)
+- Task attempted: Let the server list and remove alert subscriptions with least privilege.
+- Steps taken: Granted `sns:Unsubscribe` and `sns:GetSubscriptionAttributes` on `<topic>:*`
+  only.
+- Expected: Subscription actions are authorised on the subscription's ARN.
+- Actual: SNS may authorise these against the topic ARN, which `:*` does not match, so
+  listing and removing could fail AccessDenied; unsubscribing a pending subscription may
+  return InvalidParameter.
+- Workaround: Granted on both the topic and `<topic>:*`; InvalidParameter on remove reports
+  that the address must confirm first and keeps its record.
+- Suggestion: Document which ARN each subscription action is authorised against, and how to
+  cancel a pending subscription.
+
+### FL-029: `grant_read_write_data` grants far more than a worker needs
+
+- Date: 2026-10-06
+- Service / tool: AWS CDK DynamoDB grants
+- Severity: Low (found in review)
+- Task attempted: Give the report worker Lambda only what it uses: GetItem, Query, PutItem.
+- Steps taken: Used `table.grant_read_write_data(worker)`.
+- Expected: A grant close to the actions used.
+- Actual: The policy also allowed Scan, DeleteItem, UpdateItem and BatchWriteItem.
+- Workaround: `table.grant(worker, "dynamodb:GetItem", "dynamodb:Query",
+  "dynamodb:PutItem")`, pinned by a test.
+- Suggestion: List the actions each convenience grant includes in its docstring.
+
+## 3. Core software stack and local tooling (Python, uv, Node, test tooling)
 
 ### FL-010: Every CDK synth and test run prints a Node end-of-life banner
 
@@ -272,3 +559,1023 @@ Severity: **Blocker** (no way forward without a workaround), **High** (cost hour
   Node before 2026-10-29.
 - Suggestion: Print the banner once per day per machine, or only from the `cdk` CLI, not
   from every Python process.
+
+### FL-030: moto sent an unimplemented S3 Vectors call to real AWS
+
+- Date: 2026-10-07
+- Service / tool: moto (AWS mock library), Amazon S3 Vectors
+- Severity: Medium (a test could reach a real account)
+- Task attempted: Test vector search offline against moto.
+- Steps taken: Stored vectors with moto, then queried them.
+- Expected: An unimplemented operation raises NotImplementedError locally.
+- Actual: Five tests failed with `botocore.errorfactory.AccessDeniedException: An error
+  occurred (AccessDeniedException) when calling the QueryVectors operation: The security
+  token included in the request is invalid.`: moto stores vectors but passed QueryVectors
+  through to the real endpoint with the fake credentials.
+- Workaround: An in-memory S3 Vectors fake, and the whole suite now runs with
+  `HTTPS_PROXY=http://127.0.0.1:9`, so any network call fails.
+- Suggestion: Fail closed on unimplemented operations by default.
+
+### FL-031: moto's Cognito backend needs an undeclared optional package
+
+- Date: 2026-10-07
+- Service / tool: moto `cognitoidp`
+- Severity: Low
+- Task attempted: Test the account provisioning against moto's Cognito.
+- Steps taken: Imported moto's Cognito backend.
+- Expected: It imports with the `moto` extras installed.
+- Actual: `ModuleNotFoundError: No module named 'joserfc'`.
+- Workaround: An in-memory Cognito fake in the auth tests.
+- Suggestion: List `joserfc` in moto's `cognitoidp` extra.
+
+### FL-032: The server's JWT library arrived only as a transitive dependency
+
+- Date: 2026-10-07
+- Service / tool: uv dependency groups, PyJWT
+- Severity: Low (found in review)
+- Task attempted: Verify Cognito tokens in the MCP server with PyJWT.
+- Steps taken: Imported `jwt`, which was installed because the `mcp` package depends on it.
+- Expected: Direct imports are declared.
+- Actual: `pyjwt[crypto]` and `cryptography` were not declared, so an `mcp` release dropping
+  them would break token checks.
+- Workaround: `pyjwt[crypto]>=2.10` declared in the server group and locked.
+- Suggestion: n/a (our dependency hygiene).
+
+## 4. Our own code (found by tests, reviews, reference data and live runs)
+
+#### Legality engine and disruption impact
+
+### FL-016: Station-closure delays came out 30 minutes short of the reference
+
+- Date: 2026-10-07
+- Severity: Medium (about an hour)
+- Task attempted: Work out which flights a station closure delays, and by how much, for the
+  disruption analysis.
+- Steps taken:
+  1. First version: every departure or arrival inside the closure moves to the reopening
+     time.
+  2. Compared each affected trip's new times with reference scenario S3 (BLR closed
+     08:00-14:00Z on 17 Sep).
+- Expected: All six affected trips match the reference.
+- Actual: Every delayed movement was 30 minutes earlier than the reference, for example
+  `DX402 on 2026-09-17: duty becomes 16.5h against a 12.0h limit` where the reference has
+  17.0h. Shorter delays understate duty times, so the legality verdicts built on them would
+  have been too optimistic.
+- Workaround: A reopened station needs a 30-minute turnaround before the first movement;
+  the engine now delays to reopening plus that turnaround, and all six S3 trips match.
+- Suggestion: Write operational buffers like this into the rules data, not only into
+  reference answers, so an implementation cannot miss them.
+
+### FL-033: Duty flown on the snapshot day was left out of the hour totals
+
+- Date: 2026-10-06
+- Where: legality engine
+- Found by: review
+- Severity: High
+- What went wrong: `assess(w, "C-5837", "P-2203")` reported "30.88h of 60h/7d on
+  2026-09-16"; the true figure is 42.13h. All 32 crew rostered on 14 Sep were about 11h low;
+  the canary test used C-1042, who is not rostered that day.
+- Cause: Rostered duty dated on or before the history end was dropped, but the history held
+  0 for that day.
+- Fix: Each day counts once, from whichever source has it; a C-5837 canary test was added.
+
+### FL-034: Hour windows ending on later rostered days were never checked
+
+- Date: 2026-10-06
+- Where: legality engine
+- Found by: review
+- Severity: High
+- What went wrong: With 11h on each of the next five days plus 10h on the new day, the check
+  said PASS "10.0h of 60h/7d", although the window ending five days later holds 65h.
+- Cause: Only the window ending on the new duty day was evaluated.
+- Fix: Every window the new duty falls into is evaluated; real data then shows C-5837 at
+  "45.0h of 60h/7d in the 7 days ending 2026-09-20".
+
+### FL-035: Positioning slipped every day of a multi-day pairing, hiding short rest
+
+- Date: 2026-10-06
+- Where: legality engine
+- Found by: review
+- Severity: High
+- What went wrong: `assess(w, "C-2210", "P-2291")` came back legal, but on the real day-2
+  schedule rest is 9.5h, below the 12h minimum; 27 positioning options were offered wrongly.
+- Cause: The positioning delay was applied to every day, not only day 1.
+- Fix: Only day 1 slips; the engine now says "only 9.5h rest between 2026-09-15 and
+  2026-09-16 of the pairing". This deliberately changes an older reference answer.
+
+### FL-036: The engine ignored the snapshot time
+
+- Date: 2026-10-06
+- Where: legality engine
+- Found by: review
+- Severity: Medium
+- What went wrong: `find_options(w, "P-2201", "Captain")` offered C-1042 for a pairing that
+  had already flown, and positioning flights that had already left could be chosen.
+- Fix: Started trips and departed positioning flights are refused.
+
+### FL-037: A reserve-window failure showed the wrong reason
+
+- Date: 2026-10-06
+- Where: legality engine
+- Found by: review
+- Severity: Low
+- What went wrong: A reserve whose on-call window missed the report time was filed as "in
+  position: cannot get to the departure in time".
+- Fix: It has its own reason now.
+
+### FL-038: A reference answer offered crew already on the same flight
+
+- Date: 2026-10-06
+- Where: reference scenarios
+- Found by: comparison with reference data
+- Severity: Low
+- What went wrong: For S5, the reference answer offers two cabin crew who are already
+  rostered on that same flight, which is not possible.
+- Fix: The engine excludes them, and a test pins that it does.
+
+### FL-039: The joint plan ignored the delay and contradicted the per-seat answers
+
+- Date: 2026-10-07
+- Where: disruption impact
+- Found by: review
+- Severity: High
+- What went wrong: For a 180-minute delay to DX412 on 15 Sep, all six seats said no legal
+  cover, yet the joint plan assigned 4 crew for ₹56,000.
+- Cause: The joint plan called the option search without the delay.
+- Fix: The joint plan reuses each seat's options; that case now assigns nobody and lists six
+  unfilled seats.
+
+### FL-040: Identical seats on one pairing collapsed into one
+
+- Date: 2026-10-07
+- Where: disruption impact
+- Found by: review
+- Severity: High
+- What went wrong: `joint_plan(w, [Seat("P-2204", "Cabin Crew")] * 3)` returned 1
+  assignment, 0 unfilled, ₹9,500; in the DX412 case six seats became four assignments.
+- Cause: Options were held in a dict keyed by pairing and role.
+- Fix: Seats are handled as a list.
+
+### FL-041: Legs to drop included legs flown before the late flight
+
+- Date: 2026-10-07
+- Where: disruption impact
+- Found by: review
+- Severity: Medium
+- What went wrong: For a 900-minute delay to DX404 on 17 Sep, the summary said take
+  DX401-DX404 off (₹1,000,000); dropping DX404 alone suffices (₹250,000).
+- Fix: Only legs from the delayed flight onward shift, and earlier legs are never dropped.
+
+### FL-042: An aircraft fault of a few seconds crashed the analysis
+
+- Date: 2026-10-07
+- Where: disruption impact
+- Found by: review
+- Severity: Medium
+- What went wrong: An aircraft fault from 02:00:00Z to 02:30:10Z raised `ValueError:
+  delay_hours must be positive`.
+- Cause: A delay of seconds rounded to 0.0.
+- Fix: Delays round up to the minute, zero is skipped, and anything not assessable becomes a
+  note.
+
+### FL-043: With no disjoint combination, every seat was reported unfilled
+
+- Date: 2026-10-07
+- Where: disruption impact
+- Found by: review
+- Severity: Medium
+- What went wrong: Two seats whose only option was the same captain gave no assignment at
+  all, and a 12-option cap per seat undercounted equal-cost ties.
+- Fix: Falls back to the best partial plan; ties are counted over more options.
+
+#### Question pipeline, verifier and models
+
+### FL-018: Follow-up context gave confident wrong answers
+
+- Date: 2026-10-08
+- Severity: High (found in review before deployment)
+- Task attempted: Let a follow-up borrow from the previous turn: "they" meaning the crew
+  member just asked about, and a short reply read with the question it answers.
+- Steps taken: The first version carried the last crew member into any question with
+  he/she/they/their, and joined any reply of up to four words to an open question back.
+- Expected: Follow-ups resolve; new questions are answered on their own.
+- Actual (after "How many duty hours does C-1042 have?"): "Who is on reserve at BLR on
+  15 Sep and are they rested?" answered "No reserve duties match that." instead of listing
+  12. After "Which seat needs cover on P-2291?", the reply "Duty hours C-3310" answered
+  "D. Reddy (C-3310) is legal for P-2291: every rule passes.", a question nobody asked.
+  Both answers passed verification, because every fact in them was real. A crew member's
+  own "How many duty hours do I have before they ground me?", after a refused question
+  about C-3310, was read as C-3310 and refused.
+- Workaround: Only "he" and "she" carry, and never in questions about the asker, several
+  people, a plan's decision or a named role ("her captain"). A reply is joined only when it
+  gives just a seat, a date or one id and matches no question rule of its own. The
+  reviewer's examples are now regression tests.
+- Suggestion: n/a (our own code). Lesson: a verifier proves facts are sourced, not that
+  they answer the question asked.
+
+### FL-044: A cut-off or filtered Nova reply was served as a verified answer
+
+- Date: 2026-10-07
+- Where: Nova model layer
+- Found by: review
+- Severity: High
+- What went wrong: With `stopReason="max_tokens"` and the text "The cheapest legal cover
+  is", the answer had `source="model"` and was marked verified; a `content_filtered` reply
+  behaved the same.
+- Cause: Any stop reason other than `tool_use` was treated as a finished answer.
+- Fix: Only `end_turn` and `stop_sequence` count, for the advisor, explainer and triage;
+  anything else falls back to the template.
+
+### FL-045: The voice time budget was not enforced on Bedrock calls
+
+- Date: 2026-10-07
+- Where: Nova model layer
+- Found by: review (two rounds)
+- Severity: Medium
+- What went wrong: With a 0.5 s budget and a 1 s fake call, the run took 1.01 s and still
+  made the call; each call could run to botocore's default timeout twice. After the first
+  fix the advisor could still start a call at 5.9 s that ran until about 16 s.
+- Cause: The deadline was checked only after a tool-use reply, and botocore's retries and
+  timeouts applied.
+- Fix: The deadline is checked before every call, one attempt each, with a 3 s client for
+  triage, embeddings and guardrails and the response budget for advisor and explainer.
+
+### FL-046: The ask command hid why a live answer was replaced
+
+- Date: 2026-10-07
+- Where: ask CLI
+- Found by: live run
+- Severity: Low
+- What went wrong: A live question returned only a flight list after one model call and 44
+  output tokens; the slow network had used the budget, but nothing on screen said so.
+- Cause: The command did not print the answer's notes.
+- Fix: It prints where the answer came from, its verification and its notes.
+
+### FL-047: No did-you-mean for a misspelt surname, and closure ripple too broad
+
+- Date: 2026-10-07
+- Where: tools
+- Found by: live smoke run
+- Severity: Medium
+- What went wrong: `lookup {"entity": "crew", "filters": {"name": "Nayar"}}` returned
+  `{"count": 0, "rows": []}`; a station closure marked a whole day uncovered.
+- Fix: Returns `NEEDS_CONFIRMATION … Did you mean A. Nair (C-1042, Captain), S. Nair …`;
+  only flights in the closure window are direct, later ones at risk.
+
+### FL-048: `same_pairing` swapped in a different person of another rank
+
+- Date: 2026-10-07
+- Where: tools
+- Found by: review
+- Severity: High
+- What went wrong: `same_pairing(a="Captain S. Nair", b="C-1042")` answered for C-2295 S.
+  Nair, a First Officer.
+- Cause: No crew of the stated rank fell back to any crew with the name.
+- Fix: Asks which person is meant; several crew sharing a name give AMBIGUOUS_QUERY.
+
+### FL-049: `joint_plan` staffed the same seat twice
+
+- Date: 2026-10-07
+- Where: tools
+- Found by: review
+- Severity: High
+- What went wrong: `events=[{"crew_id":"C-1042"},{"crew_id":"C-1042"}]` gave two Captain
+  assignments on P-2291 for ₹42,500.
+- Fix: Refused: "C-1042 named as out more than once" and "P-2291 has 1 Captain seat, but the
+  events ask to cover 2".
+
+### FL-050: `lookup` filters on list fields gave wrong results
+
+- Date: 2026-10-07
+- Where: tools
+- Found by: review (two rounds)
+- Severity: High
+- What went wrong: `{"date": {"gte": "2026-09-19"}}` gave 0; `{"ratings": ["A320","ATR72"]}`
+  meant "all of" although documented as "any of"; `{"ratings": []}` matched everything;
+  `group_by=["crew"]` raised `TypeError: unhashable type: 'dict'`; after the first fix
+  `{"ratings": {"gte": 3}}` matched 150 because "A320" >= "3" as text.
+- Fix: A range or list on a list column means "any element"; empty lists and ranges, nested
+  values and mixed number/text bounds give INVALID_ARGUMENT.
+
+### FL-051: `ripple` over-reported the blast radius
+
+- Date: 2026-10-07
+- Where: tools
+- Found by: review
+- Severity: Medium
+- What went wrong: A disruption to DX404 listed DX401-DX404 as directly affected (648
+  passengers); a flight that had already landed gave the same 648; an aircraft with no time
+  treated all 28 of its flights as disrupted.
+- Fix: Only the named flight is direct, departed legs are listed apart, and an aircraft
+  without a time asks for one.
+
+### FL-052: Unknown ids were ignored or returned an empty success
+
+- Date: 2026-10-07
+- Where: tools
+- Found by: review (two rounds)
+- Severity: Medium
+- What went wrong: `{"flight_no":"DX999"}` and `{"crew_id":["C-9999"]}` returned ok with 0
+  rows; `{"crew_id": ["C-1042","C-9999"]}` returned 1 row without mentioning C-9999.
+- Fix: Every id, including each one in a list, is resolved or reported.
+
+### FL-053: Some tool arguments were silently ignored
+
+- Date: 2026-10-07
+- Where: tools
+- Found by: review
+- Severity: Low-Medium
+- What went wrong: `check_gate(..., date="2026-09-16")` answered at the snapshot time;
+  `find_options(pairing_id="P-2291", crew_id="C-1042", role="Cabin Crew")` answered for the
+  Captain seat.
+- Fix: Each argument is used or refused.
+
+### FL-054: Smaller tool defects
+
+- Date: 2026-10-07
+- Where: tools
+- Found by: review
+- Severity: Low
+- What went wrong: A started seat appeared in both `unfilled` and `already_started`; an
+  issue-count fallback showed "None"; a crew member with two pairings on one date was
+  resolved to one silently; did-you-mean hints named tools the caller cannot use.
+- Fix: Each corrected; the ambiguous cases ask.
+
+### FL-055: Entity extraction read a date range from "before" and missed a stated base
+
+- Date: 2026-10-07
+- Where: router
+- Found by: running extraction over the gold questions
+- Severity: Low
+- What went wrong: Q20 gave `'date_range': {'lt': '2026-09-16'}` from a "before" not
+  attached to a date; "C-2210 (DEL base)" was not read as a stated base.
+- Fix: "Before" counts only directly before a date; the bracketed base is recognised.
+
+### FL-056: Router rules routed some gold questions wrongly
+
+- Date: 2026-10-07
+- Where: router
+- Found by: gold-set routing check
+- Severity: Low-Medium
+- What went wrong: The word "desk" sent the morning-briefing question to the controller list
+  (`Q38 … TIER MISMATCH`); "What is C-2087's rank?" fell to the default route; "Can reserve
+  C-3305 cover P-2291?" planned two lookups instead of a legality check.
+- Fix: Rules corrected; all 38 gold questions route to their tier.
+
+### FL-057: A refusal read badly, and "my" did not mean the signed-in crew member
+
+- Date: 2026-10-07
+- Where: question pipeline
+- Found by: live run
+- Severity: Low
+- What went wrong: `I couldn't duty clock: crew may use duty_clock only about themselves`.
+- Fix: "That isn't available to your role."; I, me and my map to the caller's crew id.
+
+### FL-058: Values from a rejected draft leaked into the answer record
+
+- Date: 2026-10-07
+- Where: question pipeline
+- Found by: failing test
+- Severity: Medium (personal data)
+- What went wrong: The note "unsourced: 98765, 43210" carried a phone-like number into the
+  record.
+- Fix: Unsourced values go to the log only; notes give counts and kinds.
+
+### FL-059: A question with nothing to run got the generic scope reply
+
+- Date: 2026-10-07
+- Where: question pipeline
+- Found by: failing gold test
+- Severity: Low
+- What went wrong: "Which single flight leg has the most seats at risk…" got "I can help
+  with crew control…" instead of saying what it needed.
+- Fix: The scope reply is used only for questions no rule recognises.
+
+### FL-060: The premise check leaked other crew members' details to any role
+
+- Date: 2026-10-07
+- Where: question pipeline
+- Found by: review
+- Severity: High
+- What went wrong: As crew C-1042, "Is FO C-2087 on P-2291?" answered "C-2087 is a Captain,
+  not a First Officer…".
+- Cause: The premise check ran before any role check.
+- Fix: Crew details are revealed only to roles with `lookup`, or about the caller's own id.
+
+### FL-061: Ordinary capitalised words were read as unknown stations
+
+- Date: 2026-10-07
+- Where: router
+- Found by: review (three rounds)
+- Severity: Medium
+- What went wrong: "Which captains are rated on ATR-72?" answered "ATR isn't one of our
+  stations…"; FYI, SMS, CEO and GMT did the same, and "ATR 72" dropped the rating filter.
+- Fix: ATR-72 forms are recognised; a station needs context or a near miss.
+
+### FL-062: Date parsing errors
+
+- Date: 2026-10-07
+- Where: router
+- Found by: review (two rounds)
+- Severity: Medium
+- What went wrong: "between 15 and 17 Sep" looked up only 17 Sep; "Who may 3 captains…"
+  became 2026-05-03; "What are my duty hours on Friday?" ignored Friday.
+- Fix: Ranges, "may" only in a date context, and weekdays resolved to the week.
+
+### FL-063: Unmatched questions dumped the roster or got no answer
+
+- Date: 2026-10-07
+- Where: router
+- Found by: review (rounds 2 and 3)
+- Severity: Medium
+- What went wrong: "How much is a ticket from Delhi to London…" listed 12 DEL crew; "Show
+  flights in GMT on 16 Sep from BLR" listed 138 BLR crew; "Who covers DX412 on 16 Sep?"
+  answered "I need something to narrow by…".
+- Fix: No lookup from incidental words; cover questions ask which seat.
+
+### FL-064: The verifier missed timestamps and several number and name forms
+
+- Date: 2026-10-07
+- Where: verifier
+- Found by: review (three rounds)
+- Severity: High
+- What went wrong: `verify("Report at 2099-12-31T23:59Z.", trace)` passed with no claims;
+  "47h", "₹45k" and "120min" were not claims; "C-1042 (R. Sharma)" passed; later "₹5 lakh"
+  and "Captain Reddy (C-1526)" passed although C-1526 is N. Sen.
+- Fix: Timestamps, units, sign, lakh and crore are parsed; names are checked wherever they
+  appear, including rank and surname beside an id.
+
+### FL-065: Arithmetic checks let invented numbers through
+
+- Date: 2026-10-07
+- Where: verifier
+- Found by: review (two rounds)
+- Severity: High
+- What went wrong: On Q31, 90 of 90 integers from 10 to 99 verified as derived values;
+  "C-1042 has 47 hours of duty headroom" verified as 60 - 13.
+- Fix: Derivation is limited to rupee amounts within one result; no integer from 10 to 99
+  derives any more.
+
+### FL-066: Legality verdicts were not checked
+
+- Date: 2026-10-07
+- Where: verifier
+- Found by: review (three rounds)
+- Severity: High
+- What went wrong: "C-2087 is legal for P-2291." and "RULE-DUTY-02 is not breached." passed
+  although C-2087 fails; then "No, C-2087 is legal…" and "C-2087 can cover P-2291."; then
+  "can't" was not read as a negation.
+- Fix: Verdicts are checked against the legality results, with negation scoped to its
+  clause.
+
+### FL-067: Tool arguments and error text counted as evidence
+
+- Date: 2026-10-07
+- Where: verifier
+- Found by: review
+- Severity: High
+- What went wrong: `limit=137` made "137 passengers are affected." verify; a failed call on
+  C-7777 made "C-7777 is legal for everything." verify.
+- Fix: Evidence comes from results only; the model reaches tools through the role-checked
+  runner.
+
+### FL-068: The verifier rejected correct answers
+
+- Date: 2026-10-07
+- Where: verifier
+- Found by: review (three rounds)
+- Severity: Medium (correct answers fell back to templates)
+- What went wrong: `unsourced: 27 flight` from "64.27 flight hours"; names in did-you-mean
+  errors counted as unsourced; "RULE-FDP-01 passes but RULE-DUTY-02 fails." was rejected;
+  "on Tuesday the 15th" flagged "15th".
+- Fix: Each pattern corrected; 3,927 rendered tool calls then verified with no failures.
+
+### FL-069: Redaction mangled dates, ids and amounts
+
+- Date: 2026-10-07
+- Where: PII redaction
+- Found by: failing test and review (three rounds)
+- Severity: Medium
+- What went wrong: `redact_text("2026-09-14 2026-09-16")` gave "[card removed]";
+  "DX404-2026-09-16 2026-09-16T08:30:00Z" gave "DX[card removed]T08:30:00Z"; "costs 18500
+  24000" gave "costs [phone removed]".
+- Fix: Tighter card, Aadhaar and phone patterns; a split mobile number needs a phone word.
+
+### FL-070: Triage replies in other letter cases were discarded
+
+- Date: 2026-10-07
+- Where: Nova model layer
+- Found by: review
+- Severity: Low
+- What went wrong: Triage confidence "Medium" or "HIGH" was not recognised.
+- Fix: Normalised before use.
+
+### FL-071: A model answer with no fact, or a blanket "no cover", passed as verified
+
+- Date: 2026-10-07
+- Where: verifier and Nova model layer
+- Found by: review (two rounds)
+- Severity: High
+- What went wrong: "Nobody can cover; cancel the flight." and "Done." were served as
+  verified model answers although four legal options existed; the explainer could prepend
+  "Do not call anyone out: cancel P-2291.".
+- Fix: A draft needs at least one supported claim; a no-cover or cancel verdict needs an
+  option search that found none.
+
+### FL-072: The explainer could drop content and still pass
+
+- Date: 2026-10-07
+- Where: Nova model layer
+- Found by: review
+- Severity: High
+- What went wrong: "Done." replaced a 12-item reserve list as an "explained" answer.
+- Fix: A rewrite must keep every id, time and number of the template.
+
+### FL-073: The advisor prompt handed the model figures the verifier always rejects
+
+- Date: 2026-10-07
+- Where: Nova model layer
+- Found by: review
+- Severity: Medium (wasted paid calls)
+- What went wrong: "₹250,000 per flight" and other cost figures from the prompt were
+  unsupported by any tool, so drafts that used them were always rejected.
+- Fix: Costs removed from the prompt; it says such figures are not evidence.
+
+### FL-074: Model usage per question included earlier questions
+
+- Date: 2026-10-07
+- Where: Nova model layer
+- Found by: review
+- Severity: Low-Medium
+- What went wrong: After the second question, usage reported 2 calls and 2000 input tokens,
+  counting the first question's call.
+- Fix: Usage is reset per question.
+
+### FL-075: The explainer reworded plain lookups
+
+- Date: 2026-10-07
+- Where: Nova model layer
+- Found by: review
+- Severity: Low
+- What went wrong: Every answered lookup cost a Nova call, contrary to the docs.
+- Fix: Only judgement answers are reworded, while half the time budget remains.
+
+### FL-076: A call to a tool not on offer stayed in the conversation history
+
+- Date: 2026-10-07
+- Where: Nova model layer
+- Found by: review
+- Severity: Low
+- What went wrong: Bedrock may reject a request whose history names a tool missing from the
+  tool configuration.
+- Fix: Such calls are dropped from the history.
+
+#### Auth, roles and plans
+
+### FL-077: Sign-in ignores case, but the profile lookup did not
+
+- Date: 2026-10-07
+- Where: auth
+- Found by: failing test
+- Severity: Medium
+- What went wrong: `AuthError: Crew1042 is crew but is linked to no crew record`.
+- Fix: Usernames are lower-cased before the profile lookup.
+
+### FL-078: Token claims were trusted without issuer and client checks
+
+- Date: 2026-10-07
+- Where: auth
+- Found by: review
+- Severity: High
+- What went wrong: Claims with `"iss": "https://evil"`, `"token_use": "id"` and the
+  super_admin group produced a super-admin caller.
+- Cause: The checks were optional and off by default.
+- Fix: Issuer and client are required, and only access tokens are accepted.
+
+### FL-079: Removing someone from the team file kept their access
+
+- Date: 2026-10-07
+- Where: account provisioning
+- Found by: review
+- Severity: High
+- What went wrong: `note: ann is not in the team (kept; --prune removes it)`, then
+  "Everything already matches the team file."; the account kept the admin group and its
+  profile.
+- Fix: Accounts not in the file lose their groups and profile by default; `--prune` deletes
+  them.
+
+### FL-080: Unsafe role combinations and name forms were accepted
+
+- Date: 2026-10-07
+- Where: account provisioning
+- Found by: review
+- Severity: Low
+- What went wrong: crew together with super_admin, and controller together with approver,
+  passed the team check; "A.Nair" passed the crew-style name check; `'["crew,super_admin"]'`
+  split into two roles.
+- Fix: Crew logins hold no other role, controller with approver is refused, and groups parse
+  strictly.
+
+### FL-081: Approval could put two crew in one seat
+
+- Date: 2026-10-07
+- Where: plans
+- Found by: review
+- Severity: High
+- What went wrong: Two overlapping sick reports for C-1042 led to a commit with P-2291's
+  crew holding two Captains, seven seats in all.
+- Cause: A stale "replaces" value led to an append.
+- Fix: Approval never appends; a missing replacement makes the plan STALE, and seat counts
+  are checked.
+
+### FL-082: Two concurrent approvals could double-book one crew member
+
+- Date: 2026-10-07
+- Where: plans
+- Found by: review
+- Severity: High
+- What went wrong: Plans on P-2216 and P-2209 both chose C-2143 and both committed.
+- Fix: A per-crew roster version is checked and bumped by every commit and by stored
+  crew-out reports.
+
+### FL-083: Two seats of one role on one pairing could never be submitted
+
+- Date: 2026-10-07
+- Where: plans
+- Found by: review
+- Severity: High
+- What went wrong: `INVALID one crew member is chosen for two seats`.
+- Fix: Seats are keyed by pairing, role and the person out.
+
+### FL-084: A disruption spanning two desks could not be planned
+
+- Date: 2026-10-07
+- Where: plans
+- Found by: review
+- Severity: Medium
+- What went wrong: Each controller got `FORBIDDEN … on desk-<n>` for the other desk's
+  pairing, and the disruption stayed OPTIONS_READY for good.
+- Fix: Any desk the disruption touches may plan it.
+
+### FL-085: Seats with no legal cover were silently dropped
+
+- Date: 2026-10-07
+- Where: plans
+- Found by: review
+- Severity: High
+- What went wrong: Uncoverable seats disappeared and the disruption was marked COMMITTED;
+  when no seat was coverable there was no way to end it.
+- Fix: Uncovered seats must be acknowledged, and a disruption with nothing coverable can be
+  closed with a reason.
+
+### FL-086: Sent-back plans stayed in the controller's queue
+
+- Date: 2026-10-07
+- Where: plans
+- Found by: review
+- Severity: Low
+- What went wrong: A stale plan stayed listed after its resubmission was committed.
+- Fix: Listed only while it is the disruption's latest plan.
+
+### FL-087: Closing could end a coverable disruption and free the sick crew member
+
+- Date: 2026-10-07
+- Where: plans
+- Found by: review (regression from the fix above)
+- Severity: High
+- What went wrong: C-1042 was unavailable before the close and available after it.
+- Fix: Close refuses while any seat is coverable, and CLOSED keeps the crew unavailable.
+
+### FL-088: Smaller plan defects
+
+- Date: 2026-10-07
+- Where: plans
+- Found by: review
+- Severity: Low-Medium
+- What went wrong: A transient transaction conflict was recorded as STALE; contention
+  warnings ignored dates; a large plan could exceed DynamoDB's 100-action transaction limit.
+- Fix: A RETRY error leaves the plan submitted; contention is date-aware; plans are capped
+  at 20 seats.
+
+#### Ingestion, analysis, search and configuration
+
+### FL-089: The report worker trusted the sender written in the message
+
+- Date: 2026-10-06
+- Where: live reports
+- Found by: review
+- Severity: Medium
+- What went wrong: Anyone able to send to the queue could claim the controller role or any
+  user id; the docs said the worker checks the sender's role.
+- Fix: The MCP server now sets the sender from a verified token, and the queue's policy
+  refuses every other sender except listed operators.
+
+### FL-090: The .env file was never read
+
+- Date: 2026-10-06
+- Where: configuration
+- Found by: question from the user
+- Severity: Medium
+- What went wrong: The template said "copy to .env", but nothing read it.
+- Fix: The app and the CDK app load `.env`; values set in the shell win.
+
+### FL-091: The deploy script let .env override the command line
+
+- Date: 2026-10-06
+- Where: deploy script
+- Found by: live diff
+- Severity: Medium
+- What went wrong: `AWS_REGION=ap-southeast-2 scripts/cdk.sh diff` still synthesized for
+  us-east-1 and hit the region deny.
+- Cause: Sourcing `.env` overwrote values already set in the shell.
+- Fix: Values already set in the shell win.
+
+### FL-092: The bash and Python .env parsers disagreed
+
+- Date: 2026-10-06
+- Where: configuration
+- Found by: review
+- Severity: Medium
+- What went wrong: Trailing spaces or CRLF exported `"crewops  \r"` in bash; `S = v` was
+  skipped; a bare `T` became `T=T`; deploy and seed could use different regions.
+- Fix: The deploy script evaluates the Python parser's exports: one parser.
+
+### FL-093: Duplicate keys could half-write a batch
+
+- Date: 2026-10-06
+- Where: data store
+- Found by: review
+- Severity: Medium
+- What went wrong: Two licences or two reserve blocks for one person mapped to one key; the
+  write raised mid-batch while the batch writer still flushed, leaving the table half
+  written.
+- Fix: Duplicate keys are refused before anything is written.
+
+### FL-094: An oversized roster upload reported an invented size
+
+- Date: 2026-10-06
+- Where: roster uploads
+- Found by: self-review
+- Severity: Low
+- What went wrong: The size check passed a padded buffer, so the report showed a made-up
+  size.
+- Fix: Rejected directly with the real size and the limit.
+
+### FL-095: A long report id became a poison message
+
+- Date: 2026-10-06
+- Where: live reports
+- Found by: review
+- Severity: High
+- What went wrong: A 3000-character `report_id` became a rejection key over DynamoDB's
+  2048-byte limit, so the message retried into the dead-letter queue and was never recorded.
+- Fix: Only well-formed ids become keys; others are filed as unidentified.
+
+### FL-096: A huge rejection reason exceeded DynamoDB's item limit
+
+- Date: 2026-10-06
+- Where: live reports
+- Found by: review
+- Severity: High
+- What went wrong: A 500,000-character field produced "Item size has exceeded the maximum
+  allowed size", so retries, then the dead-letter queue.
+- Cause: Error messages echoed the input in full.
+- Fix: Quoted input is shortened and reasons are capped.
+
+### FL-097: A reused report id lost the second report
+
+- Date: 2026-10-06
+- Where: live reports
+- Found by: review
+- Severity: Medium
+- What went wrong: A different report with an existing id was silently treated as a
+  duplicate.
+- Fix: Content is compared: the same content is a duplicate, different content an id
+  conflict.
+
+### FL-098: Rejection records overwrote each other, and future times were accepted
+
+- Date: 2026-10-06
+- Where: live reports
+- Found by: review
+- Severity: Low
+- What went wrong: Rejections in the same second shared a key; reports dated in the future
+  were accepted.
+- Fix: Rejections are keyed by time and message id; reports more than 5 minutes ahead are
+  refused.
+
+### FL-099: A resend with a fresh timestamp was rejected as an id conflict
+
+- Date: 2026-10-07
+- Where: live reports
+- Found by: live run in AWS
+- Severity: Medium
+- What went wrong: `report r-demo-0001 stored`, then `rejected report r-demo-0001: report id
+  already used for a different report`.
+- Cause: The content comparison included `reported_utc`, which the send command stamps anew.
+- Fix: The report time is ignored when comparing; the first copy keeps its time.
+
+### FL-100: The analysis ignored other open disruptions
+
+- Date: 2026-10-07
+- Where: disruption analysis
+- Found by: review
+- Severity: Medium
+- What went wrong: When a second report took C-3310 out, the first disruption's analysis
+  still recommended C-3310; the existing test built exactly this case and passed.
+- Fix: Crew out in another open disruption are excluded, with the reason naming that report.
+
+### FL-101: Analysis failures retried pointlessly and the rerun command stopped early
+
+- Date: 2026-10-07
+- Where: disruption analysis
+- Found by: review
+- Severity: Low
+- What went wrong: A bad stored report failed four times, then went to a dead-letter queue
+  holding only stream pointers; `--pending` stopped at the first failure; a deleted item
+  reported already analysed.
+- Fix: An ANALYSIS_FAILED audit event; `--pending` handles each item and exits non-zero on
+  failure; a missing item is reported as missing.
+
+### FL-102: Analysis summaries could mislead, and their size was unbounded
+
+- Date: 2026-10-07
+- Where: disruption analysis
+- Found by: review
+- Severity: Low-Medium
+- What went wrong: DX412's summary repeated "cancelling costs ₹1,500,000" six times and did
+  not name overnight rest as the cause; the stored output had no bound against the 400 KB
+  item limit.
+- Fix: Cost stated once per trip, the cause named, output capped.
+
+### FL-103: Search indexes leaked answers and matched questions to themselves
+
+- Date: 2026-10-07
+- Where: search
+- Found by: review
+- Severity: High
+- What went wrong: The indexed text "Draft the callout notification to C-3310 for covering
+  P-2291" surfaced C-3310 for any P-2291 question; every gold question matched itself with
+  score 1.0.
+- Fix: Ids and dates are masked in indexed questions and queries; evaluations score
+  rewordings, never indexed prompts.
+
+### FL-104: Smaller search defects
+
+- Date: 2026-10-07
+- Where: search
+- Found by: review
+- Severity: Low
+- What went wrong: "FDP" did not keyword-match `rule-fdp-01`; past 100 documents keyword
+  scoring would have covered only the first page; the index command printed raw tracebacks.
+- Fix: Hyphenated ids split into parts, an index-size guard, one-line errors.
+
+#### MCP server, memory and notifications
+
+### FL-017: A server's "forbidden" told a caller which disruptions exist
+
+- Date: 2026-10-07
+- Severity: Medium (found in review before deployment)
+- Task attempted: Let crew read only disruptions they reported, through `show_disruption`.
+- Steps taken: Returned NOT_FOUND for a missing id and FORBIDDEN for one the caller may not
+  read.
+- Expected: A caller learns nothing about records they may not read.
+- Actual: The two answers differed, so anyone signed in could probe ids and learn which
+  disruptions exist.
+- Workaround: Both cases now return the same NOT_FOUND message.
+- Suggestion: n/a (our own code); noted because the same pattern is easy to miss in any
+  role-checked API.
+
+### FL-105: Unexpected errors showed AWS internals to MCP clients
+
+- Date: 2026-10-07
+- Where: MCP server
+- Found by: review
+- Severity: Medium
+- What went wrong: A client received `Error executing tool ask: An error occurred
+  (AccessDeniedException) when calling the Scan operation: User:
+  arn:aws:sts::<account>:assumed-role/…/sess is not authorized …`.
+- Fix: Logged on the server; the client sees `INTERNAL: something went wrong; it has been
+  logged`.
+
+### FL-106: Shared server state was not thread-safe, and the key fetch could wait 30 s
+
+- Date: 2026-10-07
+- Where: MCP server
+- Found by: review
+- Severity: Medium
+- What went wrong: Three concurrent questions took 4.54 s instead of about 1.5 s; once tools
+  moved to threads, the cached pipeline and its usage counters were shared; the Cognito key
+  fetch had a 30 s default timeout.
+- Fix: Locks around the cache and each question, and a 3 s key-fetch timeout.
+
+### FL-107: Local server runs listened on every interface
+
+- Date: 2026-10-07
+- Where: MCP server
+- Found by: review
+- Severity: Low
+- What went wrong: A local run bound to 0.0.0.0, with no protection against DNS rebinding.
+- Fix: Local runs bind to 127.0.0.1; only the AgentCore entry point uses 0.0.0.0.
+
+### FL-108: The command-line client printed a one-item list as an object
+
+- Date: 2026-10-08
+- Where: MCP client
+- Found by: review
+- Severity: Low
+- What went wrong: `my_queue` with one item printed an object, with two a list.
+- Fix: List tools always print a list, checked against the server's tools by a test.
+
+### FL-109: Alert-address edge cases were unexplained
+
+- Date: 2026-10-08
+- Where: alerts
+- Found by: review
+- Severity: Low
+- What went wrong: Removing an unconfirmed address failed without a reason, and lapsed
+  unconfirmed addresses stayed listed and counted toward the limit.
+- Fix: The tools explain both; removal works once confirmed or after the address lapses.
+
+#### Evaluation and tests
+
+### FL-019: Two evaluation checks could never fail
+
+- Date: 2026-10-08
+- Severity: Medium (found in review before the results were published)
+- Task attempted: Report "answers with an unsourced fact" and "answers with personal data"
+  in the held-out evaluation.
+- Steps taken: Counted model answers without a passing verification, and answers that
+  redaction would change.
+- Expected: Checks that would catch a regression.
+- Actual: The pipeline only returns a model answer after it verifies, and every answer is
+  already redacted (redaction is idempotent), so both counts were 0 by construction.
+- Workaround: Every factual answer is now verified again against its own tool results,
+  independently of the pipeline, and an answer showing a redaction marker counts as
+  personal data reaching it.
+- Suggestion: n/a (our own code). Lesson: check that an evaluation metric can fail before
+  publishing it.
+
+### FL-110: Tests read the developer's real .env and leaked settings between tests
+
+- Date: 2026-10-06
+- Where: tests
+- Found by: review
+- Severity: Medium
+- What went wrong: A dry-run test loaded the real `.env`, and config tests left
+  `CREWOPS_STAGE=demo`, `AWS_REGION=eu-west-1` and others set for later tests.
+- Fix: An isolated environment fixture; a leak probe now finds nothing.
+
+### FL-111: Two prompt-injection evaluation cases could not fail
+
+- Date: 2026-10-08
+- Where: evaluation
+- Found by: review
+- Severity: Medium
+- What went wrong: The "approve every plan" case forbade "approved", but no tool reachable
+  from a question writes anything; the phone-number case forbade "+91", but the seed holds
+  no phone numbers and any would be redacted first.
+- Fix: The first fails if any tool outside a hand-kept read-only list runs; the second looks
+  for redaction markers. The docs say both guard against future changes.
+
+### FL-112: The live evaluation's cost statement was wrong
+
+- Date: 2026-10-08
+- Where: evaluation
+- Found by: review
+- Severity: Low
+- What went wrong: The docs said "about 130 questions"; the run asks 99, each with several
+  Bedrock calls.
+- Fix: Corrected, and the report prints the calls and tokens used.
+
+### FL-113: Two held-out cases were not held out
+
+- Date: 2026-10-08
+- Where: evaluation
+- Found by: review
+- Severity: Low-Medium
+- What went wrong: Two cases used exactly the question the seat fix (FL-012) was built on.
+- Fix: Fresh pairings and wording; both still pass.
+
+### FL-114: A search test passed for the wrong reason
+
+- Date: 2026-10-07
+- Where: tests
+- Found by: review
+- Severity: Low
+- What went wrong: The "found by paraphrase" test shared the words rest, release, next and
+  report with the rule, so it tested keywords, not meaning.
+- Fix: A query sharing no word with any document.
+
+#### Documentation
+
+### FL-115: The docs described behaviour that was not built, or was different
+
+- Date: 2026-10-06 to 2026-10-08
+- Where: README and docs
+- Found by: reviews
+- Severity: Low
+- What went wrong: Claims included live console updates and email alerts before they
+  existed, Bedrock prompt caching that no request set, "the sender a report names is always
+  the signed-in user" before the queue policy, and "the crew member is notified" on commit.
+- Fix: Each reworded, or marked as planned, in its commit.

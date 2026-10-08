@@ -65,10 +65,16 @@ async def call(url: str, token: str, tool: str | None, arguments: dict[str, Any]
             return {"error": " ".join(getattr(c, "text", "") for c in result.content)}
         if result.structuredContent is not None:
             return result.structuredContent
-        return _parsed([getattr(c, "text", str(c)) for c in result.content])
+        texts = [getattr(c, "text", str(c)) for c in result.content]
+        return _parsed(texts, as_list=tool in LIST_TOOLS)
 
 
-def _parsed(texts: list[str]) -> Any:
+LIST_TOOLS = frozenset({"my_queue", "alert_addresses", "list_crew_tools"})
+"""The server's tools that return a list. Their results arrive as one text item per
+element, so a one-element list would otherwise look like a single object."""
+
+
+def _parsed(texts: list[str], as_list: bool = False) -> Any:
     """Tool results arrive as JSON text, one item per list element: show them as JSON."""
     values = []
     for text in texts:
@@ -76,7 +82,7 @@ def _parsed(texts: list[str]) -> Any:
             values.append(json.loads(text))
         except ValueError:
             values.append(text)
-    return values[0] if len(values) == 1 else values
+    return values if as_list or len(values) != 1 else values[0]
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -75,6 +75,7 @@ def test_a_seat_a_date_or_one_id_answers_the_question_back(pipeline, reply):
         "Who is on reserve at BLR on 15 Sep and are they rested?",
         "List the reserves at BLR on 15 Sep with their duty hours",
         "Is there a plan waiting and has she approved it?",
+        "Who is her captain on P-2291?",
     ],
 )
 def test_plural_and_other_people_are_not_the_last_crew_member(pipeline, question):

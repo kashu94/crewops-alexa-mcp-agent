@@ -267,3 +267,15 @@ def test_third_round_routing(pipeline):
         ask(pipeline, "Show flights in GMT on 16 Sep from BLR").trace[0].args["entity"] == "flights"
     )
     assert "A. Nair (C-1042)" in ask(pipeline, "C-1042?").text
+
+
+def test_the_model_never_picks_the_seat_to_cover():
+    called = []
+
+    def drafter(question, route, trace, run, allowed):
+        called.append(question)
+        return "The cheapest legal option for the Captain seat is C-3310."
+
+    answer = model_pipeline(drafter).answer("Who can cover P-2291 on 15 Sep?", CONTROLLER)
+    assert answer.source == "clarify" and answer.awaiting == "detail"
+    assert answer.text.startswith("Which seat needs cover on P-2291") and not called

@@ -180,7 +180,9 @@ def build_server(
 
     @mcp.tool(annotations=COMMIT)
     async def remove_alert_address(subscription_id: str, ctx: Context) -> dict:
-        """Admin: stop sending alerts to an address (its id from `alert_addresses`)."""
+        """Admin: stop sending alerts to an address (its id from `alert_addresses`). An
+        address never confirmed lapses after three days but stays listed, and counts
+        toward the limit, until it is removed here."""
         return await run(ctx, lambda c: api.remove_alert_address(c, subscription_id))
 
     @mcp.tool(annotations=READ)

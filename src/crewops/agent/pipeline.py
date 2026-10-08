@@ -180,6 +180,9 @@ class Pipeline:
         # they did, the template says exactly what they returned, and nothing a model could
         # add (a conclusion with no id or number in it) can slip past the verifier.
         wants_model = not any(e.ok for e in trace)
+        if not trace and (seat := self._which_seat(route)):
+            # Which seat is the asker's to say: a model must never pick one for them.
+            return Answer(question, seat, route, source="clarify", awaiting="detail", notes=notes)
         if self.drafter is not None and allowed and wants_model:
 
             def run(name: str, args: dict[str, Any]) -> TraceEntry:
@@ -284,6 +287,21 @@ class Pipeline:
                 notes.append(f"answer screening unavailable ({type(exc).__name__})")
         return Answer(question, text, route, trace, checked, source, awaiting, notes)
 
+    @staticmethod
+    def _which_seat(route: Route) -> str | None:
+        """The question back when cover is asked for a pairing or flight without saying the
+        seat or who is out, or None."""
+        ents = route.entities
+        if route.intent not in (Intent.FIND_REPLACEMENT, Intent.RANK_OPTIONS):
+            return None
+        where = ents.pairing_ids or ents.flight_ids or ents.flight_nos
+        if not where or ents.roles or ents.crew_ids:
+            return None
+        return (
+            f"Which seat needs cover on {where[0]}: Captain, First Officer, Senior Cabin Crew "
+            "or Cabin Crew? Or tell me who is out."
+        )
+
     def _nothing_ran(self, route: Route, planned: list[ToolCall], allowed: frozenset[str]) -> str:
         """Why nothing was checked: never an empty answer, which would sound like "all clear"."""
         if planned and not allowed & {c.name for c in planned}:
@@ -295,14 +313,8 @@ class Pipeline:
             and not (ents.crew_ids or ents.pairing_ids or ents.flight_ids)
         ):
             return SCOPE
-        if route.intent in (Intent.FIND_REPLACEMENT, Intent.RANK_OPTIONS) and (
-            (ents.pairing_ids or ents.flight_ids or ents.flight_nos) and not ents.roles
-        ):
-            where = (ents.pairing_ids or ents.flight_ids or ents.flight_nos)[0]
-            return (
-                f"Which seat needs cover on {where}: Captain, First Officer, Senior Cabin Crew "
-                "or Cabin Crew? Or tell me who is out."
-            )
+        if seat := self._which_seat(route):
+            return seat
         what = route.intent.value.replace("_", " ").lower()
         text = f"I read this as {what}, but couldn't run it."
         if needed := MISSING.get(route.intent):

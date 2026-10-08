@@ -14,6 +14,7 @@ and every change leaves an audit event (``ALERTS / AUDIT#ts#action#id``).
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -33,6 +34,8 @@ MAX_ADDRESSES = 20
 ADMINS = frozenset({Role.ADMIN, Role.SUPER_ADMIN})
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$")
 PK = "ALERTS"
+
+log = logging.getLogger(__name__)
 
 
 class AlertError(Exception):
@@ -96,7 +99,10 @@ class AlertSubscriptions:
                 ReturnSubscriptionArn=True,
             )["SubscriptionArn"]
         except ClientError as exc:
-            self._count_today(now, -1)  # nothing was added: give the day's slot back
+            try:
+                self._count_today(now, -1)  # nothing was added: give the day's slot back
+            except Exception:  # never hide why the address was refused
+                log.exception("could not give back today's alert slot")
             if _code(exc) == "InvalidParameter":
                 message = exc.response.get("Error", {}).get("Message", "")
                 raise AlertError("INVALID", f"AWS refused the address: {message}") from None
