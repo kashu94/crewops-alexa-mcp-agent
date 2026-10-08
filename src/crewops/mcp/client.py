@@ -69,7 +69,16 @@ async def call(url: str, token: str, tool: str | None, arguments: dict[str, Any]
         return _parsed(texts, as_list=tool in LIST_TOOLS)
 
 
-LIST_TOOLS = frozenset({"my_queue", "alert_addresses", "list_crew_tools"})
+LIST_TOOLS = frozenset(
+    {
+        "my_queue",
+        "alert_addresses",
+        "list_crew_tools",
+        "rule_thresholds",
+        "activity_log",
+        "disruptions",
+    }
+)
 """The server's tools that return a list. Their results arrive as one text item per
 element, so a one-element list would otherwise look like a single object."""
 

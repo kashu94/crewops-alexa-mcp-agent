@@ -131,7 +131,11 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Expected: The rewording keeps the template's facts and adds none, as the prompt asks.
 - Actual: The answer's notes read `model draft rejected: 1 unsourced claim(s) (number)`.
   The reworded text contained a number found in no tool result, so the template answer
-  was given instead.
+  was given instead. Seen again on 2026-10-08, through the deployed MCP server: the reply
+  "Captain" to "Who can cover P-2291 on 15 Sep?" (cover for the Captain seat, three legal
+  day-off callouts at ₹24,000) carried the note `rewording dropped or changed a fact;
+  template used` (`"model_calls": 1`). The rewrite lost or altered one of the template's
+  ids, times or figures.
 - Workaround: None needed: every model draft is verified, and the deterministic template
   is the fallback. This entry tracks how often it happens, for the evals.
 - Suggestion: A Converse option to constrain a rewrite to the numbers and ids in the input
@@ -541,6 +545,23 @@ Entries in section 4 are about our own code, so they use a shorter form:
   "dynamodb:PutItem")`, pinned by a test.
 - Suggestion: List the actions each convenience grant includes in its docstring.
 
+### FL-116: AppSync Events docs say "ID token" but show an access token
+
+- Date: 2026-10-08
+- Service / tool: AWS AppSync Events, Amazon Cognito user pools (WebSocket protocol docs)
+- Severity: Low (about 20 minutes; not yet confirmed live)
+- Task attempted: Connect the web console to the live-events channel with the signed-in
+  user's Cognito token. The rest of the app uses access tokens.
+- Steps taken: Read "Understanding the Event API WebSocket protocol", section "Amazon Cognito
+  user pools and OpenID Connect (OIDC) subprotocol format".
+- Expected: One clear statement of which Cognito token the API accepts.
+- Actual: The text says `"Authorization": <string>: A JWT ID token.`, but the example token
+  under it decodes to `"token_use":"access"`, an access token.
+- Workaround: The web app keeps both tokens in httpOnly cookies and gives the live-events
+  socket the ID token, as the text says; the first live run will confirm it.
+- Suggestion: Say whether ID tokens, access tokens or both are accepted, and make the
+  example match.
+
 ## 3. Core software stack and local tooling (Python, uv, Node, test tooling)
 
 ### FL-010: Every CDK synth and test run prints a Node end-of-life banner
@@ -600,6 +621,37 @@ Entries in section 4 are about our own code, so they use a shorter form:
   them would break token checks.
 - Workaround: `pyjwt[crypto]>=2.10` declared in the server group and locked.
 - Suggestion: n/a (our dependency hygiene).
+
+### FL-117: Next.js 16 route types exist only after a build or `next typegen`
+
+- Date: 2026-10-08
+- Service / tool: Next.js 16.4, TypeScript
+- Severity: Low (about 10 minutes)
+- Task attempted: Type-check the new web app with `tsc --noEmit`, using the `LayoutProps`
+  and `RouteContext` types the scaffold itself uses.
+- Steps taken: Ran `npx tsc --noEmit` on a fresh checkout.
+- Expected: The scaffold's own types resolve.
+- Actual: `app/layout.tsx(11,50): error TS2304: Cannot find name 'LayoutProps'.` and
+  `app/api/tools/[name]/route.ts(10,51): error TS2304: Cannot find name 'RouteContext'.`
+  They are generated globals, written by `next build` or `next typegen`.
+- Workaround: `npm run typecheck` runs `next typegen && tsc --noEmit`.
+- Suggestion: Have the scaffold's `typecheck` script (or a postinstall step) generate the
+  types, or say so in the generated README.
+
+### FL-118: A fresh Next.js scaffold reports five high-severity advisories
+
+- Date: 2026-10-08
+- Service / tool: create-next-app 16.4.0, eslint-config-next 16.4.0, npm audit
+- Severity: Low (development tooling only)
+- Task attempted: Install the web app's dependencies.
+- Steps taken: Scaffolded with `create-next-app`, then `npm install`.
+- Expected: A clean audit for a brand-new project.
+- Actual: `5 high severity vulnerabilities`, all through `micromatch` -> `fast-glob` ->
+  `@next/eslint-plugin-next` -> `eslint-config-next`; `npm audit fix --force` would make
+  breaking changes.
+- Workaround: Left as is: the packages are lint tooling and never ship in the app.
+- Suggestion: Release eslint-config-next with patched dependencies, or note in the audit
+  output that only development tooling is affected.
 
 ## 4. Our own code (found by tests, reviews, reference data and live runs)
 
@@ -1497,6 +1549,192 @@ Entries in section 4 are about our own code, so they use a shorter form:
   unconfirmed addresses stayed listed and counted toward the limit.
 - Fix: The tools explain both; removal works once confirmed or after the address lapses.
 
+#### Rule settings
+
+### FL-130: Two quick changes to one rule kept only one audit record
+
+- Date: 2026-10-08
+- Where: rule settings
+- Found by: review
+- Severity: Medium
+- What went wrong: Setting RULE-REST-04 from 12 to 13 and then 13 to 14 within one second
+  left only the 13 to 14 record; the first change had no audit trail.
+- Cause: The audit key was only the second, the action and the rule, written without a
+  condition.
+- Fix: Each record's key also carries a short random id, and the write refuses to replace an
+  existing record.
+
+### FL-131: A non-numeric "value it replaces" crashed the rule change
+
+- Date: 2026-10-08
+- Where: rule settings
+- Found by: review
+- Severity: Low
+- What went wrong: `expected=None` raised `decimal.InvalidOperation`, and a string failed
+  while building the conflict message ("Unknown format code 'g' for object of type 'str'");
+  both reached the caller as INTERNAL.
+- Cause: Only the new value was checked to be a number.
+- Fix: Both numbers are checked, and either being wrong is refused as INVALID.
+
+#### Web app
+
+### FL-119: Enter in the reason box approved and committed a plan
+
+- Date: 2026-10-08
+- Where: web console
+- Found by: review
+- Severity: High
+- What went wrong: On a disruption page, an approver typing a rejection reason and pressing
+  Enter submitted the form as its first button, "Approve and commit", and the roster
+  changed.
+- Cause: The approve, reject and withdraw buttons shared one form with the reason field;
+  Enter submits a form with its first submit button.
+- Fix: No form: the buttons act on click only, Enter in the reason box does nothing,
+  approving needs a second confirm click, and Reject needs a reason.
+
+### FL-120: Leaving a page while it connected left a live socket open
+
+- Date: 2026-10-08
+- Where: web live updates
+- Found by: review
+- Severity: Medium
+- What went wrong: If the page unmounted while `/api/live` was being fetched, the socket was
+  still opened afterwards and kept calling the old page's handler, which re-read the queue.
+- Cause: The connect step did not check, after its awaits, whether the page had gone.
+- Fix: It checks after each wait and opens nothing once the page is gone.
+
+### FL-121: Live updates retried forever when access was refused
+
+- Date: 2026-10-08
+- Where: web live updates
+- Found by: review
+- Severity: Low
+- What went wrong: Signed out, or a role without access to the channel, the hook retried
+  every 30 seconds for as long as the page was open, each try possibly refreshing the
+  session.
+- Fix: A 401 from `/api/live`, or an unauthorized error from AppSync, stops retrying and
+  shows "unavailable".
+
+### FL-122: Nothing limited request sizes or spoken answers
+
+- Date: 2026-10-08
+- Where: web server routes
+- Found by: review
+- Severity: Medium
+- What went wrong: Route handlers read whole bodies before checking them, and any signed-in
+  user could ask Polly for unlimited 1,500-character answers.
+- Cause: Next applies no body-size limit to route handlers.
+- Fix: Each route refuses a body declared larger than it accepts, before reading it; speech
+  is limited to 30 answers per user in 10 minutes.
+
+### FL-123: A failed sign-in check spun forever
+
+- Date: 2026-10-08
+- Where: web shell
+- Found by: review
+- Severity: Low
+- What went wrong: When `whoami` failed for any reason but 401 (for example the MCP server
+  unreachable), the page showed a spinner indefinitely.
+- Fix: The error is shown with a "Try again" link.
+
+### FL-124: The admin form cleared the address even when adding failed
+
+- Date: 2026-10-08
+- Where: web admin page
+- Found by: review
+- Severity: Low
+- What went wrong: After a refused address (duplicate, daily limit, invalid), the typed
+  address was gone.
+- Cause: The form was reset as soon as the request started.
+- Fix: It is reset only after a successful add.
+
+### FL-125: Each spoken answer stayed in memory until the tab closed
+
+- Date: 2026-10-08
+- Where: web assistant
+- Found by: review
+- Severity: Low
+- What went wrong: Every answer's MP3 got an object URL that was never revoked.
+- Fix: The previous URL is revoked before each new answer and when the page closes.
+
+### FL-126: A spoken question could land in the conversation just left
+
+- Date: 2026-10-08
+- Where: web assistant
+- Found by: review
+- Severity: Low
+- What went wrong: Pressing "New conversation" while listening sent the spoken question
+  under the old conversation id.
+- Cause: The id was captured when listening started.
+- Fix: The id is read when the question is sent.
+
+### FL-127: The settings command crashed with a traceback on a missing output
+
+- Date: 2026-10-08
+- Where: web settings command
+- Found by: review
+- Severity: Low
+- What went wrong: A stack deployed before an output existed made `python -m
+  crewops.web_env` end in a raw KeyError traceback.
+- Cause: Only the stack reads were inside the error handling, not the use of their outputs.
+- Fix: Building the settings is inside it too; a missing output gives a one-line message.
+
+### FL-129: Long spoken answers were cut off inside the speaker card
+
+- Date: 2026-10-08
+- Where: web assistant (Alexa+ module)
+- Found by: screenshot of the redesigned console
+- Severity: Low
+- What went wrong: A long answer (cover options plus the six affected flights) ran past the
+  speaker card and was clipped mid-sentence, ending at "DX590 and".
+- Cause: The card hides overflow and the answer had no line limit.
+- Fix: The speaker shows the first five lines, with the whole answer as a tooltip and in the
+  voice log below.
+
+### FL-132: Controllers saw a Submit button for disruptions off their desk
+
+- Date: 2026-10-08
+- Where: web console
+- Found by: review
+- Severity: Low
+- What went wrong: Any controller saw "Submit the recommended plan" for any disruption ready
+  for a plan; for one off their desk the server refused with FORBIDDEN.
+- Fix: The button appears only for disruptions on the controller's desk.
+
+### FL-133: The crew calendar showed the week of the first trip, not this week
+
+- Date: 2026-10-08
+- Where: web crew view
+- Found by: review
+- Severity: Low
+- What went wrong: "This week" showed the Monday-to-Sunday week of the first rostered day,
+  so a crew member whose trips start later saw a different week.
+- Fix: It shows the week containing the operation's current day.
+
+### FL-134: A legality check could seem to contradict the ranked option
+
+- Date: 2026-10-08
+- Where: web console
+- Found by: review
+- Severity: Low
+- What went wrong: A positioning or delayed option ranked legal by the engine could show
+  "Not legal now" on its card, because the on-demand check judges the trip as rostered.
+- Fix: Such cards say the check is against the trip as rostered and that the ranking already
+  allows for the positioning or delay.
+
+### FL-135: Missing accessibility basics on the new pages
+
+- Date: 2026-10-08
+- Where: web app
+- Found by: review
+- Severity: Low
+- What went wrong: The report sheet did not close on Escape, option cards did not say
+  whether they were expanded, the status banner was not announced, and the view menu claimed
+  list roles without keyboard support.
+- Fix: Escape closes the sheet and the menu, the first field takes focus, cards set
+  aria-expanded, the banner is a polite live region, and the menu uses plain buttons with
+  aria-current.
+
 #### Evaluation and tests
 
 ### FL-019: Two evaluation checks could never fail
@@ -1579,3 +1817,13 @@ Entries in section 4 are about our own code, so they use a shorter form:
   existed, Bedrock prompt caching that no request set, "the sender a report names is always
   the signed-in user" before the queue policy, and "the crew member is notified" on commit.
 - Fix: Each reworded, or marked as planned, in its commit.
+
+### FL-128: The docs said the browser never calls AWS
+
+- Date: 2026-10-08
+- Where: README, web README, ARCHITECTURE, D9
+- Found by: review
+- Severity: Low
+- What went wrong: "The browser never calls AWS", but the live-events socket connects from
+  the browser to AppSync with the ID token.
+- Fix: "The browser calls no AWS API except the live-events socket".

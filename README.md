@@ -111,13 +111,13 @@ src/crewops/
   plans/                Plans and approvals, with the four-eyes rules
   mcp/                  The MCP server for AgentCore, its package builder and a client
   notify/               Live console events and admin-managed email alerts
+web/                    The web app (Next.js): Alexa+ simulator, console, crew view, admin
 infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
 ```
 
-More folders arrive as the build progresses: the web app and the Alexa skill at the top
-level.
+The Alexa skill arrives at the top level in a later step.
 
 ## Getting started
 
@@ -321,8 +321,10 @@ uv run python -m crewops.mcp.client --as crew1042 report_disruption \
 Its tools: `ask` (the full verified answer pipeline), `my_queue`, `show_disruption`,
 `report_disruption`, the plan actions (`submit_plan`, `approve_plan`, `reject_plan`,
 `withdraw_plan`, `close_disruption`), `list_crew_tools` / `crew_tool` for the
-deterministic tools directly, and, for admins, `alert_addresses`, `add_alert_address` and
-`remove_alert_address`. What each user may do depends on their role.
+deterministic tools directly, `whoami`, `disruptions` (the desk's feed), `my_roster`
+(crew), `rule_thresholds`, and, for admins, `set_rule_threshold`, `activity_log`,
+`alert_addresses`, `add_alert_address` and `remove_alert_address`. What each user may do
+depends on their role.
 
 A follow-up needs the same conversation id on each question. The previous turn then fills
 in only what a reply giving just a seat, a date or an id, or a "he", "she" or "that
@@ -350,6 +352,32 @@ uv run python -m crewops.mcp.client --as priya alert_addresses
 ```
 
 Alerts and events name the disruption and its status, never a person.
+
+### The web app
+
+The web app in `web/` is the Alexa+ experience and the desk's console. It needs Node.js 20
+or later and the deployed Auth, Mcp and Notify stacks:
+
+```bash
+uv run python -m crewops.web_env     # writes web/.env.local from the stack outputs
+cd web && npm install && npm run dev # http://localhost:3000
+```
+
+| View | Who | What it does |
+|---|---|---|
+| Controller | controllers, auditors, admins | Live figures, the ingestion feed of disruptions, the Alexa+ voice module, and the solution engine: each seat's legal cover ranked by cost, with every rule's margin checked on demand and the plan submitted from there |
+| Approver | approvers, auditors | The four-eyes queue: each waiting plan, approved with a second confirming click or sent back with a reason |
+| Crew | crew | This week's duty calendar, my flights, duty-limit gauges, and reporting myself unavailable |
+| Admin | admins | Rule thresholds (tighten only), the system activity log, and alert addresses |
+| Assistant | everyone | The Alexa+ module on its own: talk or type, hear the answer (Amazon Polly), follow up |
+
+The "View" menu lists only the views the signed-in roles allow, and a banner slides in with
+every disruption status change.
+
+The browser calls no AWS API except the live-events socket: the app's server forwards
+every action to the MCP server as the signed-in user, so every role rule is the server's. Voice input uses the browser's
+speech recognition (Chrome or Edge); elsewhere, type. Hosting on AWS comes in the next
+step.
 
 ### Asking a question
 

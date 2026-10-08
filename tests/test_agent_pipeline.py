@@ -279,3 +279,10 @@ def test_the_model_never_picks_the_seat_to_cover():
     answer = model_pipeline(drafter).answer("Who can cover P-2291 on 15 Sep?", CONTROLLER)
     assert answer.source == "clarify" and answer.awaiting == "detail"
     assert answer.text.startswith("Which seat needs cover on P-2291") and not called
+
+
+def test_cover_options_read_as_a_sentence(pipeline):
+    prompt = next(q["prompt"] for q in questions() if q["question_id"] == "Q31")
+    text = ask(pipeline, prompt).text
+    assert "the cheapest legal choice is to assign Captain D. Reddy (C-3310)" in text
+    assert "Assign " not in text

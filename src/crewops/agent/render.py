@@ -195,8 +195,13 @@ def _legality(r: dict[str, Any], args: dict[str, Any]) -> str:
     return f"{who} is not legal for {r['pairing_id']}{delay}. {reasons}."
 
 
-def _option(o: dict[str, Any]) -> str:
-    return f"{o['action']}, {_inr(o['cost_inr'])}"
+def _option(o: dict[str, Any], lead: str = "") -> str:
+    """An option as part of a sentence: "to assign Captain …" after "is", "assign …" in a
+    list. The engine's labels start with a capital for use on their own."""
+    action = o["action"]
+    if action.startswith("Assign "):
+        action = f"{lead}assign {action[len('Assign ') :]}"
+    return f"{action}, {_inr(o['cost_inr'])}"
 
 
 def _options(r: dict[str, Any], args: dict[str, Any]) -> str:
@@ -209,7 +214,7 @@ def _options(r: dict[str, Any], args: dict[str, Any]) -> str:
             f"No legal cover for {seat}{out}; {r['excluded_count']} candidates were ruled out. "
             f"Cancelling costs {_inr(cancel['cost_inr'])}: {cancel['action']}."
         )
-    text = f"For {seat}{out}, the cheapest legal choice is {_option(rec)}."
+    text = f"For {seat}{out}, the cheapest legal choice is {_option(rec, 'to ')}."
     others = [o for o in r["options"][1:3]]
     if others:
         text += " Next: " + "; ".join(_option(o) for o in others) + "."

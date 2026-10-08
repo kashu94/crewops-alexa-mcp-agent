@@ -124,6 +124,60 @@ def test_ask_answers_as_the_caller(api):
     )
 
 
+def test_whoami_is_the_verified_caller(api):
+    assert api.whoami(CREW) == {
+        "user_id": "crew1042",
+        "roles": ["crew"],
+        "crew_id": "C-1042",
+        "desk": None,
+    }
+    assert api.whoami(ROHIT)["desk"] == "desk-2"
+
+
+def test_crew_see_their_own_roster_only(api):
+    roster = api.my_roster(CREW)
+    assert roster["crew_id"] == "C-1042" and roster["clock"]["crew_id"] == "C-1042"
+    assert [p["pairing_id"] for p in roster["pairings"]] == ["P-2291"]
+    assert roster["pairings"][0]["role"] == "Captain"
+    with pytest.raises(ApiError) as err:
+        api.my_roster(ROHIT)
+    assert err.value.code == "FORBIDDEN"
+
+
+def test_rule_thresholds_are_read_by_staff_and_changed_by_admins(api):
+    admin = Caller("priya", frozenset({Role.ADMIN}))
+    assert {t["param"] for t in api.thresholds(ROHIT)} >= {"min_rest_hours"}
+    with pytest.raises(ApiError):
+        api.thresholds(CREW)
+    with pytest.raises(ApiError) as err:
+        api.set_threshold(ROHIT, "RULE-REST-04", "min_rest_hours", 13, 12, "x")
+    assert err.value.code == "FORBIDDEN"
+    api.live()
+    out = api.set_threshold(admin, "RULE-REST-04", "min_rest_hours", 13, 12, "fatigue review")
+    assert out["value"] == 13 and api._live is None  # the next answer uses the new rule
+    with pytest.raises(ApiError) as err:
+        api.set_threshold(admin, "RULE-REST-04", "min_rest_hours", 20, 13, "x")
+    assert err.value.code == "INVALID"
+    assert api.activity(admin)[0]["action"] == "RULE_CHANGED"
+    with pytest.raises(ApiError):
+        api.activity(ROHIT)
+
+
+def test_the_feed_lists_disruptions_for_staff(api):
+    feed = api.disruptions(ROHIT)
+    assert feed[0]["disruption_id"] == "r-sick1042" and feed[0]["status"] == "OPTIONS_READY"
+    assert feed[0]["report_type"] == "crew_unavailable"
+    with pytest.raises(ApiError):
+        api.disruptions(CREW)
+
+
+def test_a_disruption_shows_its_ranked_options(api):
+    seats = api.show(ROHIT, "r-sick1042")["seats"]
+    assert seats and seats[0]["pairing_id"] == "P-2291" and seats[0]["crew_out"] == "C-1042"
+    best = seats[0]["options"][0]
+    assert best["crew_id"] == "C-3310" and best["cost_inr"] == 18500
+
+
 def test_reports_carry_the_signed_in_sender(api):
     out = api.report(
         CREW, "crew_unavailable", {"crew_id": "C-1042", "from_date": "2026-09-17", "reason": "sick"}

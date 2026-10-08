@@ -306,6 +306,43 @@ streamable HTTP, a code package on Linux ARM64, billed per second while a sessio
   the table, never from memory.
 - **Alert addresses.** Admins manage the email alert addresses with `alert_addresses`,
   `add_alert_address` and `remove_alert_address` (see [Notifications](#notifications)).
+- **Rule thresholds.** Four numbers in the legality rules (the flight duty period limit, duty
+  hours in 7 days, flight hours in 28 days, minimum rest) can be changed by an admin with
+  `set_rule_threshold`, only towards stricter values or back to the regulatory one, never
+  looser. A change names the value it replaces (so two admins cannot overwrite each other),
+  needs a reason, rewrites the rule's sentence, and is audited; the engine uses it the next
+  time it loads the operation, within a minute. A disruption's stored options keep the rules
+  they were analysed under until it is analysed again; approval always re-checks against the
+  rules as they are then. `activity_log` lists the latest audit
+  events across the system for admins.
+- **Views for the web app.** `whoami` (who is signed in), `disruptions` (the desk's
+  chronological feed), `my_roster` (a crew member's own pairings and duty clock), and
+  `show_disruption`, which includes each seat's ranked options from the analysis.
+
+## Web app
+
+The web app (`web/`, Next.js) is a backend for frontend. Apart from the live-events
+socket, the browser talks only to the app's own server routes; they call the MCP server as
+the signed-in user, so every role rule stays in one place.
+
+- **Sign-in.** The server signs in to Cognito with the username and password
+  (USER_PASSWORD_AUTH, no client secret) and keeps the access, ID and refresh tokens in
+  httpOnly, same-site cookies, refreshing them before they expire. Page scripts never see
+  the access or refresh token.
+- **Actions.** `/api/tools/<name>` forwards one of a fixed list of MCP tools with the
+  user's access token, and only for requests whose Origin is this site. A tool error comes
+  back as its code and message; anything unexpected as a generic error.
+- **Live updates.** The console opens an AppSync Events socket to `/ops/disruptions` with
+  the ID token, which `/api/live` hands to signed-in pages. An event only says what
+  changed; the page then re-reads through the MCP server.
+- **Voice.** Speech recognition is the browser's own. Answers are spoken by Amazon Polly
+  through `/api/speak`, for signed-in users only: at most 1,500 characters, and 30 answers
+  per user in any 10 minutes.
+- **Limits.** Each route refuses a body declared larger than it accepts before reading it.
+  The live-events hook stops retrying when the user is signed out or not allowed on the
+  channel.
+- **Conversations.** Each assistant session has its own conversation id, so short replies
+  and "she" are read with the question before.
 
 ## Flows
 

@@ -104,10 +104,14 @@ sourced number is.
 ## D9. Next.js web app as the main Alexa+ experience
 
 No public path connects a self-hosted MCP server to an Alexa+ device, and the rules accept a
-simulated Alexa+ experience in a web app. The web app (Next.js, TypeScript, Tailwind,
-shadcn/ui on Amplify) gives the Alexa+ simulator, the controller and approver console, an
-admin page and a mobile crew view. A classic Alexa custom skill, tested in the Alexa Developer Console, adds
-real Alexa voice as a second channel. A standard MCP host proves the server follows the spec.
+simulated Alexa+ experience in a web app. The web app (Next.js, TypeScript, Tailwind, a
+handful of its own components rather than a component library, to be hosted on Amplify)
+gives the Alexa+ simulator, the controller and approver console, an admin page and a mobile
+crew view. It is a backend for frontend: apart from the live-events socket, the browser
+talks only to the app's server routes, which call the MCP server as the signed-in user, so
+the web app holds no rule of its own. A classic Alexa custom skill, tested in the Alexa
+Developer Console, adds real Alexa voice as a second channel. A standard MCP host proves the
+server follows the spec.
 
 ## D10. Real-time through events, not polling
 

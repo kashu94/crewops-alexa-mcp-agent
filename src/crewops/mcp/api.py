@@ -28,8 +28,9 @@ from crewops.notify.subscriptions import AlertError, AlertSubscriptions
 from crewops.plans.service import PlanError, Plans
 from crewops.plans.service import summary as plan_summary
 from crewops.store import plans as plan_store
+from crewops.store import rules as rule_store
 from crewops.store.items import from_dynamo
-from crewops.store.reports import get_disruption
+from crewops.store.reports import disruptions_with_status, get_disruption
 from crewops.tools import TOOL_SCHEMAS, Caller, allowed_tools, dispatch
 from crewops.tools.errors import INTERNAL
 
@@ -37,6 +38,44 @@ CACHE_SECONDS = 60.0
 """How long one loaded operation answers questions before it is read again. Plan actions
 on this server reload it at once; changes made elsewhere show within this time."""
 READERS = frozenset({Role.CONTROLLER, Role.APPROVER, Role.AUDITOR, Role.ADMIN, Role.SUPER_ADMIN})
+ADMINS = frozenset({Role.ADMIN, Role.SUPER_ADMIN})
+FEED_STATUSES = ("REPORTED", "OPTIONS_READY", "SUBMITTED", "COMMITTED", "CLOSED")
+
+
+def _seat(s: Mapping[str, Any]) -> dict[str, Any]:
+    """A seat as the console shows it: who is out, the impact and the ranked options."""
+    keep = (
+        "pairing_id",
+        "role",
+        "crew_out",
+        "status",
+        "note",
+        "legal_options",
+        "excluded",
+        "cancellation_cost_inr",
+        "cancellation_multiple",
+        "delay_hours",
+    )
+    out = {k: s.get(k) for k in keep}
+    out["impact"] = s.get("impact", {})
+    out["options"] = [
+        {
+            k: o.get(k)
+            for k in (
+                "rank",
+                "action",
+                "strategy",
+                "crew_id",
+                "name",
+                "crew_rank",
+                "cost_inr",
+                "cost_breakdown",
+                "delay_hours",
+            )
+        }
+        for o in s.get("options", [])
+    ]
+    return out
 
 
 class ApiError(Exception):
@@ -126,6 +165,15 @@ class CrewOpsApi:
             "model_calls": usage.get("calls", 0),
         }
 
+    def whoami(self, caller: Caller) -> dict[str, Any]:
+        """Who the token says is signed in, as the server sees them."""
+        return {
+            "user_id": caller.user_id,
+            "roles": sorted(r.value for r in caller.roles),
+            "crew_id": caller.crew_id,
+            "desk": caller.desk,
+        }
+
     def list_tools(self, caller: Caller) -> list[dict[str, Any]]:
         allowed = allowed_tools(caller)
         return [
@@ -186,6 +234,29 @@ class CrewOpsApi:
     def queue(self, caller: Caller) -> list[dict[str, Any]]:
         return self.plans.queue(caller)
 
+    def disruptions(self, caller: Caller, limit: int = 40) -> list[dict[str, Any]]:
+        """Recent disruptions in every status, newest report first: the desk's feed."""
+        if not caller.roles & READERS:
+            raise ApiError("FORBIDDEN", "your role may not read disruptions")
+        items = [i for status in FEED_STATUSES for i in disruptions_with_status(self.table, status)]
+        out = []
+        for item in items:
+            report = from_dynamo(item.get("report") or {})
+            analysis = from_dynamo(item.get("analysis") or {})
+            out.append(
+                {
+                    "disruption_id": item["disruption_id"],
+                    "status": item["status"],
+                    "report_type": report.get("type"),
+                    "reported_utc": report.get("reported_utc"),
+                    "reported_by": (report.get("reported_by") or {}).get("user_id"),
+                    "details": report.get("details", {}),
+                    "summary": analysis.get("summary", ""),
+                }
+            )
+        out.sort(key=lambda d: d.get("reported_utc") or "", reverse=True)
+        return out[: max(1, min(int(limit), 100))]
+
     def show(self, caller: Caller, disruption_id: str) -> dict[str, Any]:
         item = get_disruption(self.table, disruption_id)
         report = from_dynamo((item or {}).get("report") or {})
@@ -199,6 +270,10 @@ class CrewOpsApi:
             "disruption_id": disruption_id,
             "status": item["status"],
             "summary": analysis.get("summary", ""),
+            "report_type": report.get("type"),
+            "reported_utc": report.get("reported_utc"),
+            # The ranked options each seat had when it was analysed; approval re-checks.
+            "seats": [_seat(s) for s in analysis.get("seats", [])],
             "plans": [
                 {"status": p["status"], **plan_summary(p)}
                 for p in plan_store.plans_for(self.table, disruption_id)
@@ -208,6 +283,69 @@ class CrewOpsApi:
                 for e in plan_store.audit_trail(self.table, disruption_id)
             ],
         }
+
+    # ------------------------------------------------------------------
+    # The crew member's own roster
+    # ------------------------------------------------------------------
+
+    def my_roster(self, caller: Caller) -> dict[str, Any]:
+        """The signed-in crew member's pairings, duty days and duty clock. Only ever their
+        own: the crew id comes from the verified profile, not from the request."""
+        if not caller.crew_id:
+            raise ApiError("FORBIDDEN", "only crew have a roster")
+        tools = self.live().pipeline.tools
+        mine = tools.lookup("pairing_crew", {"crew_id": caller.crew_id})["rows"]
+        pairings = []
+        for row in mine:
+            (p,) = tools.lookup("pairings", {"pairing_id": row["pairing_id"]})["rows"]
+            pairings.append(
+                {
+                    "pairing_id": p["pairing_id"],
+                    "aircraft": p["aircraft"],
+                    "role": row["role"],
+                    "days": p["days"],
+                }
+            )
+        return {
+            "crew_id": caller.crew_id,
+            "name": mine[0]["name"] if mine else None,
+            "clock": tools.duty_clock(caller.crew_id),
+            "pairings": sorted(pairings, key=lambda p: p["days"][0]["date"] if p["days"] else ""),
+        }
+
+    # ------------------------------------------------------------------
+    # Rule thresholds and system activity
+    # ------------------------------------------------------------------
+
+    def thresholds(self, caller: Caller) -> list[dict[str, Any]]:
+        if not caller.roles & READERS:
+            raise ApiError("FORBIDDEN", "your role may not read the rule settings")
+        return rule_store.thresholds(self.table)
+
+    def set_threshold(
+        self,
+        caller: Caller,
+        rule_id: str,
+        param: str,
+        value: float,
+        expected: float,
+        reason: str,
+    ) -> dict[str, Any]:
+        if not caller.roles & ADMINS:
+            raise ApiError("FORBIDDEN", "only an admin changes rule thresholds")
+        try:
+            out = rule_store.set_threshold(
+                self.table, rule_id, param, value, expected, caller.user_id, reason, self.clock()
+            )
+        except rule_store.RuleError as exc:
+            raise ApiError(exc.code, exc.message) from None
+        self.invalidate()  # answer from the new rules at once on this server
+        return out
+
+    def activity(self, caller: Caller, limit: int = 50) -> list[dict[str, Any]]:
+        if not caller.roles & ADMINS:
+            raise ApiError("FORBIDDEN", "only an admin reads the activity log")
+        return rule_store.activity(self.table, max(1, min(int(limit), 200)))
 
     # ------------------------------------------------------------------
     # Alert addresses (admins only)

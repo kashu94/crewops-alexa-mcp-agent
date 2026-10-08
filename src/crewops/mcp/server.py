@@ -104,10 +104,22 @@ def build_server(
         return await run(ctx, lambda c: api.ask(c, question, conversation_id))
 
     @mcp.tool(annotations=READ)
+    async def whoami(ctx: Context) -> dict:
+        """The signed-in person as the server sees them: username, roles, and their crew id
+        or desk where they have one."""
+        return await run(ctx, lambda c: api.whoami(c))
+
+    @mcp.tool(annotations=READ)
     async def my_queue(ctx: Context) -> list:
         """What is waiting for the signed-in person: plans to decide (approver), disruptions
         on their desk ready for a plan, and their plans sent back (controller)."""
         return await run(ctx, lambda c: api.queue(c))
+
+    @mcp.tool(annotations=READ)
+    async def disruptions(ctx: Context, limit: int = 40) -> list:
+        """Recent disruptions in every status, newest report first, with their analysis
+        summary: the desk's chronological feed."""
+        return await run(ctx, lambda c: api.disruptions(c, limit))
 
     @mcp.tool(annotations=READ)
     async def show_disruption(disruption_id: str, ctx: Context) -> dict:
@@ -164,6 +176,33 @@ def build_server(
         """Controller: close a disruption that has no coverable seat, saying what was done
         instead (for example, the flights were cancelled)."""
         return await run(ctx, lambda c: api.close(c, disruption_id, reason))
+
+    @mcp.tool(annotations=READ)
+    async def my_roster(ctx: Context) -> dict:
+        """Crew: your own pairings, duty days and duty clock."""
+        return await run(ctx, lambda c: api.my_roster(c))
+
+    @mcp.tool(annotations=READ)
+    async def rule_thresholds(ctx: Context) -> list:
+        """The legality rules' adjustable thresholds: current value, allowed range (never
+        looser than regulation) and the rule's text."""
+        return await run(ctx, lambda c: api.thresholds(c))
+
+    @mcp.tool(annotations=COMMIT)
+    async def set_rule_threshold(
+        rule_id: str, param: str, value: float, expected: float, reason: str, ctx: Context
+    ) -> dict:
+        """Admin: change one threshold from the value you saw (`expected`) to `value`, saying
+        why. Only stricter values, or the regulatory one, are accepted; the change is
+        audited and the engine uses it within a minute."""
+        return await run(
+            ctx, lambda c: api.set_threshold(c, rule_id, param, value, expected, reason)
+        )
+
+    @mcp.tool(annotations=READ)
+    async def activity_log(ctx: Context, limit: int = 50) -> list:
+        """Admin: the latest audit events across the system, newest first."""
+        return await run(ctx, lambda c: api.activity(c, limit))
 
     @mcp.tool(annotations=READ)
     async def alert_addresses(ctx: Context) -> list:
