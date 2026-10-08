@@ -34,6 +34,17 @@ type Event = {
   reason?: string;
 };
 
+// The teams a disruption's analysis may name (the server's crewops.domain.contacts).
+const ALERT_TEAMS = [
+  ["gate_control", "Gate and stand control"],
+  ["station_ops", "Station duty manager"],
+  ["flight_info", "Flight information (screens, website, app)"],
+  ["ops_monitoring", "Operations monitoring (tells the captain)"],
+  ["maintenance_control", "Maintenance control"],
+  ["crew_records", "Training and crew records"],
+  ["customer_care", "Customer care (passengers)"],
+] as const;
+
 type Address = { subscription_id: string; email: string; role: string; added_by: string; added_utc: string; status: string };
 
 type Message = { tone: "ok" | "error"; text: string } | null;
@@ -247,8 +258,17 @@ export default function Admin() {
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium text-slate-700">Role</span>
             <select name="role" className="rounded-lg border border-line bg-surface px-3 py-2">
-              <option value="controller">Controller</option>
-              <option value="approver">Approver</option>
+              <optgroup label="Crew control">
+                <option value="controller">Controller</option>
+                <option value="approver">Approver</option>
+              </optgroup>
+              <optgroup label="Operational teams">
+                {ALERT_TEAMS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </label>
           <Button disabled={busy}>
@@ -263,7 +283,7 @@ export default function Admin() {
             {addresses.map((a) => (
               <li key={a.subscription_id} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
                 <span className="min-w-0 flex-1 truncate">{a.email}</span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs capitalize">{a.role}</span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs capitalize">{a.role.replace(/_/g, " ")}</span>
                 <span className="text-xs text-muted">{a.status}</span>
                 <button
                   className="rounded-lg p-1.5 text-muted transition hover:bg-critical-soft hover:text-critical"

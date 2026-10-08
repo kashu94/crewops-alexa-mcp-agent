@@ -16,11 +16,22 @@ alerts the controller; the agent later reads it back to answer questions.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from crewops.analysis.gates import (
+    REMOTE_STAND,
+    GateBoard,
+    NextAtGate,
+    StandMove,
+    close_gate,
+    late_departures,
+    station_of,
+)
+from crewops.analysis.notices import LateLeg, notices_for
 from crewops.domain import GateSlot, Report, ReportType
+from crewops.domain.contacts import Contact
 from crewops.engine.impact import (
     DelayEffect,
     JointPlan,
@@ -124,6 +135,18 @@ class Analysis:
     delays: tuple[DelayEffect, ...] = ()
     affected_flights: tuple[str, ...] = ()
     notes: tuple[str, ...] = field(default_factory=tuple)
+    late: tuple[LateLeg, ...] = ()
+    """Departures that now leave late, each by how much."""
+    stands: tuple[StandMove, ...] = ()
+    """Departures moved to another gate or a remote stand."""
+    next_at_gate: tuple[NextAtGate, ...] = ()
+    """The departure due next at each gate a late flight still holds."""
+    notices: tuple[dict[str, Any], ...] = ()
+    """Who is told, besides crew control, and what (``crewops.analysis.notices``)."""
+    handling: dict[str, str] = field(default_factory=dict)
+    """How it gets resolved: ``kind`` (recrew, decision or internal) and one sentence."""
+    aircraft: tuple[str, ...] = ()
+    """Every aircraft it touches, which decides the desks it belongs to."""
 
     def to_dict(self) -> dict[str, Any]:
         doc: dict[str, Any] = {
@@ -134,6 +157,15 @@ class Analysis:
             "delays": [_delay_dict(d) for d in self.delays[:MAX_DELAYS]],
             "affected_flights": list(self.affected_flights[:MAX_FLIGHTS]),
             "notes": list(self.notes[:MAX_NOTES]),
+            "late_departures": [
+                {"flight_id": leg.flight_id, "minutes": leg.minutes}
+                for leg in self.late[:MAX_FLIGHTS]
+            ],
+            "stands": [m.to_dict() for m in self.stands[:MAX_FLIGHTS]],
+            "next_at_gate": [n.to_dict() for n in self.next_at_gate[:MAX_FLIGHTS]],
+            "notices": list(self.notices[:MAX_NOTES]),
+            "handling": dict(self.handling),
+            "aircraft": list(self.aircraft),
             "joint_plan": None,
             "omitted": {
                 name: n - cap
@@ -142,6 +174,10 @@ class Analysis:
                     ("delays", len(self.delays), MAX_DELAYS),
                     ("affected_flights", len(self.affected_flights), MAX_FLIGHTS),
                     ("notes", len(self.notes), MAX_NOTES),
+                    ("late_departures", len(self.late), MAX_FLIGHTS),
+                    ("stands", len(self.stands), MAX_FLIGHTS),
+                    ("next_at_gate", len(self.next_at_gate), MAX_FLIGHTS),
+                    ("notices", len(self.notices), MAX_NOTES),
                 )
                 if n > cap
             },
@@ -329,6 +365,43 @@ def _crew_unavailable(world: World, report: Report) -> Analysis:
     )
 
 
+def _multiple_crew_unavailable(world: World, report: Report) -> Analysis:
+    """Several crew out together. Every one of them is already marked unavailable in the
+    world (the report is open), so none is offered to cover another, and one joint plan
+    covers every seat with a different person."""
+    d = report.details
+    start, end = date.fromisoformat(d["from_date"]), date.fromisoformat(d["to_date"])
+    dates = {start + timedelta(days=i) for i in range((end - start).days + 1)}
+    seats: list[SeatAnalysis] = []
+    idle = []
+    for crew_id in d["crew_ids"]:
+        pairs = _crew_out_seats(world, crew_id, dates)
+        if not pairs:
+            idle.append(crew_id)
+        seats += [_seat_for(world, s, crew_id, hit) for s, hit in pairs]
+    who = f"{len(d['crew_ids'])} crew unavailable {start} to {end} ({d['reason']})"
+    if not seats:
+        return Analysis(
+            report.report_id,
+            report.report_type,
+            f"{who}, but none has rostered duty then: nothing to cover.",
+        )
+    trips = sorted({s.seat.pairing_id for s in seats})
+    shared = [p for p in trips if sum(s.seat.pairing_id == p for s in seats) > 1]
+    lead = f"{who}: {len(seats)} seat(s) on {len(trips)} trip(s)"
+    if shared:
+        lead += f", {', '.join(shared)} losing more than one crew member"
+    notes = tuple(f"{_crew_label(world, c)} has no rostered duty then" for c in idle)
+    return Analysis(
+        report.report_id,
+        report.report_type,
+        f"{lead}. " + _seat_summary(tuple(seats)),
+        seats=tuple(seats),
+        joint=_with_joint(seats, world),
+        notes=notes,
+    )
+
+
 def _certification_lapse(world: World, report: Report) -> Analysis:
     d = report.details
     valid_to = date.fromisoformat(d["valid_to"])
@@ -365,10 +438,13 @@ def _delays(
             f"{lead}: no rostered flights affected.",
             affected_flights=tuple(affected),
         )
-    effects, seats, lines = [], [], []
+    effects, seats, lines, late = [], [], [], []
     for (pid, day), (hours, label, flight_id) in sorted(delays.items()):
         if hours <= 0:
             continue
+        legs = next((d.flight_ids for d in world.pairings[pid].days if d.date == day), (flight_id,))
+        start = legs.index(flight_id) if flight_id in legs else 0
+        late += [LateLeg(f, round(hours * 60)) for f in legs[start:]]
         try:
             effect = delay_effect(world, pid, day, hours, from_flight=flight_id)
         except ValueError as exc:
@@ -386,6 +462,7 @@ def _delays(
         joint=_with_joint(seats, world),
         delays=tuple(effects),
         affected_flights=tuple(affected),
+        late=tuple(late),
     )
 
 
@@ -507,20 +584,240 @@ def _gate_change(world: World, report: Report, gates: tuple[GateSlot, ...]) -> A
     )
 
 
-def analyse(world: World, report: Report, gates: tuple[GateSlot, ...] = ()) -> Analysis:
-    """The analysis of one report against the current operation."""
+def _gate_closure(world: World, report: Report, gates: tuple[GateSlot, ...]) -> Analysis:
+    d = report.details
+    start, end = (
+        datetime.fromisoformat(d[k].replace("Z", "+00:00")) for k in ("from_utc", "to_utc")
+    )
+    gate = d["gate"]
+    board = GateBoard(gates, world.flights)
+    moves = close_gate(board, gate, start, end, d["reason"])
+    lead = f"{gate} closed {_iso(start)} to {_iso(end)} ({d['reason']})"
+    if not moves:
+        return Analysis(
+            report.report_id,
+            report.report_type,
+            f"{lead}: no departure holds the gate then, so nothing moves.",
+        )
+    regated = [m for m in moves if m.to_gate != REMOTE_STAND]
+    bussed = [m for m in moves if m.to_gate == REMOTE_STAND]
+    parts = []
+    if regated:
+        parts.append(
+            f"{len(regated)} departure(s) re-gated ("
+            + ", ".join(f"{m.flight_no} to {m.to_gate}" for m in regated)
+            + ")"
+        )
+    if bussed:
+        parts.append(
+            f"{len(bussed)} board(s) from a remote stand by bus, "
+            f"{bussed[0].delay_minutes} min later ("
+            + ", ".join(m.flight_no for m in bussed)
+            + f"): no other {station_of(gate)} gate is free for the whole slot"
+        )
+    index = _flight_index(world)
+    # The earliest bused departure of each duty day sets its slip: it and every later leg
+    # leave late (as the duty check assumes).
+    slips: dict[tuple[str, date], tuple[float, str, str]] = {}
+    for m in sorted(bussed, key=lambda m: m.end_utc):
+        if m.flight_id in index and index[m.flight_id] not in slips:
+            slips[index[m.flight_id]] = (m.delay_minutes / 60, m.flight_no, m.flight_id)
+    affected = [m.flight_id for m in moves]
+    if slips:
+        crew = _delays(world, report, slips, affected, f"{lead}: " + "; ".join(parts))
+        return replace(crew, stands=tuple(moves))
+    return Analysis(
+        report.report_id,
+        report.report_type,
+        f"{lead}: " + "; ".join(parts) + ". Crew legality is unaffected.",
+        affected_flights=tuple(affected),
+        stands=tuple(moves),
+    )
+
+
+def _gate_alternative(world: World, gates: tuple[GateSlot, ...], analysis: Analysis) -> Analysis:
+    """A gate change onto a gate already held: suggest the first gate free for the slot."""
+    if not analysis.notes:
+        return analysis
+    fid = analysis.affected_flights[0]
+    board = GateBoard(gates, world.flights)
+    mine = board.slot_of(fid)
+    if mine is None:
+        return analysis
+    # Its own gate first: it already holds it, so staying put is the least disruptive.
+    others = [f for f in board.holding(mine.gate, mine.start_utc, mine.end_utc) if f != fid]
+    if not others:
+        return replace(
+            analysis,
+            summary=analysis.summary + f" Keep it at {mine.gate}: that gate stays free for it.",
+        )
+    taken = {g.gate for g in gates if g.flight_id in analysis.affected_flights[1:]}
+    move = board.move(mine, "requested gate already held", taken)
+    tail = (
+        f" {move.to_gate} is free for its whole boarding window."
+        if move.to_gate != REMOTE_STAND
+        else " No gate at the station is free for its whole slot: board from a remote stand."
+    )
+    return replace(analysis, summary=analysis.summary + tail, stands=(move,))
+
+
+def _late_gates(world: World, gates: tuple[GateSlot, ...], analysis: Analysis) -> Analysis:
+    """A late departure keeps its gate longer: name the next departure at each such gate
+    and move it when the gate is still taken."""
+    if not analysis.late or not gates:
+        return analysis
+    board = GateBoard(gates, world.flights)
+    late = sorted(
+        analysis.late,
+        key=lambda leg: (
+            world.flights[leg.flight_id].dep_utc if leg.flight_id in world.flights else 0
+        ),
+    )
+    moves, nexts = late_departures(
+        board, [(leg.flight_id, timedelta(minutes=leg.minutes)) for leg in late]
+    )
+    return replace(analysis, stands=tuple(moves), next_at_gate=tuple(nexts))
+
+
+def _kept_gate(gates: tuple[GateSlot, ...], report: Report, a: Analysis) -> str | None:
+    """A refused gate change (the gate is taken) that keeps the flight where it was."""
+    if report.report_type is not ReportType.GATE_CHANGE or not a.notes or a.stands:
+        return None
+    return next((g.gate for g in gates if g.flight_id == report.details["flight_id"]), None)
+
+
+def _uncovered(analysis: Analysis) -> list[str]:
+    seats = [s for s in analysis.seats if s.options is None or not s.options.recommended]
+    return sorted({f for s in seats for f in s.impact.uncovered_flights})
+
+
+def _crew_line(analysis: Analysis) -> str:
+    if any(d.duty_breaches_limit for d in analysis.delays):
+        return "The crew's duty day becomes too long: crew control decides which legs come off."
+    if analysis.seats:
+        n = len(analysis.seats)
+        return f"{n} crew member(s) go over a legal limit; crew control is re-crewing."
+    return "Every rostered crew member stays legal."
+
+
+def _handling(world: World, report: Report, analysis: Analysis) -> dict[str, str]:
+    """How this disruption gets resolved, in one sentence for the record."""
+    coverable = [s for s in analysis.seats if s.options is not None and s.options.recommended]
+    if coverable:
+        return {
+            "kind": "recrew",
+            "text": f"Crew control re-crews {len(analysis.seats)} seat(s): choose cover below, "
+            "then a different approver approves it.",
+        }
+    breaches = [d for d in analysis.delays if d.duty_breaches_limit]
+    if analysis.seats or breaches:
+        what = (
+            "no legal cover exists for "
+            + ", ".join(f"{s.seat.pairing_id} {s.seat.role.value}" for s in analysis.seats)
+            if analysis.seats
+            else "the delayed duty day is too long for any crew: "
+            + ", ".join(f.split("-")[0] for d in breaches for f in d.legs_to_drop)
+            + " must come off"
+        )
+        return {
+            "kind": "decision",
+            "text": f"Not solved by re-crewing: {what}. Crew control decides with operations "
+            "(delay, swap or cancel) and closes it with what was done.",
+        }
+    kind = report.report_type
+    told = sorted({n["team_title"] for n in analysis.notices if n["channel"] == "email"})
+    informed = f" Informed: {', '.join(told)}." if told else ""
+    if kind is ReportType.GATE_CLOSURE:
+        moved = len(analysis.stands)
+        text = (
+            f"Handled at {station_of(report.details['gate'])} by gate and stand control: "
+            f"{moved} departure(s) moved off {report.details['gate']}. No re-crew required."
+            if moved
+            else f"No departure holds {report.details['gate']} during the closure. "
+            "No re-crew required."
+        )
+    elif kind is ReportType.STATION_DISRUPTION:
+        text = (
+            f"Handled by operations: {len(analysis.late)} departure(s) wait until "
+            f"{report.details['station']} reopens, and every rostered crew member stays "
+            "legal. No re-crew required."
+        )
+    elif kind in (ReportType.FLIGHT_DELAY, ReportType.AIRCRAFT_TECHNICAL):
+        nxt = "; ".join(
+            f"next at {n.gate} is {n.flight_no}"
+            + (
+                f", moved to {m.to_gate}"
+                if (m := next((m for m in analysis.stands if m.flight_id == n.flight_id), None))
+                else f", gate free {n.buffer_minutes} min before it boards"
+            )
+            for n in analysis.next_at_gate
+        )
+        text = (
+            f"Handled by operations: {len(analysis.late)} departure(s) leave late and every "
+            "rostered crew member stays legal. No re-crew required."
+            + (f" Gates: {nxt}." if nxt else "")
+        )
+    elif kind is ReportType.GATE_CHANGE:
+        text = "Handled by gate control: crew legality is unaffected. No re-crew required."
+    else:
+        text = "Nothing to cover: no rostered duty is affected."
+    return {"kind": "internal", "text": text + informed}
+
+
+def _aircraft_of(world: World, analysis: Analysis) -> tuple[str, ...]:
+    touched = {
+        world.pairings[s.seat.pairing_id].aircraft
+        for s in analysis.seats
+        if s.seat.pairing_id in world.pairings
+    }
+    # The flights the disruption itself is about; a flight only re-gated because of it
+    # stays its own desk's business. (A gate closure's moved flights are its affected ones.)
+    touched |= {
+        world.flights[f].aircraft
+        for f in (*analysis.affected_flights, *(leg.flight_id for leg in analysis.late))
+        if f in world.flights
+    }
+    return tuple(sorted(touched))
+
+
+def analyse(
+    world: World,
+    report: Report,
+    gates: tuple[GateSlot, ...] = (),
+    contacts: tuple[Contact, ...] = (),
+) -> Analysis:
+    """The analysis of one report against the current operation: what broke, who must be
+    replaced and how, which gates move, who is told, and how it gets resolved."""
     kind = report.report_type
     if kind is ReportType.CREW_UNAVAILABLE:
-        return _crew_unavailable(world, report)
-    if kind is ReportType.CERTIFICATION_LAPSE:
-        return _certification_lapse(world, report)
-    if kind is ReportType.FLIGHT_DELAY:
-        return _flight_delay(world, report)
-    if kind is ReportType.AIRCRAFT_TECHNICAL:
-        return _aircraft_technical(world, report)
-    if kind is ReportType.STATION_DISRUPTION:
-        return _station_disruption(world, report)
-    return _gate_change(world, report, gates)
+        a = _crew_unavailable(world, report)
+    elif kind is ReportType.MULTIPLE_CREW_UNAVAILABLE:
+        a = _multiple_crew_unavailable(world, report)
+    elif kind is ReportType.CERTIFICATION_LAPSE:
+        a = _certification_lapse(world, report)
+    elif kind is ReportType.FLIGHT_DELAY:
+        a = _late_gates(world, gates, _flight_delay(world, report))
+    elif kind is ReportType.AIRCRAFT_TECHNICAL:
+        a = _late_gates(world, gates, _aircraft_technical(world, report))
+    elif kind is ReportType.STATION_DISRUPTION:
+        a = _late_gates(world, gates, _station_disruption(world, report))
+    elif kind is ReportType.GATE_CLOSURE:
+        a = _gate_closure(world, report, gates)
+    else:
+        a = _gate_alternative(world, gates, _gate_change(world, report, gates))
+    notices = notices_for(
+        world,
+        report,
+        contacts,
+        late=a.late,
+        moves=a.stands,
+        nexts=a.next_at_gate,
+        crew_line=_crew_line(a),
+        uncovered_flights=_uncovered(a),
+        kept_gate=_kept_gate(gates, report, a),
+    )
+    a = replace(a, notices=tuple(notices), aircraft=_aircraft_of(world, a))
+    return replace(a, handling=_handling(world, report, a))
 
 
 __all__ = ["Analysis", "SeatAnalysis", "analyse", "option_dict"]

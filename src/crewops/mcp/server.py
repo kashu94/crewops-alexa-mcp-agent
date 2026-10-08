@@ -130,11 +130,14 @@ def build_server(
     async def report_disruption(
         report_type: str, details: dict, ctx: Context, narrative: str = ""
     ) -> dict:
-        """Report a disruption. report_type is one of crew_unavailable, flight_delay,
-        aircraft_technical, station_disruption, gate_change, certification_lapse. details
-        depend on the type, e.g. crew_unavailable: {"crew_id": "C-1042", "from_date":
-        "2026-09-15", "to_date": "2026-09-16", "reason": "sick"}. Crew may report only
-        their own unavailability. It is analysed automatically."""
+        """Report a disruption. report_type is one of crew_unavailable,
+        multiple_crew_unavailable, certification_lapse, flight_delay, aircraft_technical,
+        station_disruption, gate_closure, gate_change. details depend on the type, e.g.
+        crew_unavailable: {"crew_id": "C-1042", "from_date": "2026-09-15", "to_date":
+        "2026-09-16", "reason": "sick"}; multiple_crew_unavailable: the same with "crew_ids"
+        (2 to 12) instead of "crew_id"; gate_closure: {"gate": "BLR-G2", "from_utc",
+        "to_utc", "reason"}. Crew may report only their own unavailability. It is analysed
+        automatically."""
         return await run(ctx, lambda c: api.report(c, report_type, details, narrative))
 
     @mcp.tool(annotations=WRITE)
@@ -174,13 +177,26 @@ def build_server(
     @mcp.tool(annotations=WRITE)
     async def close_disruption(disruption_id: str, reason: str, ctx: Context) -> dict:
         """Controller: close a disruption that has no coverable seat, saying what was done
-        instead (for example, the flights were cancelled)."""
+        (for example, the flights were cancelled). Also marks one handled outside crew
+        control resolved (a gate closure re-gated, a delay every crew member absorbs), with
+        the remark as the reason."""
         return await run(ctx, lambda c: api.close(c, disruption_id, reason))
 
     @mcp.tool(annotations=READ)
     async def my_roster(ctx: Context) -> dict:
         """Crew: your own pairings, duty days and duty clock."""
         return await run(ctx, lambda c: api.my_roster(c))
+
+    @mcp.tool(annotations=READ)
+    async def my_reports(ctx: Context, limit: int = 30) -> list:
+        """What you have reported, newest first, and how each stands."""
+        return await run(ctx, lambda c: api.my_reports(c, limit))
+
+    @mcp.tool(annotations=READ)
+    async def report_reference(ctx: Context) -> dict:
+        """Reporters, controllers and approvers: the crew, flights, aircraft, gates and
+        stations a report can name."""
+        return await run(ctx, lambda c: api.reference(c))
 
     @mcp.tool(annotations=READ)
     async def rule_thresholds(ctx: Context) -> list:
@@ -213,8 +229,10 @@ def build_server(
     @mcp.tool(annotations=OUTWARD)
     async def add_alert_address(email: str, role: str, ctx: Context) -> dict:
         """Admin: send one role's alerts (controller: options ready or a plan sent back;
-        approver: a plan waiting) to an email address. AWS asks the address to confirm
-        first. Limited to a few new addresses a day."""
+        approver: a plan waiting), or one operational team's (gate_control, station_ops,
+        flight_info, ops_monitoring, maintenance_control, crew_records, customer_care: the
+        disruptions that team must act on), to an email address. AWS asks the address to
+        confirm first. Limited to a few new addresses a day."""
         return await run(ctx, lambda c: api.add_alert_address(c, email, role))
 
     @mcp.tool(annotations=COMMIT)

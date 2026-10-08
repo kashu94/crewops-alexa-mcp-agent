@@ -7,9 +7,11 @@ import {
   BadgeCheck,
   ClipboardCheck,
   Cpu,
+  DoorClosed,
   Inbox,
   Plane,
   Radio,
+  Users,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
@@ -18,11 +20,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlexaModule } from "@/components/alexa";
 import { useLiveListener } from "@/components/live";
 import { Actions, DeskBanner, Recommendation } from "@/components/disruption";
+import { HandlingBanner } from "@/components/handling";
 import { useMe } from "@/components/me";
 import { SeatOptions } from "@/components/solutions";
 import { clock, cx, day, Empty, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
-import { describe, type Detail, type FeedItem, type QueueItem } from "@/lib/types";
+import { describe, shownStatus, type Detail, type FeedItem, type QueueItem } from "@/lib/types";
 
 const TYPE_ICON: Record<string, typeof Radio> = {
   crew_unavailable: AlertOctagon,
@@ -31,6 +34,8 @@ const TYPE_ICON: Record<string, typeof Radio> = {
   aircraft_technical: Wrench,
   station_disruption: Radio,
   gate_change: Plane,
+  gate_closure: DoorClosed,
+  multiple_crew_unavailable: Users,
 };
 
 function Kpi({
@@ -104,7 +109,7 @@ function Feed({
                   <Mono className="text-[11px] text-muted">
                     {day(d.reported_utc)} {clock(d.reported_utc)}
                   </Mono>
-                  <Status value={d.status} />
+                  <Status value={shownStatus(d.status, d.handling)} />
                 </span>
                 <span className="mt-1 block truncate text-sm font-medium text-slate-800">{describe(d)}</span>
                 <span className="mt-0.5 flex items-center gap-2 text-[11px] text-muted">
@@ -146,7 +151,7 @@ function Solutions({ id, onChanged }: { id: string; onChanged: () => void }) {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <Mono className="text-base font-semibold">{detail.disruption_id}</Mono>
-        <Status value={detail.status} />
+        <Status value={shownStatus(detail.status, detail.handling?.kind)} />
         <Link
           href={`/console/${encodeURIComponent(id)}`}
           className="ml-auto flex items-center gap-1 text-xs text-accent hover:underline"
@@ -155,8 +160,9 @@ function Solutions({ id, onChanged }: { id: string; onChanged: () => void }) {
         </Link>
       </div>
       <DeskBanner detail={detail} />
+      <HandlingBanner handling={detail.handling} />
       {detail.seats.length === 0 ? (
-        <Empty icon={<Cpu size={22} />}>{detail.summary || "No seats to cover for this disruption."}</Empty>
+        <p className="text-sm leading-relaxed text-slate-700">{detail.summary || "No seats to cover for this disruption."}</p>
       ) : (
         detail.seats.map((s) => (
           <div key={`${s.pairing_id}-${s.role}-${s.crew_out}`} className="flex flex-col gap-3">
@@ -206,7 +212,7 @@ export default function ControllerWorkspace() {
   const resolved = feed?.filter((d) => ["COMMITTED", "CLOSED"].includes(d.status)).length ?? 0;
   const readyAll = feed?.filter((d) => d.status === "OPTIONS_READY").length ?? 0;
   const isController = me.roles.includes("controller");
-  const ready = queue.filter((q) => q.kind === "ready_for_plan").length;
+  const ready = queue.filter((q) => q.kind === "ready_for_plan" || q.kind === "to_resolve").length;
   const sentBack = queue.filter((q) => q.kind.startsWith("sent_back")).length;
   const current = feed?.find((d) => d.disruption_id === selected);
 
@@ -226,7 +232,8 @@ export default function ControllerWorkspace() {
   }, [current]);
 
   return (
-    <div className="flex flex-col gap-4">
+    // On wide screens the workspace fits the window exactly; only the panels scroll.
+    <div className="flex flex-col gap-4 xl:h-[calc(100vh-6.75rem)] xl:overflow-hidden">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Crew control</h1>
@@ -243,7 +250,7 @@ export default function ControllerWorkspace() {
         <Kpi label="Open disruptions" value={feed ? open.length : "–"} tone="critical" icon={AlertOctagon} />
         {isController ? (
           <>
-            <Kpi label="Ready for a plan on your desk" value={ready} tone="accent" icon={Inbox} />
+            <Kpi label="Waiting on your desk" value={ready} tone="accent" icon={Inbox} />
             <Kpi label="Sent back to you" value={sentBack} tone="pending" icon={ClipboardCheck} />
           </>
         ) : (
@@ -254,14 +261,14 @@ export default function ControllerWorkspace() {
         )}
         <Kpi label="Resolved" value={feed ? resolved : "–"} tone="ok" icon={BadgeCheck} />
       </div>
-      <div className="grid gap-4 xl:grid-cols-[minmax(280px,1fr)_minmax(380px,1.25fr)_minmax(360px,1.25fr)]">
-        <Panel title="Ingestion feed" icon={<Radio size={14} className="text-critical" />} className="xl:max-h-[calc(100vh-170px)]" bodyClassName="overflow-y-auto p-2">
+      <div className="grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(280px,1fr)_minmax(380px,1.25fr)_minmax(360px,1.25fr)]">
+        <Panel title="Ingestion feed" icon={<Radio size={14} className="text-critical" />} className="xl:h-full xl:min-h-0" bodyClassName="overflow-y-auto p-2">
           <Feed items={feed} selected={selected} onDesk={onDesk} onSelect={setSelected} />
         </Panel>
-        <Panel title="Alexa+ voice" icon={<Activity size={14} className="text-accent" />} className="xl:max-h-[calc(100vh-170px)]" bodyClassName="flex flex-col overflow-hidden">
+        <Panel title="Alexa+ voice" icon={<Activity size={14} className="text-accent" />} className="xl:h-full xl:min-h-0" bodyClassName="flex flex-col overflow-hidden">
           <AlexaModule suggestions={suggestions} className="flex-1" />
         </Panel>
-        <Panel title="Solution engine" icon={<Cpu size={14} className="text-accent" />} className="xl:max-h-[calc(100vh-170px)]" bodyClassName="overflow-y-auto">
+        <Panel title="Solution engine" icon={<Cpu size={14} className="text-accent" />} className="xl:h-full xl:min-h-0" bodyClassName="overflow-y-auto">
           {selected ? (
             <Solutions key={selected} id={selected} onChanged={load} />
           ) : (

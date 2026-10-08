@@ -16,6 +16,8 @@ export type View = { href: string; label: string; hint: string };
 
 const ALL: Record<string, View> = {
   console: { href: "/console", label: "Controller", hint: "Disruptions, assistant, options" },
+  disruptions: { href: "/disruptions", label: "Disruptions", hint: "Every disruption, by desk and state" },
+  report: { href: "/report", label: "Report", hint: "Record a disruption" },
   approvals: { href: "/approvals", label: "Approver", hint: "Four-eyes approval queue" },
   crew: { href: "/crew", label: "Crew", hint: "My duty, my flights, report unavailable" },
   admin: { href: "/admin", label: "Admin", hint: "Rule thresholds, activity, alerts" },
@@ -26,7 +28,9 @@ export function viewsFor(roles: Role[]): View[] {
   const has = (...r: Role[]) => roles.some((role) => r.includes(role));
   const views: View[] = [];
   if (has("controller", "auditor", "admin", "super_admin")) views.push(ALL.console);
+  if (has("controller", "approver", "auditor", "admin", "super_admin")) views.push(ALL.disruptions);
   if (has("approver", "auditor")) views.push(ALL.approvals);
+  if (has("reporter", "controller", "approver")) views.push(ALL.report);
   if (has("crew")) views.push(ALL.crew);
   if (has("admin", "super_admin")) views.push(ALL.admin);
   views.push(ALL.assistant);
@@ -35,6 +39,7 @@ export function viewsFor(roles: Role[]): View[] {
 
 export function homeFor(roles: Role[]): string {
   if (roles.includes("crew")) return "/crew";
+  if (roles.includes("reporter") && !roles.some((r) => ["controller", "approver"].includes(r))) return "/report";
   if (roles.includes("approver")) return "/approvals";
   if (roles.some((r) => ["controller", "auditor"].includes(r))) return "/console";
   if (roles.some((r) => ["admin", "super_admin"].includes(r))) return "/admin";

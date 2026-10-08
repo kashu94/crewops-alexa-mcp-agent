@@ -83,6 +83,25 @@ def test_duplicate_delivery_is_stored_once(table):
         ),
         (
             report(
+                "multiple_crew_unavailable",
+                {"crew_ids": ["C-1042", "C-0000"], "from_date": "2026-09-15", "reason": "sick"},
+            ),
+            "unknown crew C-0000",
+        ),
+        (
+            report(
+                "gate_closure",
+                {
+                    "gate": "BLR-G9",
+                    "from_utc": "2026-09-16T06:00:00Z",
+                    "to_utc": "2026-09-16T07:00:00Z",
+                    "reason": "x",
+                },
+            ),
+            "unknown gate BLR-G9",
+        ),
+        (
+            report(
                 "aircraft_technical",
                 {
                     "aircraft": "VT-ZZZ",

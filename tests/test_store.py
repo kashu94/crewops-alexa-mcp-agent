@@ -18,7 +18,7 @@ from crewops.store.items import from_dynamo, from_item, to_dynamo, to_item
 from crewops.store.ops_store import SORT_KEYS, OpsStore, seed_records, table_for
 
 SETTINGS = Settings.from_env({"CREWOPS_STAGE": "test", "AWS_REGION": "ap-southeast-2"})
-EXPECTED_ITEMS = 1408
+EXPECTED_ITEMS = 1429  # the operation, its rules and costs, and 21 team contacts
 
 
 @pytest.fixture(autouse=True)
@@ -105,6 +105,7 @@ def test_seed_round_trips_through_the_table(seed):
     counts = store.put_seed(seed)
     assert sum(counts.values()) == EXPECTED_ITEMS
     assert counts["crew"] == 150 and counts["certification"] == 600
+    assert counts["contact"] == 21
     assert store.load_seed() == normalised(seed)
 
 

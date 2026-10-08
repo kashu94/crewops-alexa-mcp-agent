@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Ban, CheckCircle2, ChevronDown, Clock, Plane, ShieldCheck, Swords, Users, XCircle } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { tool } from "@/lib/client";
 import { byRule, type Legality, type Option, type Rival, type Seat } from "@/lib/types";
@@ -26,6 +26,76 @@ const RULE_NAME: Record<string, string> = {
   "RULE-BASE-07": "Base",
 };
 
+/** Every rule checked live for one person on one trip, with each rule's margin. */
+export function LegalityCheck({
+  crewId,
+  pairingId,
+  strategy,
+  delay,
+}: {
+  crewId: string;
+  pairingId: string;
+  strategy: string;
+  delay: number;
+}) {
+  const [legality, setLegality] = useState<Legality | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    tool<{ ok: boolean; result?: Legality; error?: string }>("crew_tool", {
+      name: "check_legality",
+      arguments: { crew_id: crewId, pairing_id: pairingId },
+    }).then(
+      (out) => (out.ok && out.result ? setLegality(out.result) : setError(out.error ?? "The legality check failed.")),
+      (err: Error) => setError(err.message),
+    );
+  }, [crewId, pairingId]);
+  if (error) return <p className="text-xs text-critical">{error}</p>;
+  if (!legality)
+    return (
+      <p className="flex items-center gap-2 text-xs text-muted">
+        <Spinner className="h-3 w-3" /> Checking every rule against the live roster…
+      </p>
+    );
+  return (
+    <>
+      {(strategy === "positioning" || delay > 0) && (
+        <p className="mb-2 text-[11px] text-muted">
+          Checked against the trip as rostered; the ranking already allows for the positioning flight or the later
+          departure.
+        </p>
+      )}
+      <p
+        className={cx(
+          "mb-2 flex items-center gap-1.5 text-xs font-semibold",
+          legality.legal ? "text-emerald-700" : "text-critical",
+        )}
+      >
+        {legality.legal ? <ShieldCheck size={14} /> : <XCircle size={14} />}
+        {legality.legal ? "Legal now: every rule passes" : `Not legal now: ${legality.blocking.join(", ")}`}
+      </p>
+      <ul className="grid gap-1.5 sm:grid-cols-2">
+        {byRule(legality.verdicts).map((v) => (
+          <li
+            key={v.rule_id}
+            className={cx(
+              "flex items-start gap-1.5 rounded-lg px-2 py-1.5 text-[11px]",
+              v.status === "PASS" ? "bg-ok-soft/60 text-emerald-900" : "bg-critical-soft text-red-900",
+            )}
+            title={v.rule_id}
+          >
+            {v.status === "PASS" ? <CheckCircle2 size={12} className="mt-0.5 shrink-0" /> : <XCircle size={12} className="mt-0.5 shrink-0" />}
+            <span>
+              <span className="font-semibold">{RULE_NAME[v.rule_id] ?? v.rule_id}</span>{" "}
+              {v.headroom !== null ? `${v.headroom}h margin · ` : ""}
+              <span className="opacity-80">{v.detail}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
 /** Other open disruptions, possibly on other desks, that want the same person. */
 function Rivals({ rivals }: { rivals: Rival[] }) {
   return (
@@ -40,7 +110,7 @@ function Rivals({ rivals }: { rivals: Rival[] }) {
           className="rounded bg-pending-soft px-1.5 py-0.5 font-mono hover:underline"
           title={r.kind === "plan" ? `In plan ${r.plan_id}, awaiting approval` : `Ranked #${r.rank} there`}
         >
-          {r.disruption_id} · {r.desks.join("/")}
+          {r.disruption_id} · {r.desks.map((d) => d.desk_id).join("/")}
           {r.kind === "plan" ? " · in a plan" : ""}
         </Link>
       ))}
@@ -60,25 +130,7 @@ function OptionCard({
   rivals: Rival[];
 }) {
   const [open, setOpen] = useState(false);
-  const [legality, setLegality] = useState<Legality | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const extra = option.cost_inr - best;
-
-  async function check() {
-    setOpen((o) => !o);
-    if (legality || !option.crew_id) return;
-    try {
-      const out = await tool<{ ok: boolean; result?: Legality; error?: string }>("crew_tool", {
-        name: "check_legality",
-        arguments: { crew_id: option.crew_id, pairing_id: pairingId },
-      });
-      if (out.ok && out.result) setLegality(out.result);
-      else setError(out.error ?? "The legality check failed.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "The legality check failed.");
-    }
-  }
-
   return (
     <li
       className={cx(
@@ -87,7 +139,7 @@ function OptionCard({
       )}
       style={{ animationDelay: `${option.rank * 50}ms` }}
     >
-      <button onClick={check} aria-expanded={open} className="flex w-full items-start gap-3 p-3 text-left">
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full items-start gap-3 p-3 text-left">
         <span
           className={cx(
             "grid h-7 w-7 shrink-0 place-items-center rounded-lg text-xs font-bold",
@@ -129,49 +181,8 @@ function OptionCard({
                 .join(" · ")}
             </p>
           )}
-          {!option.crew_id ? null : error ? (
-            <p className="text-xs text-critical">{error}</p>
-          ) : !legality ? (
-            <p className="flex items-center gap-2 text-xs text-muted">
-              <Spinner className="h-3 w-3" /> Checking every rule against the live roster…
-            </p>
-          ) : (
-            <>
-              {(option.strategy === "positioning" || option.delay_hours > 0) && (
-                <p className="mb-2 text-[11px] text-muted">
-                  Checked against the trip as rostered; the ranking above already allows for the
-                  positioning flight or the later departure.
-                </p>
-              )}
-              <p
-                className={cx(
-                  "mb-2 flex items-center gap-1.5 text-xs font-semibold",
-                  legality.legal ? "text-emerald-700" : "text-critical",
-                )}
-              >
-                {legality.legal ? <ShieldCheck size={14} /> : <XCircle size={14} />}
-                {legality.legal ? "Legal now: every rule passes" : `Not legal now: ${legality.blocking.join(", ")}`}
-              </p>
-              <ul className="grid gap-1.5 sm:grid-cols-2">
-                {byRule(legality.verdicts).map((v) => (
-                  <li
-                    key={v.rule_id}
-                    className={cx(
-                      "flex items-start gap-1.5 rounded-lg px-2 py-1.5 text-[11px]",
-                      v.status === "PASS" ? "bg-ok-soft/60 text-emerald-900" : "bg-critical-soft text-red-900",
-                    )}
-                    title={v.rule_id}
-                  >
-                    {v.status === "PASS" ? <CheckCircle2 size={12} className="mt-0.5 shrink-0" /> : <XCircle size={12} className="mt-0.5 shrink-0" />}
-                    <span>
-                      <span className="font-semibold">{RULE_NAME[v.rule_id] ?? v.rule_id}</span>{" "}
-                      {v.headroom !== null ? `${v.headroom}h margin · ` : ""}
-                      <span className="opacity-80">{v.detail}</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </>
+          {option.crew_id && (
+            <LegalityCheck crewId={option.crew_id} pairingId={pairingId} strategy={option.strategy} delay={option.delay_hours} />
           )}
         </div>
       )}
@@ -206,7 +217,8 @@ function CancelCard({ seat }: { seat: Seat }) {
 }
 
 export function SeatOptions({ seat, contention = {} }: { seat: Seat; contention?: Record<string, Rival[]> }) {
-  const best = seat.options[0]?.cost_inr ?? 0;
+  const options: Option[] = seat.live?.options ?? seat.options;
+  const best = options[0]?.cost_inr ?? 0;
   const impact = seat.impact ?? {};
   return (
     <div className="flex flex-col gap-3">
@@ -241,7 +253,7 @@ export function SeatOptions({ seat, contention = {} }: { seat: Seat; contention?
       )}
       {seat.status === "options" ? (
         <ol className="flex flex-col gap-2">
-          {seat.options.map((o) => (
+          {options.map((o) => (
             <OptionCard
               key={`${o.rank}-${o.crew_id}`}
               option={o}

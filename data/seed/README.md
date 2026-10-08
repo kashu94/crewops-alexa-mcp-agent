@@ -13,11 +13,13 @@ and all money is in Indian rupees.
 | Crew | 150 (28 captains, 29 first officers, 93 cabin crew) |
 | Flights | 147, grouped into 39 pairings |
 | Reserves | 16 crew on call, each with a daily window |
+| Passengers | 16,544 booked across 20,034 seats (70 to 96% full per flight) |
+| Contacts | 21: two per station, five for the network |
 
 | File | Contents |
 |---|---|
 | `crew.json` | Rank, base, aircraft ratings, status, how fast they can be reached |
-| `flights.json` | Every leg with times, aircraft and seats |
+| `flights.json` | Every leg with times, aircraft, seats and passengers booked |
 | `rosters.json` | Pairings (duty days, legs, crew by role) and flagged exceptions |
 | `reserve_pool.json` | On-call dates and windows |
 | `certifications.json` | Licence, medical, recurrent training, dangerous goods |
@@ -25,7 +27,8 @@ and all money is in Indian rupees.
 | `risk_signals.json` | Provided disruption-risk scores (shown, never used to rank) |
 | `rules.json` | The seven legality rules and their parameters |
 | `costs.json` | Callout, positioning, delay and cancellation costs |
-| `boarding_gates.json` | Gate held for each departure |
+| `boarding_gates.json` | Gate held for each departure, from boarding (or the aircraft's arrival, when it parks overnight) until it leaves |
+| `contacts.json` | The person on duty for each operational team: gate control and the duty manager at every station, and flight information, operations monitoring, maintenance control, training and crew records, and customer care for the network |
 
 Check it loads and hangs together:
 

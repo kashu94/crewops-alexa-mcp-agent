@@ -77,6 +77,7 @@ LIST_TOOLS = frozenset(
         "rule_thresholds",
         "activity_log",
         "disruptions",
+        "my_reports",
     }
 )
 """The server's tools that return a list. Their results arrive as one text item per

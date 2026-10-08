@@ -20,6 +20,7 @@ Flight                          FLIGHT#id / META           DATE#yyyy-mm-dd / DEP
 Pairing (days and crew seats)   PAIRING#id / META          AIRCRAFT#tail / DATE#first-day
 Gate slot                       GATE#gate / SLOT#start#id  FLIGHT#id / GATE
 Rule, cost table                CONFIG / RULE#id, COSTS
+Team contact                    CONFIG / CONTACT#team#scope
 Disruption                      DISRUPTION#id / META       STATUS#status / AT#reported#id
 Plan                            DISRUPTION#id / PLAN#id    PLAN#status / AT#submitted
 Audit event                     DISRUPTION#id / AUDIT#ts#action

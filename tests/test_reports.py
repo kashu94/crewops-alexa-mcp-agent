@@ -3,7 +3,7 @@
 import pytest
 
 from crewops.domain import DataError
-from crewops.domain.reports import Report, ReportType, Role, authorize
+from crewops.domain.reports import Report, ReportType, Role, authorize, crew_out_of
 
 
 def report(type_="crew_unavailable", details=None, roles=("reporter",), crew_id=None, **extra):
@@ -39,6 +39,17 @@ VALID_DETAILS = {
         "crew_id": "C-5417",
         "cert_type": "recurrent_training",
         "valid_to": "2026-09-17",
+    },
+    "multiple_crew_unavailable": {
+        "crew_ids": ["C-1938", "C-1042"],
+        "from_date": "2026-09-15",
+        "reason": "sick",
+    },
+    "gate_closure": {
+        "gate": "BLR-G2",
+        "from_utc": "2026-09-15T00:00:00Z",
+        "to_utc": "2026-09-15T08:00:00Z",
+        "reason": "jet bridge fault",
     },
 }
 
@@ -160,3 +171,41 @@ def test_any_operational_role_wins_over_others():
     mixed = report(roles=("admin", "controller"))
     assert authorize(Report.from_dict(mixed)) is None
     assert Role.ADMIN in Report.from_dict(mixed).reported_by.roles
+
+
+def test_several_crew_in_one_report():
+    r = Report.from_dict(
+        report("multiple_crew_unavailable", VALID_DETAILS["multiple_crew_unavailable"])
+    )
+    assert r.details == {
+        "crew_ids": ["C-1042", "C-1938"],
+        "from_date": "2026-09-15",
+        "to_date": "2026-09-15",
+        "reason": "sick",
+    }
+    assert crew_out_of(r.report_type, r.details) == ("C-1042", "C-1938")
+    for bad, message in (
+        (["C-1042"], "2 to 12"),
+        ("C-1042", "2 to 12"),
+        (["C-1042", "C-1042"], "listed twice"),
+        ([f"C-{i}" for i in range(13)], "2 to 12"),
+    ):
+        details = {**VALID_DETAILS["multiple_crew_unavailable"], "crew_ids": bad}
+        with pytest.raises(DataError, match=message):
+            Report.from_dict(report("multiple_crew_unavailable", details))
+
+
+def test_crew_may_not_report_others_together_with_themselves():
+    details = {**VALID_DETAILS["multiple_crew_unavailable"], "crew_ids": ["C-1042", "C-2087"]}
+    doc = report("multiple_crew_unavailable", details, roles=("crew",), crew_id="C-1042")
+    assert "their own" in authorize(Report.from_dict(doc))
+
+
+def test_a_gate_is_named_by_station_and_number():
+    details = {**VALID_DETAILS["gate_closure"], "gate": "Gate 2"}
+    with pytest.raises(DataError, match="like BLR-G2"):
+        Report.from_dict(report("gate_closure", details))
+    late = {**VALID_DETAILS["gate_closure"], "to_utc": "2026-09-14T00:00:00Z"}
+    with pytest.raises(DataError, match="after from_utc"):
+        Report.from_dict(report("gate_closure", late))
+    assert crew_out_of("gate_closure", VALID_DETAILS["gate_closure"]) == ()

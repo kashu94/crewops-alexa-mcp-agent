@@ -323,6 +323,8 @@ class Flight:
     aircraft: str
     aircraft_type: AircraftType
     seats: int
+    booked: int | None = None
+    """Passengers booked, when known. Never more than the seats."""
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any], ctx: str = "flight") -> Flight:
@@ -342,7 +344,17 @@ class Flight:
             aircraft=_str(d, "aircraft", ctx),
             aircraft_type=_enum(AircraftType, d, "aircraft_type", ctx),
             seats=_int(d, "seats", ctx, minimum=1),
+            booked=_booked(d, ctx),
         )
+
+
+def _booked(d: Mapping[str, Any], ctx: str) -> int | None:
+    if d.get("booked") is None:
+        return None
+    booked = _int(d, "booked", ctx)
+    if booked > d["seats"]:
+        raise DataError(f"{ctx}.booked: {booked} is more than the {d['seats']} seats")
+    return booked
 
 
 @dataclass(frozen=True, slots=True)

@@ -97,6 +97,8 @@ export function Field({
 const STATUS: Record<string, string> = {
   REPORTED: "bg-critical-soft text-red-800 ring-red-200",
   OPTIONS_READY: "bg-accent-soft text-sky-800 ring-sky-200",
+  TO_RESOLVE: "bg-ok-soft text-emerald-800 ring-emerald-200",
+  DECISION_NEEDED: "bg-pending-soft text-amber-800 ring-amber-200",
   SUBMITTED: "bg-pending-soft text-amber-800 ring-amber-200",
   COMMITTED: "bg-ok-soft text-emerald-800 ring-emerald-200",
   CLOSED: "bg-slate-100 text-slate-700 ring-slate-200",
@@ -109,7 +111,7 @@ export function Status({ value }: { value: string }) {
   return (
     <span
       className={cx(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-wide ring-1 ring-inset",
+        "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-wide ring-1 ring-inset",
         STATUS[value] ?? "bg-slate-100 text-slate-700 ring-slate-200",
       )}
     >

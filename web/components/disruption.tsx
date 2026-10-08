@@ -5,6 +5,7 @@ import {
   Building2,
   CalendarDays,
   CheckCheck,
+  CheckCircle2,
   Lock,
   MapPin,
   Plane,
@@ -12,7 +13,6 @@ import {
   ShieldCheck,
   Sparkles,
   Swords,
-  Users,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -61,23 +61,34 @@ export function DeskBanner({ detail }: { detail: Detail }) {
   );
 }
 
-/** The figures a controller reads first. */
+/** The figures a controller reads first: for a re-crew, the uncrewed flights; otherwise
+ * the flights it delays or re-gates. Passengers are the seed's bookings. */
 export function Coverage({ detail }: { detail: Detail }) {
-  const flights = detail.seats.flatMap((s) => s.context?.flights ?? []);
-  const uncrewed = new Map(flights.filter((f) => f.state === "uncrewed").map((f) => [f.flight_id, f]));
-  const dates = new Set(detail.seats.flatMap((s) => s.impact?.affected_dates ?? []));
-  const passengers = detail.seats.reduce((n, s) => n + (s.impact?.passengers ?? 0), 0);
-  const seatsAtRisk = [...uncrewed.values()].reduce((n, f) => n + f.seats, 0);
-  const stations = new Set([...uncrewed.values()].flatMap((f) => [f.from, f.to]));
-  const stats = [
-    { label: "Duty dates", value: dates.size, icon: CalendarDays },
-    { label: "Flights uncrewed", value: uncrewed.size, icon: Plane },
-    { label: "Seats at risk", value: seatsAtRisk, icon: AlertOctagon },
-    { label: "Passengers at risk", value: passengers, icon: Users },
-    { label: "Stations", value: stations.size, icon: MapPin },
-  ];
+  let stats: { label: string; value: number; icon: typeof Plane }[];
+  if (detail.seats.length > 0) {
+    const flights = detail.seats.flatMap((s) => s.context?.flights ?? []);
+    const uncrewed = new Map(flights.filter((f) => f.state === "uncrewed").map((f) => [f.flight_id, f]));
+    const dates = new Set(detail.seats.flatMap((s) => s.impact?.affected_dates ?? []));
+    const booked = [...uncrewed.values()].reduce((n, f) => n + (f.booked ?? 0), 0);
+    const stations = new Set([...uncrewed.values()].flatMap((f) => [f.from, f.to]));
+    stats = [
+      { label: "Duty dates", value: dates.size, icon: CalendarDays },
+      { label: "Flights uncrewed", value: uncrewed.size, icon: Plane },
+      { label: "Passengers booked", value: booked, icon: AlertOctagon },
+      { label: "Stations", value: stations.size, icon: MapPin },
+    ];
+  } else {
+    const flights = detail.flights ?? [];
+    const stands = detail.stands ?? [];
+    stats = [
+      { label: "Flights affected", value: flights.length, icon: Plane },
+      { label: "Leaving late", value: flights.filter((f) => f.late_minutes > 0).length, icon: CalendarDays },
+      { label: "Gate moves", value: stands.length, icon: MapPin },
+      { label: "Passengers booked", value: flights.reduce((n, f) => n + (f.booked ?? 0), 0), icon: AlertOctagon },
+    ];
+  }
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" title="From the roster, the gate plan and the bookings">
       {stats.map(({ label, value, icon: Icon }) => (
         <div key={label} className="animate-rise rounded-2xl border border-line bg-surface p-3 shadow-sm">
           <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -257,7 +268,17 @@ export function PlanList({ plans }: { plans: Plan[] }) {
 type Message = { tone: "ok" | "error"; text: string } | null;
 
 /** Only the actions the signed-in role may take on this disruption, as it stands. */
-export function Actions({ detail, onChanged }: { detail: Detail; onChanged: () => void }) {
+export type Choice = { seat: string; crewId: string; name: string; overrides: boolean; stale?: boolean };
+
+export function Actions({
+  detail,
+  onChanged,
+  choices = [],
+}: {
+  detail: Detail;
+  onChanged: () => void;
+  choices?: Choice[];
+}) {
   const me = useMe();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<Message>(null);
@@ -273,7 +294,14 @@ export function Actions({ detail, onChanged }: { detail: Detail; onChanged: () =
   // Some seats without cover: a plan can still go, with them acknowledged. No seat with
   // cover: the only way out is to close it, as the server requires.
   const someUncovered = detail.seats.some((s) => s.status !== "options");
-  const noneCoverable = detail.seats.length > 0 && detail.seats.every((s) => s.status !== "options");
+  const overriding = choices.some((c) => c.overrides);
+  // Only changed seats go: the server keeps the joint plan for the rest.
+  const picked = Object.fromEntries(choices.filter((c) => c.overrides).map((c) => [c.seat, c.crewId]));
+  const stale = choices.some((c) => c.stale);
+  // No seat with cover (or none to cover at all): it is closed, or marked resolved with a
+  // remark when it was handled outside crew control.
+  const noneCoverable = detail.seats.every((s) => s.status !== "options");
+  const internal = detail.handling?.kind === "internal";
 
   async function act(name: string, args: Record<string, unknown>, done: string) {
     setBusy(true);
@@ -303,7 +331,7 @@ export function Actions({ detail, onChanged }: { detail: Detail; onChanged: () =
         {detail.status === "COMMITTED"
           ? "Committed: the roster has been changed."
           : detail.status === "CLOSED"
-            ? "Closed without a plan."
+            ? "Resolved: see the remark on the audit trail."
             : pending
               ? pending.submitted_by === me.user_id
                 ? "Waiting for a different approver."
@@ -320,39 +348,86 @@ export function Actions({ detail, onChanged }: { detail: Detail; onChanged: () =
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
       {canPlan && (
         <>
-          <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
-            maxLength={500}
-            placeholder="Note for the approver (optional)"
-            className="rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-accent"
-          />
+          {choices.length > 0 && (
+            <ul className="flex flex-col gap-1 rounded-lg bg-sunken p-2 text-xs">
+              {choices.map((c) => (
+                <li key={c.seat} className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-muted">Submitting</span> <b>{c.name}</b> <Mono>{c.crewId}</Mono>
+                  <span className="text-muted">for {c.seat.split("/").slice(0, 2).join(" ")}</span>
+                  {c.stale ? (
+                    <span className="rounded-full bg-critical-soft px-2 py-0.5 font-semibold text-red-800">
+                      no longer a legal option: choose again
+                    </span>
+                  ) : (
+                    c.overrides && (
+                      <span className="rounded-full bg-pending-soft px-2 py-0.5 font-semibold text-amber-800">
+                        overrides the recommendation
+                      </span>
+                    )
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
           {!noneCoverable && (
-            <Button type="button" tone="accent" disabled={busy} onClick={() => act("submit_plan", { note, accept_uncovered: false }, "Submitted")}>
-              <Send size={14} /> Submit the recommended plan
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
+              maxLength={500}
+              placeholder={overriding ? "Why this option over the recommended one? (required)" : "Note for the approver (optional)"}
+              className="rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          )}
+          {!noneCoverable && (
+            <Button
+              type="button"
+              tone="accent"
+              disabled={busy || stale || (overriding && !note.trim())}
+              onClick={() => act("submit_plan", { note, accept_uncovered: false, choices: picked }, "Submitted")}
+            >
+              <Send size={14} /> {overriding ? "Submit my choice for approval" : "Submit the recommended plan"}
             </Button>
           )}
           {someUncovered && !noneCoverable && (
-            <Button type="button" tone="secondary" disabled={busy} onClick={() => act("submit_plan", { note, accept_uncovered: true }, "Submitted")}>
+            <Button
+              type="button"
+              tone="secondary"
+              disabled={busy || stale || (overriding && !note.trim())}
+              onClick={() => act("submit_plan", { note, accept_uncovered: true, choices: picked }, "Submitted")}
+            >
               Submit, accepting uncovered seats
             </Button>
           )}
           {noneCoverable && (
-          <div className="mt-2 flex flex-col gap-2 border-t border-line pt-3">
-            <input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
-              maxLength={300}
-              placeholder="Reason to close without a plan"
-              className="rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-accent"
-            />
-            <Button type="button" tone="secondary" disabled={busy || !reason.trim()} onClick={() => act("close_disruption", { reason }, "Closed")}>
-              Close without a plan
-            </Button>
-            <p className="text-[11px] text-muted">Only when no seat can be covered, for example the flights were cancelled.</p>
-          </div>
+            <div className={cx("flex flex-col gap-2", detail.seats.length > 0 && "mt-2 border-t border-line pt-3")}>
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                maxLength={300}
+                rows={2}
+                placeholder={
+                  internal
+                    ? "Remark before resolving, e.g. gates re-allocated, screens updated, captains told"
+                    : "What was done instead, e.g. DX404 cancelled and passengers rebooked"
+                }
+                className="rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+              <Button
+                type="button"
+                tone={internal ? "accent" : "secondary"}
+                disabled={busy || !reason.trim()}
+                onClick={() => act("close_disruption", { reason }, internal ? "Resolved" : "Closed")}
+              >
+                {internal ? <CheckCircle2 size={14} /> : null}
+                {internal ? "Mark resolved" : "Close without a plan"}
+              </Button>
+              <p className="text-[11px] text-muted">
+                {internal
+                  ? "No crew change is needed. The remark goes on the audit trail and to whoever reported it."
+                  : "Only when no seat can be covered, for example the flights were cancelled."}
+              </p>
+            </div>
           )}
         </>
       )}

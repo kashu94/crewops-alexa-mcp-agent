@@ -2,12 +2,13 @@
 
 The event source mapping passes only disruption items; this handler keeps the records
 whose status actually changed. Each change is published to the console channel, and the
-ones that need someone's attention also go out as an alert to the role concerned.
+ones that need someone's attention also go out as an alert to the role concerned, and an
+analysed disruption to each operational team it names.
 
 Console updates are best effort: a failure is logged and the console catches up on its
 next read. An alert that cannot be sent is a batch item failure, so Lambda retries from
 that record (a console event may then be sent twice, which is harmless: it only tells the
-console to read again).
+console to read again; an alert sent before the failure may also go twice).
 """
 
 from __future__ import annotations
@@ -15,7 +16,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from crewops.notify.changes import CONSOLE_CHANNEL, alert_for, change_of, console_event
+from crewops.notify.changes import (
+    CONSOLE_CHANNEL,
+    alert_for,
+    change_of,
+    console_event,
+    team_alerts,
+)
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -34,12 +41,12 @@ def process(records: list[dict[str, Any]], events: Any, alerts: Any, stage: str)
     for record, change in changes:
         if change is None or alerts is None:
             continue
-        alert = alert_for(change, stage)
-        if alert is None:
-            continue
+        role_alert = alert_for(change, stage)
         try:
-            alerts.publish(alert)
-            log.info("alert %s sent to %s", change.disruption_id, alert.role)
+            outgoing = [*([role_alert] if role_alert else []), *team_alerts(record, change, stage)]
+            for alert in outgoing:
+                alerts.publish(alert)
+                log.info("alert %s sent to %s", change.disruption_id, alert.role)
         except Exception:
             sequence = record["dynamodb"]["SequenceNumber"]
             log.exception("alert for %s failed; it will be retried", change.disruption_id)

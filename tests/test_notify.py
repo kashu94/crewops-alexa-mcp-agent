@@ -281,3 +281,55 @@ def test_removing_an_address_unsubscribes_it_and_is_audited(subscriptions, ops_t
         if i.get("entity") == "audit_event" and i["pk"] == "ALERTS"
     ]
     assert sorted(actions) == ["ALERT_ADDED", "ALERT_REMOVED"]
+
+
+# -- Operational teams -----------------------------------------------------------------
+
+
+def notice(team, scope, message, channel="email"):
+    return {
+        "team": team,
+        "team_title": team.replace("_", " ").capitalize(),
+        "scope": scope,
+        "channel": channel,
+        "why": "act on it",
+        "message": message,
+    }
+
+
+ANALYSED = {
+    "notices": [
+        notice("flight_info", "NETWORK", "DX412 BLR-BOM now departs 08:00Z 15 Sep"),
+        notice("station_ops", "BLR", "Hold boarding at BLR-G6"),
+        notice("station_ops", "BOM", "DX413 leaves BOM an hour late"),
+        notice("crew", "C-5417", "Your recurrent training expires", channel="in_app"),
+    ]
+}
+
+
+def test_each_team_named_by_the_analysis_gets_one_email_when_it_is_analysed():
+    records = [
+        record(
+            disruption("OPTIONS_READY", analysis=ANALYSED),
+            disruption("REPORTED"),
+            seq="2",
+        ),
+        # Later moves never repeat the teams' alerts.
+        record(disruption("SUBMITTED", analysis=ANALYSED), disruption("OPTIONS_READY"), seq="3"),
+    ]
+    events, alerts = Recorder(), Recorder()
+    assert process(records, events, alerts, "dev") == {"batchItemFailures": []}
+    sent = {a[0].role: a[0] for a in alerts.sent}
+    assert list(sent) == ["controller", "flight_info", "station_ops", "approver"]
+    station = sent["station_ops"].message
+    assert "BLR: Hold boarding at BLR-G6" in station and "BOM: DX413" in station
+    # In-app notices are read in CrewOps, never emailed.
+    assert all("recurrent training" not in a[0].message for a in alerts.sent)
+    assert sent["flight_info"].subject.startswith("CrewOps dev: Flight info")
+
+
+def test_an_address_can_follow_an_operational_team(subscriptions):
+    out = subscriptions.add(ADMIN, "screens@example.com", "flight_info")
+    arn = f"{subscriptions.topic_arn}:{out['subscription_id']}"
+    attrs = subscriptions.sns.get_subscription_attributes(SubscriptionArn=arn)["Attributes"]
+    assert json.loads(attrs["FilterPolicy"]) == {"role": ["flight_info"]}

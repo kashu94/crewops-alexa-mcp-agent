@@ -1,9 +1,10 @@
 """Alert addresses, managed by the admin alone.
 
-An admin subscribes an email address to one role's alerts (controller or approver); an
-address holds one role, because SNS keeps one subscription per address and topic. SNS
-asks the address to confirm before anything is delivered, and every alert is filtered by
-role, so an address only ever receives what its role is about. Nobody else can add or
+An admin subscribes an email address to one role's alerts (controller or approver) or one
+operational team's (gate control, flight information and so on); an address holds one
+role, because SNS keeps one subscription per address and topic. SNS asks the address to
+confirm before anything is delivered, and every alert is filtered by role, so an address
+only ever receives what its role is about. Nobody else can add or
 remove addresses, and at most ``DAILY_CAP`` can be added a day and ``MAX_ADDRESSES`` held
 at once, so a public demo account cannot be used to send mail to strangers.
 
@@ -24,11 +25,15 @@ from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 from crewops.domain import Role
+from crewops.domain.contacts import Team
 from crewops.store import schema
 from crewops.store.schema import SEPARATOR as S
 from crewops.tools import Caller
 
-ALERT_ROLES = ("controller", "approver")
+ALERT_ROLES = ("controller", "approver", *(t.value for t in Team))
+"""Crew control's two roles, then the operational teams told about disruptions
+(``crewops.domain.contacts``): gate control, station duty managers, flight information,
+operations monitoring, maintenance control, training and crew records, customer care."""
 DAILY_CAP = 5
 MAX_ADDRESSES = 20
 ADMINS = frozenset({Role.ADMIN, Role.SUPER_ADMIN})

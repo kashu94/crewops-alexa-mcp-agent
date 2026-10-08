@@ -8,6 +8,79 @@ export type FeedItem = {
   reported_by: string | null;
   details: Record<string, unknown>;
   summary: string;
+  /** recrew: crew control covers seats; decision: no legal cover; internal: handled elsewhere. */
+  handling?: "recrew" | "decision" | "internal" | null;
+  desks?: string[];
+};
+
+/** Someone told about a disruption besides crew control, and what. */
+export type TeamNotice = {
+  team: string;
+  team_title: string;
+  scope: string;
+  contact: string | null;
+  contact_title: string | null;
+  channel: "email" | "in_app";
+  why: string;
+  message: string;
+  about: string | null;
+};
+
+export type StandMove = {
+  flight_id: string;
+  flight_no: string;
+  from_gate: string;
+  to_gate: string;
+  boarding_from_utc: string;
+  departs_utc: string;
+  booked: number | null;
+  delay_minutes: number;
+  why: string;
+};
+
+export type NextAtGate = {
+  flight_id: string;
+  flight_no: string;
+  gate: string;
+  boarding_from_utc: string;
+  buffer_minutes: number;
+};
+
+export type FlightRow = {
+  flight_id: string;
+  flight_no: string;
+  from: string;
+  to: string;
+  aircraft: string;
+  dep_utc: string;
+  new_dep_utc: string | null;
+  late_minutes: number;
+  gate: string | null;
+  seats: number;
+  booked: number | null;
+};
+
+export type Handling = { kind: "recrew" | "decision" | "internal"; text: string };
+
+export type MyReport = {
+  disruption_id: string;
+  status: string;
+  outcome: string;
+  report_type: string | null;
+  reported_utc: string | null;
+  details: Record<string, unknown>;
+  handled: string | null;
+  remark: string | null;
+};
+
+export type Reference = {
+  crew: { crew_id: string; name: string; rank: string; base: string }[];
+  flights: { flight_id: string; flight_no: string; date: string; from: string; to: string; dep_utc: string; gate: string | null }[];
+  aircraft: string[];
+  gates: string[];
+  stations: string[];
+  cert_types: string[];
+  week: string[];
 };
 
 export type Option = {
@@ -36,6 +109,27 @@ export type Seat = {
   impact: { affected_dates?: string[]; uncovered_flights?: string[]; at_risk_flights?: string[]; passengers?: number };
   options: Option[];
   context?: SeatContext;
+  live?: LiveSearch | null;
+  reserves?: { base: string; on_call: number }[];
+};
+
+export type LiveOption = Option & {
+  base: string | null;
+  reachability_minutes: number | null;
+  risk_score: number | null;
+  resilience: number | null;
+  positioning_flight: string | null;
+};
+
+export type LiveSearch = {
+  options: LiveOption[];
+  policies: Record<string, LiveOption | null>;
+  strategies: LiveOption[];
+  cancellation: LiveOption | null;
+  legal_options: number;
+  funnel: { stage: string; remaining: number; dropped: number; reason: string }[];
+  excluded: { crew_id: string; name: string; stage: string; rule_ids: string[]; reasons: string[] }[];
+  excluded_count: number;
 };
 
 export type SeatContext = {
@@ -54,6 +148,7 @@ export type SeatContext = {
     dep_utc: string;
     arr_utc: string;
     seats: number;
+    booked?: number | null;
     state: "uncrewed" | "at_risk" | "crewed";
   }[];
   crew?: { crew_id: string; name: string | null; role: string; state: "out" | "on" }[];
@@ -65,8 +160,11 @@ export type Rival = {
   pairing_id: string;
   rank?: number;
   plan_id?: string;
-  desks: string[];
+  desks: { desk_id: string; controller: string }[];
+  crew_out?: string | null;
+  role?: string;
   kind: "option" | "plan";
+  report_type?: string | null;
 };
 
 export type Plan = {
@@ -92,6 +190,12 @@ export type Detail = {
   yours?: boolean;
   joint_plan?: { assignments?: Record<string, unknown>[]; total_cost_inr?: number } | null;
   contention?: Record<string, Rival[]>;
+  handling?: Handling | null;
+  notices?: TeamNotice[];
+  stands?: StandMove[];
+  next_at_gate?: NextAtGate[];
+  flights?: FlightRow[];
+  notes?: string[];
   seats: Seat[];
   plans: Plan[];
   audit: { at: string; action: string; actor: string; plan_id?: string; reason?: string }[];
@@ -133,6 +237,13 @@ export function describe(item: Pick<FeedItem, "report_type" | "details">): strin
       const to = s(d.to_date) && s(d.to_date) !== s(d.from_date) ? ` to ${s(d.to_date)}` : "";
       return `${s(d.crew_id)} unavailable ${s(d.from_date)}${to} (${s(d.reason)})`;
     }
+    case "multiple_crew_unavailable": {
+      const ids = Array.isArray(d.crew_ids) ? (d.crew_ids as unknown[]).map(s) : [];
+      const to = s(d.to_date) && s(d.to_date) !== s(d.from_date) ? ` to ${s(d.to_date)}` : "";
+      return `${ids.length} crew unavailable ${s(d.from_date)}${to} (${s(d.reason)}): ${ids.join(", ")}`;
+    }
+    case "gate_closure":
+      return `${s(d.gate)} closed ${s(d.from_utc).slice(11, 16)}–${s(d.to_utc).slice(11, 16)}Z (${s(d.reason)})`;
     case "certification_lapse":
       return `${s(d.crew_id)} ${s(d.cert_type).replace(/_/g, " ")} lapsed`;
     case "flight_delay":
@@ -160,4 +271,13 @@ export function byRule(verdicts: Verdict[]): Verdict[] {
     if (worse) out.set(v.rule_id, v);
   }
   return [...out.values()].sort((a, b) => a.rule_id.localeCompare(b.rule_id));
+}
+
+/** The status as a desk reads it: a disruption ready but with nothing to re-crew is to be
+ * resolved (or decided), not "options ready". */
+export function shownStatus(status: string, handling?: string | null): string {
+  if (status !== "OPTIONS_READY") return status;
+  if (handling === "internal") return "TO_RESOLVE";
+  if (handling === "decision") return "DECISION_NEEDED";
+  return status;
 }

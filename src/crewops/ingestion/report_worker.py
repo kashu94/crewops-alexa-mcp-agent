@@ -35,6 +35,7 @@ from crewops.domain.reports import (
     ReportType,
     authorize,
     check_timing,
+    crew_out_of,
 )
 from crewops.store import schema
 from crewops.store.reports import (
@@ -72,10 +73,9 @@ def check_references(table: Any, report: Report) -> str | None:
     """None if every id the report names exists, otherwise what is missing."""
     d = report.details
     kind = report.report_type
-    if kind in (ReportType.CREW_UNAVAILABLE, ReportType.CERTIFICATION_LAPSE) and not _exists(
-        table, f"CREW{S}{d['crew_id']}", "PROFILE"
-    ):
-        return f"unknown crew {d['crew_id']}"
+    for crew_id in crew_out_of(kind, d):
+        if not _exists(table, f"CREW{S}{crew_id}", "PROFILE"):
+            return f"unknown crew {crew_id}"
     if kind is ReportType.CERTIFICATION_LAPSE and not _exists(
         table, f"CREW{S}{d['crew_id']}", f"CERT{S}{d['cert_type']}"
     ):
@@ -84,6 +84,12 @@ def check_references(table: Any, report: Report) -> str | None:
         table, f"FLIGHT{S}{d['flight_id']}", "META"
     ):
         return f"unknown flight {d['flight_id']}"
+    if kind is ReportType.GATE_CLOSURE:
+        found = table.query(
+            KeyConditionExpression=Key(schema.PK).eq(f"GATE{S}{d['gate']}"), Limit=1
+        )
+        if not found.get("Items"):
+            return f"unknown gate {d['gate']}"
     if kind is ReportType.AIRCRAFT_TECHNICAL:
         found = table.query(
             IndexName=schema.GSI1,

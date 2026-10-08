@@ -13,6 +13,7 @@ from typing import Any
 
 from crewops.analysis.disruption import analyse
 from crewops.domain import DataError, GateSlot, Report, ReportType
+from crewops.domain.reports import crew_out_of
 from crewops.engine import build_world
 from crewops.engine.world import World
 from crewops.ingestion.seed import SeedData
@@ -50,7 +51,10 @@ def unavailable_crew(
             log.warning("skipping unreadable disruption %s", item.get("disruption_id"))
             continue
         d = report.details
-        if report.report_type is ReportType.CREW_UNAVAILABLE:
+        if report.report_type in (
+            ReportType.CREW_UNAVAILABLE,
+            ReportType.MULTIPLE_CREW_UNAVAILABLE,
+        ):
             start, end = date.fromisoformat(d["from_date"]), date.fromisoformat(d["to_date"])
             dates = [start + timedelta(days=i) for i in range((end - start).days + 1)]
         elif report.report_type is ReportType.CERTIFICATION_LAPSE:
@@ -58,7 +62,8 @@ def unavailable_crew(
             dates = [day for day in duty_dates if day > valid_to]
         else:
             continue
-        out.setdefault(d["crew_id"], []).extend((day, report.report_id) for day in dates)
+        for crew_id in crew_out_of(report.report_type, d):
+            out.setdefault(crew_id, []).extend((day, report.report_id) for day in dates)
     return {crew: tuple(sorted(set(days))) for crew, days in out.items()}
 
 
@@ -113,7 +118,8 @@ def analyse_item(table: Any, item: dict[str, Any], operation: Operation) -> RunR
     if item.get("status") != STATUS_REPORTED:
         return RunResult(disruption_id, "not_reported")
     report = Report.from_dict(from_dynamo(item["report"]))
-    analysis = analyse(operation.world, report, operation.gates)
+    contacts = operation.seed.contacts if operation.seed else ()
+    analysis = analyse(operation.world, report, operation.gates, contacts)
     outcome = store_analysis(table, disruption_id, analysis.to_dict(), datetime.now(UTC))
     if outcome is AnalysisOutcome.STORED:
         log.info("analysed %s: %s", disruption_id, analysis.summary)

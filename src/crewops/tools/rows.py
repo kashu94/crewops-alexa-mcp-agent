@@ -42,6 +42,7 @@ ENTITY_FIELDS: dict[str, tuple[str, ...]] = {
         "aircraft",
         "aircraft_type",
         "seats",
+        "booked",
     ),
     "pairings": ("pairing_id", "aircraft", "dates", "days", "crew"),
     "pairing_crew": ("pairing_id", "aircraft", "dates", "crew_id", "role", "name"),

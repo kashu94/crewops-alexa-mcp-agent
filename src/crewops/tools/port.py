@@ -21,6 +21,7 @@ from typing import Any
 from crewops.analysis.disruption import option_dict
 from crewops.domain import DataError, Rank, Report, ReportType, parse_utc
 from crewops.domain.desks import DESKS, desks_for
+from crewops.domain.reports import crew_out_of
 from crewops.engine import AlreadyStarted, World, assess, find_options
 from crewops.engine.duty import calendar_window
 from crewops.engine.impact import Seat, delay_effect, joint_plan, pairing_impact
@@ -1279,7 +1280,17 @@ class CrewOpsTools:
                 if (f.dep_station == d["station"] and start <= f.dep_utc <= end)
                 or (f.arr_station == d["station"] and start <= f.arr_utc <= end)
             }
-        if kind is ReportType.CREW_UNAVAILABLE:
+        if kind is ReportType.GATE_CLOSURE:
+            start, end = parse_utc(d["from_utc"]), parse_utc(d["to_utc"])
+            return {
+                w.flights[g.flight_id].aircraft
+                for g in self.gates
+                if g.gate == d["gate"]
+                and g.start_utc < end
+                and start < g.end_utc
+                and g.flight_id in w.flights
+            }
+        if kind in (ReportType.CREW_UNAVAILABLE, ReportType.MULTIPLE_CREW_UNAVAILABLE):
             first, last = date.fromisoformat(d["from_date"]), date.fromisoformat(d["to_date"])
 
             def hit(day: date) -> bool:
@@ -1292,7 +1303,8 @@ class CrewOpsTools:
 
         return {
             w.pairings[pid].aircraft
-            for pid, _ in self.crew_pairings.get(d["crew_id"], [])
+            for crew_id in crew_out_of(kind, d)
+            for pid, _ in self.crew_pairings.get(crew_id, [])
             if any(hit(day.date) for day in w.pairings[pid].days)
         }
 

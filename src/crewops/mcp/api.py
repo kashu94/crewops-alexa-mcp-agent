@@ -24,6 +24,7 @@ from typing import Any
 from crewops.agent.context import Turn
 from crewops.agent.memory import ConversationMemory, valid_conversation
 from crewops.domain import DataError, Report, Role, authorize
+from crewops.domain.reports import OPERATIONAL_REPORTERS
 from crewops.mcp import views
 from crewops.notify.subscriptions import AlertError, AlertSubscriptions
 from crewops.plans.service import PlanError, Plans
@@ -46,8 +47,44 @@ OUTCOME = {
     "OPTIONS_READY": "Crew control is arranging cover.",
     "SUBMITTED": "A plan is waiting for approval.",
     "COMMITTED": "Cover has been arranged.",
-    "CLOSED": "Closed by crew control.",
+    "CLOSED": "Resolved by crew control.",
 }
+RESOLVED = ("COMMITTED", "CLOSED")
+
+
+def _remark(table: Any, disruption_id: str, status: str) -> str | None:
+    """What crew control said when it resolved or closed the disruption."""
+    if status != "CLOSED":
+        return None
+    closed = [
+        e for e in plan_store.audit_trail(table, disruption_id) if e.get("action") == "CLOSED"
+    ]
+    return closed[-1].get("reason") if closed else None
+
+
+def _outcome(status: str, handling: Mapping[str, Any]) -> str:
+    """How a disruption stands, for whoever reported it."""
+    if status == "OPTIONS_READY" and handling.get("kind") == "internal":
+        return "Handled; crew control will mark it resolved."
+    if status == "OPTIONS_READY" and handling.get("kind") == "decision":
+        return "Crew control is deciding what to do with operations."
+    return OUTCOME.get(status, status)
+
+
+def _analysis_view(tools: Any, analysis: Mapping[str, Any]) -> dict[str, Any]:
+    """How a disruption is handled beyond its seats: the one-line handling, who is told,
+    the flights it moves or delays and the gates that change."""
+    late = {leg["flight_id"]: leg["minutes"] for leg in analysis.get("late_departures") or []}
+    flights = [*analysis.get("affected_flights", []), *late]
+    return {
+        "handling": analysis.get("handling") or None,
+        "notices": analysis.get("notices") or [],
+        "stands": analysis.get("stands") or [],
+        "next_at_gate": analysis.get("next_at_gate") or [],
+        "flights": views.flight_rows(tools, flights, late),
+        "delays": analysis.get("delays") or [],
+        "notes": analysis.get("notes") or [],
+    }
 
 
 def _seat(s: Mapping[str, Any]) -> dict[str, Any]:
@@ -63,6 +100,7 @@ def _seat(s: Mapping[str, Any]) -> dict[str, Any]:
         "cancellation_cost_inr",
         "cancellation_multiple",
         "delay_hours",
+        "delay_date",
     )
     out = {k: s.get(k) for k in keep}
     out["impact"] = s.get("impact", {})
@@ -247,6 +285,7 @@ class CrewOpsApi:
         if not caller.roles & READERS:
             raise ApiError("FORBIDDEN", "your role may not read disruptions")
         items = [i for status in FEED_STATUSES for i in disruptions_with_status(self.table, status)]
+        tools = self.live().pipeline.tools
         out = []
         for item in items:
             report = from_dynamo(item.get("report") or {})
@@ -260,6 +299,15 @@ class CrewOpsApi:
                     "reported_by": (report.get("reported_by") or {}).get("user_id"),
                     "details": report.get("details", {}),
                     "summary": analysis.get("summary", ""),
+                    "handling": (analysis.get("handling") or {}).get("kind"),
+                    "desks": [
+                        d["desk_id"]
+                        for d in views.desks_of_disruption(
+                            tools,
+                            analysis,
+                            [seat["pairing_id"] for seat in analysis.get("seats", [])],
+                        )
+                    ],
                 }
             )
         out.sort(key=lambda d: d.get("reported_utc") or "", reverse=True)
@@ -273,24 +321,34 @@ class CrewOpsApi:
         # cannot be probed.
         if item is None or not (caller.roles & READERS or own):
             raise ApiError("NOT_FOUND", f"no disruption {disruption_id} that you may read")
+        analysis = from_dynamo(item.get("analysis") or {})
+        handling = analysis.get("handling") or {}
         if not caller.roles & READERS:
             # The person who filed it hears how it stands, nothing about other crew,
             # replacements, costs or other desks.
             return {
                 "disruption_id": disruption_id,
                 "status": item["status"],
-                "outcome": OUTCOME.get(item["status"], item["status"]),
+                "outcome": _outcome(item["status"], handling),
                 "report_type": report.get("type"),
                 "reported_utc": report.get("reported_utc"),
                 "reported_by": caller.user_id,
                 "details": report.get("details", {}),
+                # Handled outside crew control (gates moved, a delay absorbed): what was
+                # done is about flights and gates, never about crew, so they may read it.
+                "handled": handling.get("text") if handling.get("kind") == "internal" else None,
+                # Crew control's remark on resolving it, which is about what was done.
+                "remark": _remark(self.table, disruption_id, item["status"]),
             }
-        analysis = from_dynamo(item.get("analysis") or {})
         tools = self.live().pipeline.tools
         seats = [_seat(s) for s in analysis.get("seats", [])]
         for seat in seats:
             seat["context"] = views.seat_context(tools, seat)
-        desks = views.desks_of(tools, [s["pairing_id"] for s in seats])
+            seat["live"] = views.live_options(tools, seat)
+            seat["reserves"] = views.reserve_capacity(
+                tools, seat["role"], seat["impact"].get("affected_dates") or []
+            )
+        desks = views.desks_of_disruption(tools, analysis, [s["pairing_id"] for s in seats])
         joint = analysis.get("joint_plan")
         return {
             "disruption_id": disruption_id,
@@ -301,7 +359,11 @@ class CrewOpsApi:
             "reported_by": (report.get("reported_by") or {}).get("user_id"),
             "details": report.get("details", {}),
             "desks": desks,
-            "yours": bool(caller.desk) and any(d["desk_id"] == caller.desk for d in desks),
+            # Touching no aircraft at all (a closed gate nobody was using): any desk's.
+            "yours": bool(caller.desk)
+            and Role.CONTROLLER in caller.roles
+            and (not desks or any(d["desk_id"] == caller.desk for d in desks)),
+            **_analysis_view(tools, analysis),
             # The ranked options each seat had when it was analysed; approval re-checks.
             "seats": seats,
             "joint_plan": joint if joint and joint.get("assignments") else None,
@@ -312,7 +374,11 @@ class CrewOpsApi:
                 disruption_id,
                 [
                     (
-                        {o["crew_id"] for o in s["options"] if o.get("crew_id")},
+                        {
+                            o["crew_id"]
+                            for o in ((s["live"] or {}).get("options") or s["options"])
+                            if o.get("crew_id")
+                        },
                         set(s["impact"].get("affected_dates") or []),
                     )
                     for s in seats
@@ -353,9 +419,66 @@ class CrewOpsApi:
         return {
             "crew_id": caller.crew_id,
             "name": mine[0]["name"] if mine else None,
+            "notices": self._crew_notices(caller.crew_id),
             "clock": tools.duty_clock(caller.crew_id),
             "pairings": sorted(pairings, key=lambda p: p["days"][0]["date"] if p["days"] else ""),
         }
+
+    def _crew_notices(self, crew_id: str) -> list[dict[str, Any]]:
+        """In-app notices addressed to this crew member (a certificate about to lapse),
+        newest first, with how the disruption behind each stands."""
+        out = []
+        for status in FEED_STATUSES:
+            for item in disruptions_with_status(self.table, status):
+                analysis = from_dynamo(item.get("analysis") or {})
+                for n in analysis.get("notices") or []:
+                    if n.get("channel") == "in_app" and n.get("about") == crew_id:
+                        report = from_dynamo(item.get("report") or {})
+                        out.append(
+                            {
+                                "disruption_id": item["disruption_id"],
+                                "status": item["status"],
+                                "at": report.get("reported_utc"),
+                                "message": n["message"],
+                            }
+                        )
+        return sorted(out, key=lambda n: n["at"] or "", reverse=True)
+
+    # ------------------------------------------------------------------
+    # Reporting desk
+    # ------------------------------------------------------------------
+
+    def my_reports(self, caller: Caller, limit: int = 30) -> list[dict[str, Any]]:
+        """What the signed-in person has reported, newest first, and how each stands."""
+        out = []
+        for status in FEED_STATUSES:
+            for item in disruptions_with_status(self.table, status):
+                report = from_dynamo(item.get("report") or {})
+                if (report.get("reported_by") or {}).get("user_id") != caller.user_id:
+                    continue
+                handling = from_dynamo(item.get("analysis") or {}).get("handling") or {}
+                out.append(
+                    {
+                        "disruption_id": item["disruption_id"],
+                        "status": item["status"],
+                        "outcome": _outcome(item["status"], handling),
+                        "report_type": report.get("type"),
+                        "reported_utc": report.get("reported_utc"),
+                        "details": report.get("details", {}),
+                        "handled": handling.get("text")
+                        if handling.get("kind") == "internal"
+                        else None,
+                        "remark": _remark(self.table, item["disruption_id"], item["status"]),
+                    }
+                )
+        out.sort(key=lambda d: d.get("reported_utc") or "", reverse=True)
+        return out[: max(1, min(int(limit), 100))]
+
+    def reference(self, caller: Caller) -> dict[str, Any]:
+        """The crew, flights, aircraft, gates and stations a report can name."""
+        if not caller.roles & OPERATIONAL_REPORTERS:
+            raise ApiError("FORBIDDEN", "only reporters, controllers and approvers file reports")
+        return views.reference(self.live().pipeline.tools)
 
     # ------------------------------------------------------------------
     # Rule thresholds and system activity

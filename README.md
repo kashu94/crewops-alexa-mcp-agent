@@ -37,7 +37,7 @@ anyone hears it.
 | Role | Can do |
 |---|---|
 | **Crew** | See own schedule, report own unavailability |
-| **Reporter** | Report crew unavailability, flight delays, aircraft faults, station closures, gate changes and certification lapses |
+| **Reporter** | Record any disruption: sick crew (one or several), certification expiry, delays, aircraft faults, station and gate closures, gate changes; follow their own reports |
 | **Controller** | Review disruptions and options, submit one plan for approval |
 | **Approver** | Approve or reject submitted plans; approval commits them |
 | **Auditor** | Read-only access to every disruption, decision and audit record |
@@ -226,8 +226,8 @@ uv run python -m crewops.ingestion.send_report crew_unavailable \
   --details '{"crew_id": "C-1042", "from_date": "2026-09-15", "reason": "sick"}'
 ```
 
-Report types: `crew_unavailable`, `flight_delay`, `aircraft_technical`,
-`station_disruption`, `gate_change`, `certification_lapse`. Add `--dry-run` to validate
+Report types: `crew_unavailable`, `multiple_crew_unavailable`, `certification_lapse`,
+`flight_delay`, `aircraft_technical`, `station_disruption`, `gate_closure`, `gate_change`. Add `--dry-run` to validate
 without sending. Crew may report only their own unavailability; auditors and admins may not
 report.
 
@@ -322,7 +322,7 @@ Its tools: `ask` (the full verified answer pipeline), `my_queue`, `show_disrupti
 `report_disruption`, the plan actions (`submit_plan`, `approve_plan`, `reject_plan`,
 `withdraw_plan`, `close_disruption`), `list_crew_tools` / `crew_tool` for the
 deterministic tools directly, `whoami`, `disruptions` (the desk's feed), `my_roster`
-(crew), `rule_thresholds`, and, for admins, `set_rule_threshold`, `activity_log`,
+(crew, with their notices), `my_reports` and `report_reference` (reporting), `rule_thresholds`, and, for admins, `set_rule_threshold`, `activity_log`,
 `alert_addresses`, `add_alert_address` and `remove_alert_address`. What each user may do
 depends on their role.
 
@@ -342,8 +342,12 @@ Events API, which staff (not crew or reporters) can subscribe to with their sign
 console uses it to refresh. Email alerts are optional and only an admin can set them up:
 an address is subscribed to the controller or approver alerts, AWS emails it a link to
 confirm, and after that it receives that role's alerts (options ready, a plan sent back, a
-plan waiting for approval). An address holds one role, and at most five addresses can be
-added a day.
+plan waiting for approval). An address can instead follow one operational team: gate
+control, station duty managers, flight information (airport screens, website, app),
+operations monitoring (who tells the captain), maintenance control, training and crew
+records, or customer care. Each analysed disruption emails the teams it needs, for example
+a delay goes to flight information, operations monitoring, the station and customer care.
+An address holds one role or team, and at most five addresses can be added a day.
 
 ```bash
 uv run python -m crewops.mcp.client --as priya add_alert_address \
@@ -351,7 +355,9 @@ uv run python -m crewops.mcp.client --as priya add_alert_address \
 uv run python -m crewops.mcp.client --as priya alert_addresses
 ```
 
-Alerts and events name the disruption and its status, never a person.
+Alerts and events name the disruption, its status, and for a team the flights, gates and
+times it acts on, never a crew member. A crew member whose certificate lapses is told on
+their own CrewOps page.
 
 ### The web app
 
@@ -365,9 +371,11 @@ cd web && npm install && npm run dev # http://localhost:3000
 
 | View | Who | What it does |
 |---|---|---|
-| Controller | controllers, auditors, admins | Live figures for the role, the ingestion feed of disruptions, the Alexa+ voice module, and the solution engine: the recommendation, each seat's legal cover ranked by cost with cancellation last, every rule's margin checked on demand, crew another desk also wants, and the plan submitted from there. Each disruption's full record adds coverage figures, its desk, the trip's flights and crew, plans and the audit trail |
+| Disruptions | controllers, approvers, auditors, admins | Every disruption, filtered by desk (mine, other desks, the whole network), state (open, resolved, all) and type |
+| Report | reporters, controllers, approvers | Record any of the eight disruption types, picking crew, flights, gates and stations from the operation, and follow your own reports |
+| Controller | controllers, auditors, admins | Live figures for the role, the ingestion feed of disruptions, the Alexa+ voice module, and the solution engine: the recommendation, each seat's legal cover ranked by cost with cancellation last, every rule's margin checked on demand, crew another desk also wants, and the plan submitted from there. Each disruption's full record adds coverage figures, its desk, crew another desk is competing for (with a joint plan across both), recommendation cards by policy, a plain explanation of the chosen option, every legal option to choose from, every excluded candidate and why, the trip's flights and crew, plans and the audit trail. Every record says in one sentence how it gets resolved (re-crew, a decision, or handled internally), shows gate moves and late flights with passengers booked, and lists who has been told and why; one handled internally is marked resolved with a remark |
 | Approver | approvers, auditors | The four-eyes queue: each waiting plan, approved with a second confirming click or sent back with a reason |
-| Crew | crew | This week's duty calendar, my flights, duty-limit gauges, and reporting myself unavailable |
+| Crew | crew | Notices for me (a certificate about to lapse), this week's duty calendar, my flights, duty-limit gauges, and reporting myself unavailable |
 | Admin | admins | Rule thresholds (tighten only), the system activity log, and alert addresses |
 | Assistant | everyone | The Alexa+ module on its own: talk or type, hear the answer (Amazon Polly), follow up |
 

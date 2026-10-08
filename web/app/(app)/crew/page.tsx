@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Clock3, HeartPulse, MoonStar, Plane, X } from "lucide-react";
+import { BellRing, CalendarDays, Clock3, HeartPulse, MoonStar, Plane, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { useMe } from "@/components/me";
@@ -20,6 +20,7 @@ type Roster = {
     last_rest_ended: string | null;
   };
   pairings: { pairing_id: string; aircraft: string; role: string; days: Day[] }[];
+  notices?: { disruption_id: string; status: string; at: string | null; message: string }[];
 };
 
 const REASONS = [
@@ -185,6 +186,28 @@ export default function Crew() {
       </div>
 
       {message && <Notice tone="ok">{message}</Notice>}
+
+      {(roster.notices ?? []).length > 0 && (
+        <section aria-label="Notices for you" className="flex flex-col gap-2">
+          {(roster.notices ?? []).map((n) => (
+            <div
+              key={n.disruption_id}
+              className="animate-rise flex gap-3 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4"
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-amber-600 shadow-sm">
+                <BellRing size={17} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-900">Action needed</p>
+                <p className="mt-0.5 text-sm leading-relaxed text-amber-950/90">{n.message}</p>
+                <p className="mt-1 text-[11px] text-amber-900/60">
+                  {day(n.at)} · <Mono>{n.disruption_id}</Mono>
+                </p>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       <Panel title="This week" icon={<CalendarDays size={14} className="text-accent" />}>
         <ol className="grid grid-cols-7 gap-1.5 text-center">

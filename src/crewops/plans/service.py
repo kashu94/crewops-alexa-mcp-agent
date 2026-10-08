@@ -116,7 +116,7 @@ class Plans:
         analysis = from_dynamo(item.get("analysis") or {})
         world = self.load(self.table).world
         seats = analysis.get("seats", [])
-        self._check_desk(desk, world, seats, disruption_id)
+        self._check_desk(desk, world, analysis, disruption_id)
 
         coverable, uncovered = [], []
         for seat in seats:
@@ -181,9 +181,11 @@ class Plans:
         return self._close(plan, store.PLAN_WITHDRAWN, caller, reason or "withdrawn")
 
     def close(self, caller: Caller, disruption_id: str, reason: str) -> Outcome:
-        """End a disruption that has no coverable seat, recording what was done instead (for
-        example, the flights were cancelled). Nothing on the roster changes, and a crew
-        member it took out stays out on its dates."""
+        """End a disruption that has no coverable seat, recording what was done (for example,
+        the flights were cancelled). This is also how one handled outside crew control is
+        marked resolved, with a remark: a gate closure re-gated by gate control, a delay every
+        crew member absorbs. Nothing on the roster changes, and a crew member it took out
+        stays out on its dates."""
         desk = self._controller_desk(caller)
         item = self._disruption(disruption_id)
         if item["status"] != STATUS_OPTIONS_READY:
@@ -192,7 +194,7 @@ class Plans:
             raise PlanError("INVALID", "say what was done instead")
         analysis = from_dynamo(item.get("analysis") or {})
         world = self.load(self.table).world
-        self._check_desk(desk, world, analysis.get("seats", []), disruption_id)
+        self._check_desk(desk, world, analysis, disruption_id)
         coverable = [s for s in analysis.get("seats", []) if not self._why_uncoverable(world, s)]
         if coverable:
             raise PlanError(
@@ -269,11 +271,11 @@ class Plans:
             ready = {}
             for item in disruptions_with_status(self.table, STATUS_OPTIONS_READY):
                 analysis = from_dynamo(item.get("analysis") or {})
-                if self._touches(desk, world, analysis.get("seats", [])):
+                if self._touches(desk, world, analysis):
                     ready[item["disruption_id"]] = item
                     out.append(
                         {
-                            "kind": "ready_for_plan",
+                            "kind": "ready_for_plan" if analysis.get("seats") else "to_resolve",
                             "disruption_id": item["disruption_id"],
                             "summary": analysis.get("summary", ""),
                         }
@@ -369,17 +371,26 @@ class Plans:
             raise PlanError("FOUR_EYES", "a plan is decided by someone other than its submitter")
 
     @staticmethod
-    def _touches(desk: Desk, world: World, seats: list[dict[str, Any]]) -> bool:
-        return any(
-            s["pairing_id"] in world.pairings
-            and world.pairings[s["pairing_id"]].aircraft in desk.aircraft
-            for s in seats
-        )
+    def _touches(desk: Desk, world: World, analysis: Mapping[str, Any]) -> bool:
+        """Whether a disruption is on this desk: through its seats' trips, or, with no seat
+        to cover (a gate closure, a delay every crew member absorbs), through the aircraft
+        its flights fly. One that touches no aircraft at all is any controller's."""
+        seats = analysis.get("seats") or []
+        if seats:
+            return any(
+                s["pairing_id"] in world.pairings
+                and world.pairings[s["pairing_id"]].aircraft in desk.aircraft
+                for s in seats
+            )
+        if "aircraft" not in analysis:  # analysed before desks were recorded: nobody's
+            return False
+        aircraft = set(analysis["aircraft"] or [])
+        return not aircraft or bool(aircraft & set(desk.aircraft))
 
     def _check_desk(
-        self, desk: Desk, world: World, seats: list[dict[str, Any]], disruption_id: str
+        self, desk: Desk, world: World, analysis: Mapping[str, Any], disruption_id: str
     ) -> None:
-        if not self._touches(desk, world, seats):
+        if not self._touches(desk, world, analysis):
             raise PlanError("FORBIDDEN", f"{disruption_id} touches no aircraft on {desk.desk_id}")
 
     @staticmethod

@@ -158,7 +158,8 @@ function Banner() {
       role="status"
       aria-live="polite"
       className={cx(
-        "animate-drop border-b",
+        // Floats over the page, so it never pushes the workspace into scrolling.
+        "animate-drop fixed inset-x-0 top-[57px] z-20 border-b shadow-sm",
         critical ? "border-red-200 bg-critical-soft" : waiting ? "border-amber-200 bg-pending-soft" : "border-sky-200 bg-accent-soft",
       )}
     >

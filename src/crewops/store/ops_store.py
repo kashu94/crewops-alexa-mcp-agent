@@ -29,6 +29,7 @@ from crewops.domain import (
     RosterException,
     Rule,
 )
+from crewops.domain.contacts import Contact
 from crewops.ingestion.seed import SeedData
 from crewops.store import schema
 from crewops.store.items import ENTITY, from_item, to_item
@@ -44,6 +45,7 @@ SORT_KEYS: dict[type, Any] = {
     Pairing: lambda r: r.pairing_id,
     GateSlot: lambda r: (r.gate, r.start_utc, r.flight_id),
     Rule: lambda r: r.rule_id,
+    Contact: lambda c: (c.team, c.scope),
 }
 """Records come back from a scan in hash order; sorting makes a read deterministic."""
 
@@ -67,6 +69,7 @@ def seed_records(seed: SeedData) -> Iterator[Any]:
     yield from seed.gates
     yield from seed.rules
     yield seed.costs
+    yield from seed.contacts
 
 
 class OpsStore:
@@ -138,6 +141,7 @@ class OpsStore:
             rules=ordered(Rule),
             costs=costs[0],
             gates=ordered(GateSlot),
+            contacts=ordered(Contact),
         )
 
 
@@ -154,5 +158,6 @@ _OPERATION_ENTITIES = frozenset(
         "gate_slot",
         "rule",
         "costs",
+        "contact",
     }
 )

@@ -27,15 +27,15 @@ describe("roles and views", () => {
     expect(homeFor(["approver"])).toBe("/approvals");
     expect(homeFor(["controller"])).toBe("/console");
     expect(homeFor(["admin"])).toBe("/admin");
-    expect(homeFor(["reporter"])).toBe("/assistant");
+    expect(homeFor(["reporter"])).toBe("/report");
   });
 
   it("shows only the views a role uses", () => {
     expect(viewsFor(["crew"]).map((v) => v.href)).toEqual(["/crew", "/assistant"]);
-    expect(viewsFor(["controller"]).map((v) => v.href)).toEqual(["/console", "/assistant"]);
-    expect(viewsFor(["approver"]).map((v) => v.href)).toEqual(["/approvals", "/assistant"]);
-    expect(viewsFor(["admin"]).map((v) => v.href)).toEqual(["/console", "/admin", "/assistant"]);
-    expect(viewsFor(["reporter"]).map((v) => v.href)).toEqual(["/assistant"]);
+    expect(viewsFor(["controller"]).map((v) => v.href)).toEqual(["/console", "/disruptions", "/report", "/assistant"]);
+    expect(viewsFor(["approver"]).map((v) => v.href)).toEqual(["/disruptions", "/approvals", "/report", "/assistant"]);
+    expect(viewsFor(["admin"]).map((v) => v.href)).toEqual(["/console", "/disruptions", "/admin", "/assistant"]);
+    expect(viewsFor(["reporter"]).map((v) => v.href)).toEqual(["/report", "/assistant"]);
   });
 });
 

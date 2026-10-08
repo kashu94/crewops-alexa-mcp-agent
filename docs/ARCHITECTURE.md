@@ -195,10 +195,16 @@ the records whose status changed. Each change goes to two places:
   addresses (MCP tools), AWS asks each address to confirm before anything is delivered, and
   at most five addresses can be added a day and twenty held, so a public demo cannot be used
   to send mail to strangers. A failed alert is retried from that record.
+- **Team alerts.** When a disruption is analysed (REPORTED to OPTIONS_READY), each
+  operational team its analysis names gets one email with every notice for it (see
+  [Who is told](#who-is-told)). An admin subscribes addresses to a team exactly as to a
+  role: the SNS filter is the team's name.
 
-Events and alerts carry the disruption id, its report type and the statuses, never a name or
-a crew id. Accounts still hold no email address: an alert address belongs to a role, not to
-a person's login.
+Events and alerts carry the disruption id, its report type and the statuses; team alerts
+also carry the flights, gates, stations and times the team acts on. None carries a crew
+member's name or id. Accounts still hold no email address: an alert address belongs to a
+role or a team, not to a person's login. A crew member is told in CrewOps itself: a lapsing
+certificate shows as a notice on their own page.
 
 ## Disruption analysis
 
@@ -206,10 +212,43 @@ Every report becomes a decision-ready analysis, computed by the engine with no m
 
 | Report | What the analysis works out |
 |---|---|
-| Crew unavailable, certification lapse | The seats that person holds on the affected days, each with its blast radius (uncovered flights, later flights of the trip at risk, passengers) and ranked legal options. Several seats get a joint plan that never gives one person two seats. |
-| Flight delay, aircraft fault | What the delay does to that duty day: its new duty period against the limit, which rostered crew stop being legal and why, and, when the day is too long for anyone, the fewest trailing legs that must come off this crew and what cancelling them costs. |
-| Station closure | Every flight departing or landing in the closure, delayed to reopening plus a 30-minute turnaround, and the same delay effects for each affected duty day. |
-| Gate change | Whether the new gate is free for the flight's boarding window, or which flight holds it. |
+| Crew unavailable, certification lapse | The seats that person holds on the affected days, each with its blast radius (uncovered flights, later flights of the trip at risk, passengers booked) and ranked legal options. Several seats get a joint plan that never gives one person two seats. |
+| Several crew unavailable | The same for everyone named, together. They are all marked unavailable before the search, so none is offered to cover another, and one joint plan covers every seat with a different person. Trips losing more than one crew member are named. |
+| Flight delay, aircraft fault | What the delay does to that duty day: its new duty period against the limit, which rostered crew stop being legal and why, and, when the day is too long for anyone, the fewest trailing legs that must come off this crew and what cancelling them costs. The late leg and every later leg that day leave late; each keeps its gate until it leaves, and the next departure due at that gate within three hours is named, and moved to a free gate (or a remote stand) when the gate is still taken. |
+| Station closure | Every flight departing or landing in the closure, delayed to reopening plus a 30-minute turnaround, and the same delay and gate effects for each affected duty day. |
+| Gate closure | Every departure holding the gate during the closure moves to the first gate at the station free for its whole slot, each move counted before the next. With none free it boards from a remote stand by bus, 15 minutes later, and that delay is checked against crew duty like any other. |
+| Gate change | Whether the new gate is free for the flight's boarding window, or which flight holds it; when it is taken, keep the flight at its own gate, or else the first gate free for it. |
+
+Each analysis also says how the disruption gets resolved, in one sentence on its record:
+
+- **Re-crew:** some seat has legal cover; a controller submits a plan and a different
+  approver approves it.
+- **Decision:** no legal cover, or a duty day too long for anyone; crew control decides with
+  operations (delay, swap or cancel) and closes it saying what was done.
+- **Handled internally:** nothing to re-crew (a gate closure re-gated, a delay every crew
+  member absorbs). The desk's controller marks it resolved with a remark, which goes on the
+  audit trail and to whoever reported it.
+
+A disruption with no seat belongs to the desks of the aircraft its flights fly; one touching
+no aircraft at all (a closed gate nobody was using) is any controller's.
+
+### Who is told
+
+Crew control is always told (the desk alert). The analysis names everyone else, with the
+person on duty for each team from the contact directory (`contacts.json`):
+
+| Disruption | Told, besides crew control |
+|---|---|
+| Sick crew, one or several | Only when a seat has no legal cover: operations monitoring and customer care, since the flight may not operate |
+| Certification expiry | The crew member, on their CrewOps page; training and crew records, who book the renewal |
+| Delay, aircraft fault | Flight information (airport screens, website, app), operations monitoring (tells the captain), the departure station's duty manager, customer care for the booked passengers, the gate agent of the next departure at the same gate, and gate control when a gate moves; for a fault, maintenance control first |
+| Station closure | That station's duty manager, the duty managers at the other end of every affected flight, operations monitoring, flight information and customer care |
+| Gate closure | The station's gate control and duty manager; flight information and customer care when a departure moves; operations monitoring when one boards by bus |
+| Gate change | Gate control and the duty manager; flight information and customer care when the gate really changes |
+
+Two limits for now: a station duty manager's address receives every station's notices (an
+address follows a team, not a team at one station), and the reason a reporter types for a
+gate or station closure goes into the emails as written.
 
 A trip that has already started is reported as such rather than re-crewed. Crew taken out by
 other open disruptions (reported unavailable, or a reported certificate lapse) are excluded on
@@ -320,7 +359,11 @@ streamable HTTP, a code package on Linux ARM64, billed per second while a sessio
   `show_disruption`, which includes each seat's ranked options from the analysis, the desks
   it belongs to, the trip's flights and crew, and its cross-desk contention: for each option,
   the other open disruptions on the same or adjacent days that rank the same person, and
-  the submitted plans that already use them, with their desks.
+  the submitted plans that already use them, with their desks. Each seat also carries the
+  engine's live option search under the current rules and roster: every legal option with
+  its base, reachability and reserve-cover score, the picks by policy (cheapest, least
+  delay, keeps most reserve cover), the candidate funnel, every excluded candidate with its
+  rule and reason, and the reserves of its rank on call by base.
 - **Sessions.** The web app keeps one connected MCP client per access token (renewed
   hourly), so its calls reuse the same warm server instance. A broken connection is
   dropped; only reads are retried on a new one, since a write may already have happened.
@@ -351,6 +394,10 @@ the signed-in user, so every role rule stays in one place.
   channel.
 - **Conversations.** Each assistant session has its own conversation id, so short replies
   and "she" are read with the question before.
+- **Reporting.** Reporters, controllers and approvers record any of the eight disruption
+  types on one page, picking crew, flights, gates and stations from the operation
+  (`report_reference`), and follow their own reports (`my_reports`): how each stands, and
+  for one handled internally, what was done.
 
 ## Flows
 
@@ -389,7 +436,8 @@ asserted, so the set cannot quietly become a tuning target.
 ## Data store
 
 One DynamoDB table holds the whole operation: crew, certifications, duty clocks, reserves,
-flights, pairings, gates, configuration, disruptions, plans and audit events. Each item has a
+flights (with passengers booked), pairings, gates, configuration, team contacts,
+disruptions, plans and audit events. Each item has a
 partition and sort key, and two overloaded secondary indexes serve the lookups a key cannot,
 such as flights by date or plans awaiting approval. The full key layout is documented in
 `src/crewops/store/schema.py`, which both the CDK stack and the data-access code import.
@@ -402,7 +450,7 @@ they submitted.
 | Role | Report | Review options | Submit plan | Approve / reject | Audit log | Rules and users |
 |---|---|---|---|---|---|---|
 | Crew | Own unavailability | | | | | |
-| Reporter | Any incident or unavailability | Affected flights only | | | | |
+| Reporter | Any incident or unavailability | Own reports and how they stand | | | | |
 | Controller | Yes | Yes | Yes | | Own desk | |
 | Approver | Yes | Yes | | Yes | Yes | |
 | Auditor | | Read only | | | Yes | |
@@ -417,14 +465,16 @@ unavailability. Every report goes through the same queue and wakes the disruptio
 | Event | Example | What the disruption analysis does |
 |---|---|---|
 | Crew unavailable | "C-1042 is sick for tomorrow" | Uncovered flights, then legal cost-ranked replacements |
+| Several crew unavailable | "C-1042 and C-1938 both went down after the crew meal" | The same for all of them, covered together by one joint plan |
 | Flight delay | "DX402 is delayed 90 minutes" | Re-checks duty period and rest for everyone on the pairing; finds breaches and cover |
 | Aircraft technical | "VT-DXA is grounded until 14:00" | Finds every affected flight and pairing, then the same as a delay |
 | Station disruption | "BLR closed 08:00 to 14:00 for weather" | Finds every flight touching the station in the window |
-| Gate change or conflict | "DX401 moved from gate G1 to G4" | Checks the gate is free; if boarding slips, treats it as a delay |
+| Gate closure | "BLR-G2 closed 00:00 to 08:00, jet bridge fault" | Re-gates every departure holding it, or buses it from a remote stand; checks any slip against crew duty |
+| Gate change or conflict | "DX401 moved from gate G1 to G4" | Checks the gate is free; if not, keeps the flight at its own gate or finds a free one |
 | Certification lapse | "C-5417's recurrent training expired" | Re-checks legality on every future duty for that crew member |
 
 A gate problem on its own does not change crew legality. It matters only when it delays a
-departure, so the agent turns it into a delay and checks the knock-on effect.
+departure, so the analysis turns that slip into a delay and checks the knock-on effect.
 
 ### Plan lifecycle
 

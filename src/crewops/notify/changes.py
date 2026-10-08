@@ -12,8 +12,14 @@ SUBMITTED -> OPTIONS_READY controller           the plan was rejected, withdrawn
                                                 stale; the disruption needs another plan
 =========================  ===================  ============================================
 
-Events and alerts carry the disruption id, its report type and the statuses, never a name,
-a crew id or the analysis: the details are read in CrewOps, signed in, with role checks.
+When a disruption is analysed (REPORTED -> OPTIONS_READY), each operational team its
+analysis names is also alerted (``crewops.analysis.notices``): flight information to update
+the screens, operations monitoring to tell the captain, gate control to move gates, and so
+on. One email per team, with every notice for that team.
+
+Events and alerts carry the disruption id, its report type and the statuses; team alerts
+also carry the flights, gates, stations and times the team acts on. None carries a crew
+member's name or id: those are read in CrewOps, signed in, with role checks.
 """
 
 from __future__ import annotations
@@ -72,6 +78,39 @@ def console_event(change: Change) -> dict[str, Any]:
         "previous": change.before,
         "report_type": change.report_type,
     }
+
+
+def team_alerts(record: dict[str, Any], change: Change, stage: str) -> list[Alert]:
+    """One alert per operational team the analysis names, once, when it is analysed."""
+    if not (change.before == STATUS_REPORTED and change.after == STATUS_OPTIONS_READY):
+        return []
+    from boto3.dynamodb.types import TypeDeserializer
+
+    image = (record.get("dynamodb") or {}).get("NewImage") or {}
+    raw = image.get("analysis")
+    if not raw:
+        return []
+    analysis = TypeDeserializer().deserialize(raw)
+    by_team: dict[str, list[dict[str, Any]]] = {}
+    for n in analysis.get("notices") or []:
+        if n.get("channel") == "email" and n.get("team"):
+            by_team.setdefault(str(n["team"]), []).append(n)
+    what = change.report_type.replace("_", " ")
+    out = []
+    for team, notices in by_team.items():
+        title = str(notices[0].get("team_title") or team)
+        lines = [
+            f"- {n.get('scope')}: {n.get('message')} (why you: {n.get('why')})" for n in notices
+        ]
+        body = (
+            f"Disruption {change.disruption_id} ({what}) needs {title.lower()}:\n\n"
+            + "\n".join(lines)
+            + "\n\nSign in to CrewOps for the full record. You receive this because a CrewOps "
+            f"administrator subscribed this address to {title.lower()} alerts."
+        )
+        subject = f"CrewOps {stage}: {title}, {what} {change.disruption_id}"
+        out.append(Alert(team, subject[:100], body))
+    return out
 
 
 def alert_for(change: Change, stage: str) -> Alert | None:

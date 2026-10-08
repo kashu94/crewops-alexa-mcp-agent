@@ -30,7 +30,7 @@ def run(world, seed, type_, details):
             "details": details,
         }
     )
-    analysis = analyse(world, report, seed.gates)
+    analysis = analyse(world, report, seed.gates, seed.contacts)
     json.dumps(analysis.to_dict())  # always storable and sendable as JSON
     return analysis
 
@@ -248,4 +248,214 @@ def test_stored_output_is_capped_and_counts_what_it_left_out(world, seed, monkey
     )
     doc = a.to_dict()
     assert len(doc["affected_flights"]) == 5
-    assert doc["omitted"] == {"affected_flights": 8}
+    assert len(doc["late_departures"]) == 5
+    assert doc["omitted"] == {"affected_flights": 8, "late_departures": 8}
+
+
+# -- Gates, notices and how each disruption gets resolved -------------------------------
+
+
+def teams(a):
+    return {(n["team"], n["scope"]) for n in a.notices}
+
+
+def test_gate_closure_regates_or_buses_and_needs_no_recrew(world, seed):
+    a = run(
+        world,
+        seed,
+        "gate_closure",
+        {
+            "gate": "BLR-G2",
+            "from_utc": "2026-09-15T00:00:00Z",
+            "to_utc": "2026-09-15T08:00:00Z",
+            "reason": "jet bridge fault",
+        },
+    )
+    moves = {m.flight_no: m for m in a.stands}
+    # DX433 finds a free gate; DX431's overnight slot fits no other BLR gate: bus boarding.
+    assert moves["DX433"].to_gate == "BLR-G3" and moves["DX433"].delay_minutes == 0
+    assert moves["DX431"].to_gate == "remote stand" and moves["DX431"].delay_minutes == 15
+    assert moves["DX433"].booked == 141
+    assert a.seats == () and a.handling["kind"] == "internal"
+    assert "No re-crew required" in a.handling["text"]
+    assert {("gate_control", "BLR"), ("station_ops", "BLR"), ("flight_info", "NETWORK")} <= teams(a)
+    # A bused departure slips, so operations monitoring tells its captain.
+    assert ("ops_monitoring", "NETWORK") in teams(a)
+    gate = next(n for n in a.notices if n["team"] == "gate_control")
+    assert gate["contact"] == "Sameer Hegde"
+
+
+def test_gate_closure_with_no_departure_moves_nothing(world, seed):
+    a = run(
+        world,
+        seed,
+        "gate_closure",
+        {
+            "gate": "GOI-G1",
+            "from_utc": "2026-09-14T18:00:00Z",
+            "to_utc": "2026-09-14T18:30:00Z",
+            "reason": "cleaning",
+        },
+    )
+    # Nothing moves, so only the station's gate control and duty manager need to know.
+    assert a.stands == () and teams(a) == {("gate_control", "GOI"), ("station_ops", "GOI")}
+    assert a.handling["kind"] == "internal" and "nothing moves" in a.summary
+
+
+def test_delay_tells_screens_captain_and_the_next_departure_at_the_gate(world, seed):
+    a = run(world, seed, "flight_delay", {"flight_id": "DX412-2026-09-15", "delay_minutes": 60})
+    assert {leg.flight_id for leg in a.late} == {
+        "DX412-2026-09-15",
+        "DX413-2026-09-15",
+        "DX588-2026-09-15",
+    }
+    assert {("flight_info", "NETWORK"), ("ops_monitoring", "NETWORK")} <= teams(a)
+    assert ("customer_care", "NETWORK") in teams(a)
+    # DX588 leaves BLR-G2 an hour late; DX401's aircraft is due on that gate meanwhile.
+    (nxt,) = a.next_at_gate
+    assert (nxt.flight_no, nxt.gate, nxt.buffer_minutes) == ("DX401", "BLR-G2", -60)
+    assert [(m.flight_no, m.to_gate) for m in a.stands] == [("DX401", "BLR-G6")]
+    agent = [n for n in a.notices if n["about"] == "DX401-2026-09-16"]
+    assert agent and "moves to BLR-G6" in agent[0]["message"]
+
+
+def test_a_short_delay_leaves_the_next_departure_its_gate(world, seed):
+    a = run(world, seed, "flight_delay", {"flight_id": "DX402-2026-09-15", "delay_minutes": 10})
+    # DX404 leaves BLR-G1 ten minutes late; DX451 still boards there 65 minutes later.
+    (nxt,) = a.next_at_gate
+    assert (nxt.flight_no, nxt.gate, nxt.buffer_minutes) == ("DX451", "BLR-G1", 65)
+    assert a.stands == () and a.handling["kind"] == "internal"
+    agent = next(n for n in a.notices if n["about"] == nxt.flight_id)
+    assert "free in time" in agent["message"]
+
+
+def test_emails_never_name_crew(world, seed):
+    for type_, details in (
+        ("crew_unavailable", {"crew_id": "C-1042", "from_date": "2026-09-15", "reason": "sick"}),
+        (
+            "certification_lapse",
+            {"crew_id": "C-5417", "cert_type": "recurrent_training", "valid_to": "2026-09-17"},
+        ),
+        ("flight_delay", {"flight_id": "DX412-2026-09-15", "delay_minutes": 180}),
+    ):
+        a = run(world, seed, type_, details)
+        for n in a.notices:
+            if n["channel"] == "email":
+                assert "C-" not in n["message"] and "Krishnan" not in n["message"]
+
+
+def test_certificate_lapse_tells_the_crew_member_in_app_and_crew_records(world, seed):
+    a = run(
+        world,
+        seed,
+        "certification_lapse",
+        {"crew_id": "C-5417", "cert_type": "recurrent_training", "valid_to": "2026-09-17"},
+    )
+    crew = [n for n in a.notices if n["channel"] == "in_app"]
+    assert [(n["about"], n["contact"]) for n in crew] == [("C-5417", "S. Krishnan")]
+    assert "recurrent training expires on 2026-09-17" in crew[0]["message"]
+    assert ("crew_records", "NETWORK") in teams(a)
+    assert a.handling["kind"] == "recrew"
+
+
+def test_several_sick_crew_are_covered_together(world, seed):
+    from dataclasses import replace
+    from datetime import date
+
+    out = ("C-1042", "C-1938")
+    # Open reports mark everyone they name unavailable before the analysis runs.
+    sick = replace(world, unavailable={c: ((date(2026, 9, 15), "r-analysis-1"),) for c in out})
+    a = run(
+        sick,
+        seed,
+        "multiple_crew_unavailable",
+        {"crew_ids": list(out), "from_date": "2026-09-15", "reason": "sick"},
+    )
+    assert {(s.seat.pairing_id, s.crew_out) for s in a.seats} == {
+        ("P-2291", "C-1042"),
+        ("P-2209", "C-1938"),
+    }
+    offered = {o.crew_id for s in a.seats for o in s.options.crew_options}
+    assert not offered & set(out)  # neither is offered to cover the other
+    picks = [o.crew_id for _, o in a.joint.assignments]
+    assert len(picks) == len(set(picks)) == 2
+    assert a.handling["kind"] == "recrew" and "2 seat(s) on 2 trip(s)" in a.summary
+
+
+def test_a_refused_gate_change_keeps_the_gate_and_tells_only_the_station(world, seed):
+    a = run(world, seed, "gate_change", {"flight_id": "DX401-2026-09-15", "new_gate": "BLR-G2"})
+    assert "Keep it at BLR-G4" in a.summary and a.stands == ()
+    assert teams(a) == {("gate_control", "BLR"), ("station_ops", "BLR")}
+
+
+def test_desks_come_from_the_aircraft_touched(world, seed):
+    a = run(
+        world,
+        seed,
+        "gate_closure",
+        {
+            "gate": "DEL-G1",
+            "from_utc": "2026-09-15T04:00:00Z",
+            "to_utc": "2026-09-15T06:00:00Z",
+            "reason": "security sweep",
+        },
+    )
+    assert a.aircraft == ("VT-DXA",)
+
+
+def _double_booked(gates, stands):
+    """Gates held by two departures at once after the moves (late ones held to their new
+    departure)."""
+    from collections import defaultdict
+
+    moved = {m.flight_id: m for m in stands}
+    held = defaultdict(list)
+    for g in gates:
+        m = moved.get(g.flight_id)
+        if m is None:
+            held[g.gate].append((g.start_utc, g.end_utc, g.flight_id))
+        elif m.to_gate != "remote stand":
+            held[m.to_gate].append((m.start_utc, m.end_utc, g.flight_id))
+    return [
+        (gate, a[2], b[2])
+        for gate, spans in held.items()
+        for i, a in enumerate(spans)
+        for b in spans[i + 1 :]
+        if a[0] < b[1] and b[0] < a[1]
+    ]
+
+
+def test_a_long_delay_moves_no_flight_onto_its_own_gate_or_a_taken_one(world, seed):
+    # A 400-minute delay to DX401: its own later legs leave late too, so they never clash
+    # with it, and nothing may be "moved" to the gate it already has.
+    a = run(world, seed, "flight_delay", {"flight_id": "DX401-2026-09-14", "delay_minutes": 400})
+    late = {leg.flight_id for leg in a.late}
+    assert all(m.from_gate != m.to_gate for m in a.stands)
+    assert not any(m.flight_id in late and "late DX401" in m.why for m in a.stands)
+    assert len({n.flight_id for n in a.next_at_gate}) == len(a.next_at_gate)
+    assert a.aircraft == ("VT-DXA",)  # flights only re-gated stay their own desk's
+
+
+@pytest.mark.parametrize("minutes", [60, 180, 300, 420])
+def test_moves_never_double_book_a_gate(world, seed, minutes):
+    from dataclasses import replace as shifted
+    from datetime import timedelta
+
+    for f in sorted(world.flights)[::3]:
+        a = run(world, seed, "flight_delay", {"flight_id": f, "delay_minutes": minutes})
+        late = {leg.flight_id: timedelta(minutes=leg.minutes) for leg in a.late}
+        assert all(m.from_gate != m.to_gate for m in a.stands), f
+        # A late departure boards and leaves later: its whole slot moves with it.
+        gates = [
+            shifted(
+                g, start_utc=g.start_utc + late[g.flight_id], end_utc=g.end_utc + late[g.flight_id]
+            )
+            if g.flight_id in late
+            else g
+            for g in seed.gates
+        ]
+        stands = [
+            shifted(m, start_utc=m.start_utc + late[m.flight_id]) if m.flight_id in late else m
+            for m in a.stands
+        ]
+        assert _double_booked(gates, stands) == [], (f, minutes)

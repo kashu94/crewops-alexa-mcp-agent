@@ -1832,6 +1832,207 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Cause: Crew and dates were pooled across all seats.
 - Fix: Each seat's options are matched against trips near that seat's own dates.
 
+### FL-143: A controller could not choose an option, only submit the recommendation
+
+- Date: 2026-10-08
+- Where: web full record
+- Found by: live run (the project owner)
+- Severity: Medium
+- What went wrong: There was no way to pick a different legal option for a seat, and on
+  another desk's disruption there was no plan button at all, with nothing explaining why.
+- Cause: The server accepted a chosen person per seat (`choices`), but the page never
+  offered one; planning is limited to the disruption's own desk.
+- Fix: Options and recommendation cards are selectable on your own desk's disruptions;
+  Submit sends the choices, and choosing other than the recommendation asks for the reason,
+  which goes to the approver. Another desk's disruption says whose it is.
+
+### FL-144: "Passengers at risk" was the seat count
+
+- Date: 2026-10-08
+- Where: web full record
+- Found by: live run (the project owner)
+- Severity: Low
+- What went wrong: Seats at risk and passengers at risk always showed the same number (972
+  and 972).
+- Cause: The seed has no booking counts; the engine's passenger figure is the uncrewed
+  flights' seat capacity.
+- Fix: Only "Seats at risk" is shown.
+
+### FL-145: The console scrolled as a whole page as well as inside its panels
+
+- Date: 2026-10-08
+- Where: web console
+- Found by: live run (the project owner)
+- Severity: Low
+- What went wrong: On a wide screen the page grew a vertical scrollbar although each panel
+  already scrolled.
+- Cause: The panels' height did not count the figures strip above them, and the live banner
+  pushed content down.
+- Fix: The workspace fits the window on wide screens and only the panels scroll; the banner
+  floats over the page.
+
+### FL-146: Recommendation cards showed no reserve-cover score
+
+- Date: 2026-10-08
+- Where: web full record
+- Found by: screenshot
+- Severity: Low
+- What went wrong: Each policy card read "Reserve cover kept —/100".
+- Cause: The engine's policy picks are shorter copies of the options, without the resilience
+  figure.
+- Fix: The server returns each pick as the option's full record.
+
+### FL-147: The full record's main Submit failed when one person covered two seats
+
+- Date: 2026-10-08
+- Where: web full record
+- Found by: independent review
+- Severity: High
+- What went wrong: For a week-long absence with two seats, "Submit the recommended plan"
+  failed with "one crew member is chosen for two seats", although a plan from the console
+  went through.
+- Cause: The page sent every seat's top live option as an explicit choice, and an explicit
+  choice outranks the analysis's joint plan, which gives each seat a different person.
+- Fix: Only seats the controller changed are sent; the rest follow the joint plan, which is
+  also what the page now shows as the recommendation. A pick that is no longer a legal option
+  blocks Submit until the controller chooses again.
+
+### FL-148: Live options for a delayed seat were worked out for the wrong day
+
+- Date: 2026-10-08
+- Where: MCP server, full record
+- Found by: independent review
+- Severity: Medium
+- What went wrong: When the delay was on a later day of a trip, the options shown were
+  judged as if the first day were late, so a listed person could fail approval.
+- Cause: The record dropped the seat's delay date, and the search then defaulted to the
+  trip's first day.
+- Fix: The delay date is kept; a test covers a delay on the trip's second day.
+
+### FL-149: A seat that became coverable after the analysis broke Submit
+
+- Date: 2026-10-08
+- Where: web full record
+- Found by: independent review
+- Severity: Medium
+- What went wrong: If the rules or roster changed after the analysis, a seat stored as
+  "no legal cover" could show selectable options, and Submit then failed with "no such
+  seat".
+- Cause: The page offered choices for any seat with live options; the server plans only
+  seats the stored analysis could cover.
+- Fix: Only coverable seats can be chosen. Others show their live options for information,
+  with a note to re-run the analysis.
+
+### FL-150: "Build a joint plan" treated a delayed crew member as absent
+
+- Date: 2026-10-08
+- Where: web full record
+- Found by: independent review
+- Severity: Low
+- What went wrong: A competing delay disruption went into the joint plan as if its crew
+  member were off sick.
+- Cause: Every competing seat with a crew member was sent as an absence.
+- Fix: Competing disruptions carry their report type, and only absences (sick, certificate
+  lapse) go into the joint plan.
+
+### FL-151: A late flight named "the next departure at its gate" days ahead
+
+- Date: 2026-10-08
+- Where: disruption analysis (gates)
+- Found by: smoke run of every report type on the seed
+- Severity: Low
+- What went wrong: A 60-minute delay told the gate agent of a departure boarding 30 hours
+  later that its gate was "free in time, 1815 min before it boards".
+- Cause: The next slot at the gate was taken however far away it was.
+- Fix: Only a departure boarding within three hours of the late one leaving is told.
+
+### FL-152: A refused gate change suggested a remote stand instead of staying put
+
+- Date: 2026-10-08
+- Where: disruption analysis (gates)
+- Found by: smoke run of every report type on the seed
+- Severity: Low
+- What went wrong: Asked to move DX401 onto a gate already held, the analysis first
+  suggested its own current gate as the "new" one, then, with that excluded, a remote stand,
+  although the flight could simply keep its gate. Flight information and customer care
+  would have been told about a gate change that never happened.
+- Cause: The alternative search treated the flight's own gate like any other.
+- Fix: The flight keeps its own gate when that stays free for it, and then only the
+  station's gate control and duty manager are told. Otherwise the first free gate is
+  suggested.
+
+### FL-153: Capped analyses did not count the new lists they cut
+
+- Date: 2026-10-08
+- Where: disruption analysis (stored size)
+- Found by: test run
+- Severity: Low
+- What went wrong: A long station closure stored only the first late departures, gate moves
+  and notices, with nothing saying more existed.
+- Cause: The count of what was left out covered only the original lists.
+- Fix: Late departures, gate moves, next-at-gate entries and notices are counted too.
+
+### FL-154: A long delay double-booked gates and "moved" flights onto their own gate
+
+- Date: 2026-10-08
+- Where: disruption analysis (gates)
+- Found by: independent review
+- Severity: High
+- What went wrong: For DX401 400 minutes late, the aircraft's own later leg was moved
+  "because the gate is still held by late DX401" onto a gate another flight held, and DX451
+  was "moved" from BLR-G1 to BLR-G1, which gate control would have been emailed.
+- Cause: The gate check treated the late aircraft's later legs as on time, kept a moved
+  flight's original departure time, and kept looking for clashes at the gate it had
+  already left.
+- Fix: Late departures clash only by their own late times and move with their own late
+  departure; each moved flight is tracked at its new gate; a move onto the same gate is
+  impossible. Tests check, over hundreds of delays, that no gate is held twice.
+
+### FL-155: A flight re-gated by another desk's delay pulled that desk in
+
+- Date: 2026-10-08
+- Where: disruption analysis (desks)
+- Found by: independent review
+- Severity: Medium
+- What went wrong: A delay to a desk-1 aircraft that re-gated a desk-3 flight belonged to
+  both desks, so the desk-3 controller could mark it resolved.
+- Cause: The aircraft a disruption touches included every flight it re-gated.
+- Fix: Only the flights the disruption is about decide its desks; for a gate closure those
+  are the moved flights themselves. Disruptions analysed before desks were recorded stay
+  closable by nobody, as before.
+
+### FL-156: A joint plan across desks left out a rival report of several sick crew
+
+- Date: 2026-10-08
+- Where: web full record
+- Found by: independent review
+- Severity: Medium
+- What went wrong: "Build a joint plan" ignored crew out in a competing multiple-sick report.
+- Cause: The list of absence types predated the new report type.
+- Fix: It includes several-crew reports.
+
+### FL-157: Two bused departures on one trip day counted only one as late
+
+- Date: 2026-10-08
+- Where: disruption analysis (gate closure)
+- Found by: independent review
+- Severity: Low
+- What went wrong: When a gate closure sent two departures of the same duty day to a remote
+  stand, the earlier one's 15 minutes went missing from the late list and the notices.
+- Cause: Each duty day kept the last bused departure instead of the first.
+- Fix: The earliest one sets the day's slip, and every later leg slips with it.
+
+### FL-158: The resolve remark never reached whoever reported it
+
+- Date: 2026-10-08
+- Where: MCP server, web report page
+- Found by: independent review
+- Severity: Low
+- What went wrong: "Mark resolved" said the remark goes to the reporter, but the reporter
+  saw only "Resolved by crew control."
+- Cause: The reporter's view did not read the audit trail.
+- Fix: The reporter's record and their report list show crew control's remark.
+
 #### Evaluation and tests
 
 ### FL-019: Two evaluation checks could never fail

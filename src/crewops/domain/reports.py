@@ -33,6 +33,8 @@ from crewops.domain.models import (
 )
 
 REPORT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+GATE_RE = re.compile(r"^[A-Z]{3}-G[0-9]{1,2}$")
+MAX_CREW_IN_ONE_REPORT = 12
 MAX_NARRATIVE = 1000
 MAX_DELAY_MINUTES = 24 * 60
 
@@ -54,6 +56,8 @@ class ReportType(StrEnum):
     STATION_DISRUPTION = "station_disruption"
     GATE_CHANGE = "gate_change"
     CERTIFICATION_LAPSE = "certification_lapse"
+    MULTIPLE_CREW_UNAVAILABLE = "multiple_crew_unavailable"
+    GATE_CLOSURE = "gate_closure"
 
 
 OPERATIONAL_REPORTERS = frozenset({Role.REPORTER, Role.CONTROLLER, Role.APPROVER})
@@ -123,6 +127,20 @@ def _crew_unavailable(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
     }
 
 
+def _multiple_crew_unavailable(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
+    """Several crew out at once (a stomach bug after a crew meal, a road accident on the way
+    in): one report, so their seats are covered together and never by one another."""
+    raw = d.get("crew_ids")
+    if not isinstance(raw, list) or not 2 <= len(raw) <= MAX_CREW_IN_ONE_REPORT:
+        raise DataError(f"{ctx}.crew_ids: a list of 2 to {MAX_CREW_IN_ONE_REPORT} crew ids")
+    crew_ids = [_text({"crew_id": c}, "crew_id", f"{ctx}.crew_ids") for c in raw]
+    if len(set(crew_ids)) != len(crew_ids):
+        raise DataError(f"{ctx}.crew_ids: a crew member is listed twice")
+    one = _crew_unavailable({**d, "crew_id": crew_ids[0]}, ctx)
+    del one["crew_id"]
+    return {"crew_ids": sorted(crew_ids), **one}
+
+
 def _flight_delay(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
     minutes = d.get("delay_minutes")
     if isinstance(minutes, bool) or not isinstance(minutes, int):
@@ -144,6 +162,23 @@ def _station_disruption(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
     start, end = _window(d, ctx)
     return {
         "station": station,
+        "from_utc": start,
+        "to_utc": end,
+        "reason": _text(d, "reason", ctx, max_len=200),
+    }
+
+
+def _gate(d: Mapping[str, Any], key: str, ctx: str) -> str:
+    gate = _text(d, key, ctx, 20)
+    if not GATE_RE.match(gate):
+        raise DataError(f"{ctx}.{key}: expected a gate like BLR-G2, got {_shown(gate)}")
+    return gate
+
+
+def _gate_closure(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
+    start, end = _window(d, ctx)
+    return {
+        "gate": _gate(d, "gate", ctx),
         "from_utc": start,
         "to_utc": end,
         "reason": _text(d, "reason", ctx, max_len=200),
@@ -175,7 +210,19 @@ DETAIL_PARSERS: dict[ReportType, Callable[[Mapping[str, Any], str], dict[str, An
     ReportType.STATION_DISRUPTION: _station_disruption,
     ReportType.GATE_CHANGE: _gate_change,
     ReportType.CERTIFICATION_LAPSE: _certification_lapse,
+    ReportType.MULTIPLE_CREW_UNAVAILABLE: _multiple_crew_unavailable,
+    ReportType.GATE_CLOSURE: _gate_closure,
 }
+
+
+def crew_out_of(report_type: str, details: Mapping[str, Any]) -> tuple[str, ...]:
+    """The crew a report takes off the roster: the sick, or the holder of a lapsed
+    certificate. Empty for reports about flights, aircraft, stations and gates."""
+    if report_type == ReportType.MULTIPLE_CREW_UNAVAILABLE:
+        return tuple(details.get("crew_ids") or ())
+    if report_type in (ReportType.CREW_UNAVAILABLE, ReportType.CERTIFICATION_LAPSE):
+        return (details["crew_id"],) if details.get("crew_id") else ()
+    return ()
 
 
 # --------------------------------------------------------------------------

@@ -7,6 +7,8 @@ export const TOOLS = {
   whoami: { list: false, write: false },
   disruptions: { list: true, write: false },
   my_roster: { list: false, write: false },
+  my_reports: { list: true, write: false },
+  report_reference: { list: false, write: false },
   rule_thresholds: { list: true, write: false },
   set_rule_threshold: { list: false, write: true },
   activity_log: { list: true, write: false },

@@ -31,6 +31,7 @@ from crewops.domain import (
     RosterException,
     Rule,
 )
+from crewops.domain.contacts import Contact
 from crewops.store import schema
 from crewops.store.schema import SEPARATOR as S
 
@@ -152,7 +153,12 @@ def _flight(f: Flight) -> dict[str, Any]:
         "aircraft": f.aircraft,
         "aircraft_type": f.aircraft_type,
         "seats": f.seats,
+        **({"booked": f.booked} if f.booked is not None else {}),
     }
+
+
+def _contact(c: Contact) -> dict[str, Any]:
+    return {"team": c.team, "scope": c.scope, "name": c.name, "title": c.title}
 
 
 def _pairing(p: Pairing) -> dict[str, Any]:
@@ -314,6 +320,12 @@ CODECS: dict[type, Codec] = {
     GateSlot: Codec("gate_slot", _gate_keys, _gate, GateSlot.from_dict),
     Rule: Codec("rule", lambda r: _keys("CONFIG", f"RULE{S}{r.rule_id}"), _rule, Rule.from_dict),
     CostTable: Codec("costs", lambda c: _keys("CONFIG", "COSTS"), _costs, CostTable.from_dict),
+    Contact: Codec(
+        "contact",
+        lambda c: _keys("CONFIG", f"CONTACT{S}{c.team}{S}{c.scope}"),
+        _contact,
+        Contact.from_dict,
+    ),
 }
 
 BY_ENTITY: dict[str, Codec] = {codec.entity: codec for codec in CODECS.values()}

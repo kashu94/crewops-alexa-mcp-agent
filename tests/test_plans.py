@@ -424,3 +424,16 @@ def test_a_plan_too_large_to_commit_is_refused(table, monkeypatch):
     with pytest.raises(PlanError) as err:
         Plans(table).submit(ROHIT, "r-toolarge")
     assert err.value.code == "TOO_LARGE"
+
+
+def test_a_report_of_several_sick_crew_moves_each_ones_roster_version(table):
+    from crewops.store.versions import read_versions
+
+    details = {"crew_ids": ["C-1042", "C-1938"], "from_date": "2026-09-15", "reason": "sick"}
+    doc = report("multiple_crew_unavailable", details, report_id="r-sick-both")
+    store_report(table, Report.from_dict(doc), AT)
+    assert read_versions(table, {"C-1042", "C-1938", "C-3310"}) == {
+        "C-1042": 1,
+        "C-1938": 1,
+        "C-3310": 0,
+    }

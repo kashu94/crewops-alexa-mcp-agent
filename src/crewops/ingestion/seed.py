@@ -34,6 +34,7 @@ from crewops.domain import (
     RosterException,
     Rule,
 )
+from crewops.domain.contacts import NETWORK, TEAMS, Contact
 
 REPORT_BEFORE_FIRST_DEPARTURE = timedelta(minutes=60)
 RELEASE_AFTER_LAST_ARRIVAL = timedelta(minutes=30)
@@ -50,6 +51,7 @@ SEED_FILES = (
     "rules.json",
     "costs.json",
     "boarding_gates.json",
+    "contacts.json",
 )
 
 
@@ -74,6 +76,8 @@ class SeedData:
     rules: tuple[Rule, ...]
     costs: CostTable
     gates: tuple[GateSlot, ...]
+    contacts: tuple[Contact, ...] = ()
+    """Who is on duty for each operational team (see ``crewops.domain.contacts``)."""
 
     @property
     def snapshot_utc(self) -> datetime:
@@ -143,6 +147,7 @@ def load_seed(directory: Path | str | None = None) -> SeedData:
         rules=_parse_list(rules.get("rules"), "rules", Rule.from_dict),
         costs=CostTable.from_dict(raw["costs.json"]),
         gates=_parse_list(raw["boarding_gates.json"], "boarding_gates", GateSlot.from_dict),
+        contacts=_parse_list(raw["contacts.json"], "contacts", Contact.from_dict),
     )
 
 
@@ -292,6 +297,18 @@ def validate(seed: SeedData) -> list[Issue]:
             warn(g.gate, f"slot for {g.flight_id} does not end at departure")
         if g.aircraft_type != flight.aircraft_type:
             error(g.gate, f"{g.flight_id} aircraft type mismatch")
+
+    # -- Contacts -----------------------------------------------------------
+    for dup in _duplicates(f"{c.team} {c.scope}" for c in seed.contacts):
+        error(dup, "duplicate contact")
+    stations = {f.dep_station for f in seed.flights} | {f.arr_station for f in seed.flights}
+    for team, info in TEAMS.items():
+        scopes = {c.scope for c in seed.contacts if c.team is team}
+        for missing in sorted((stations if info.per_station else {NETWORK}) - scopes):
+            warn(str(team), f"no contact for {missing}")
+    for c in seed.contacts:
+        if TEAMS[c.team].per_station and c.scope not in stations:
+            error(f"{c.team} {c.scope}", "contact for a station no flight serves")
 
     return issues
 

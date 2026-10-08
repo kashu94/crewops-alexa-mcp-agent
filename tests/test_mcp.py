@@ -184,7 +184,17 @@ def test_a_disruption_shows_its_desk_its_trip_and_who_else_wants_its_crew(api):
     assert {f["state"] for f in context["flights"]} == {"uncrewed"}
     assert {c["crew_id"] for c in context["crew"] if c["state"] == "out"} == {"C-1042"}
     rivals = shown["contention"]["C-1526"]
-    assert rivals[0]["disruption_id"] == "r-sick1938" and rivals[0]["desks"] == ["desk-1"]
+    assert rivals[0]["disruption_id"] == "r-sick1938" and rivals[0]["crew_out"] == "C-1938"
+    assert rivals[0]["desks"] == [{"desk_id": "desk-1", "controller": "Ananya Iyer"}]
+    live = shown["seats"][0]["live"]
+    assert (
+        live["options"][0]["crew_id"] == "C-3310" and live["options"][0]["resilience"] is not None
+    )
+    assert {"cheapest", "least_delay", "keeps_most_reserve_cover"} <= set(live["policies"])
+    assert all(o["resilience"] is not None for o in live["policies"].values())
+    assert live["funnel"][0]["stage"] == "considered" and live["excluded"]
+    assert live["excluded"][0]["reasons"]
+    assert any(r["base"] == "BLR" for r in shown["seats"][0]["reserves"])
     assert (
         api.show(Caller("ananya", frozenset({Role.CONTROLLER}), desk="desk-1"), "r-sick1042")[
             "yours"
@@ -205,8 +215,113 @@ def test_whoever_filed_a_report_sees_only_how_it_stands(api):
         "reported_utc",
         "reported_by",
         "details",
+        "handled",
+        "remark",
     }
+    assert filer["handled"] is None  # covering crew is crew control's, not the filer's
     assert "r-sick1938" not in str(filer) and "C-3310" not in str(filer)
+
+
+def filed(table, report_id, type_, details, by="u-1", roles=("reporter",)):
+    """Store a report as the ingest worker would and analyse it, as the stream does."""
+    from test_plans import AT
+    from test_reports import report
+
+    from crewops.analysis.runner import Operation, analyse_by_id
+    from crewops.domain import Report
+    from crewops.store.reports import store_report
+
+    doc = report(type_, details, report_id=report_id, roles=roles)
+    doc["reported_by"]["user_id"] = by
+    store_report(table, Report.from_dict(doc), AT)
+    assert analyse_by_id(table, report_id, Operation.load(table)).outcome == "stored"
+
+
+def test_a_delayed_seat_is_searched_on_the_day_of_the_delay(api):
+    # DX412 on 15 Sep is the second day of P-2291's crew: live options must be worked out
+    # for that day, as approval re-checks them.
+    filed(
+        api.table,
+        "r-late412",
+        "flight_delay",
+        {"flight_id": "DX412-2026-09-15", "delay_minutes": 180},
+    )
+    seats = api.show(ROHIT, "r-late412")["seats"]
+    assert seats and all(s["delay_date"] == "2026-09-15" for s in seats)
+
+
+ANANYA = Caller("ananya", frozenset({Role.CONTROLLER}), desk="desk-1")
+IMRAN = Caller("imran", frozenset({Role.REPORTER}))
+GATE_CLOSED = {
+    "gate": "DEL-G1",
+    "from_utc": "2026-09-15T04:00:00Z",
+    "to_utc": "2026-09-15T06:00:00Z",
+    "reason": "security sweep",
+}
+
+
+def test_a_gate_closure_is_handled_internally_and_resolved_with_a_remark(api):
+    filed(api.table, "r-gate-del1", "gate_closure", GATE_CLOSED, by="imran")
+    shown = api.show(ANANYA, "r-gate-del1")  # DX402 flies VT-DXA, desk-1
+    assert shown["yours"] is True and shown["seats"] == []
+    assert shown["handling"]["kind"] == "internal"
+    assert [(m["flight_no"], m["to_gate"]) for m in shown["stands"]] == [("DX402", "remote stand")]
+    assert any(f["flight_no"] == "DX402" and f["booked"] == 134 for f in shown["flights"])
+    assert {n["team"] for n in shown["notices"]} >= {"gate_control", "station_ops", "flight_info"}
+    assert api.show(ROHIT, "r-gate-del1")["yours"] is False
+    assert "to_resolve" in {q["kind"] for q in api.queue(ANANYA)}
+
+    with pytest.raises(ApiError) as err:
+        api.close(ROHIT, "r-gate-del1", "re-gated")
+    assert err.value.code == "FORBIDDEN"
+    out = api.close(ANANYA, "r-gate-del1", "DX402 bussed from stand 14; screens updated")
+    assert out["status"] == "CLOSED"
+    trail = api.show(ANANYA, "r-gate-del1")["audit"]
+    assert trail[-1]["reason"] == "DX402 bussed from stand 14; screens updated"
+
+    # Whoever filed it reads what was done about the gate, nothing about crew.
+    filer = api.show(IMRAN, "r-gate-del1")
+    assert filer["outcome"] == "Resolved by crew control."
+    assert filer["handled"].startswith("Handled at DEL by gate and stand control")
+    assert filer["remark"] == "DX402 bussed from stand 14; screens updated"
+    (mine,) = api.my_reports(IMRAN)
+    assert mine["disruption_id"] == "r-gate-del1" and mine["handled"]
+    assert api.my_reports(ROHIT) == []
+
+
+def test_the_feed_carries_desks_and_how_each_is_handled(api):
+    filed(api.table, "r-gate-del1", "gate_closure", GATE_CLOSED)
+    feed = {d["disruption_id"]: d for d in api.disruptions(ROHIT)}
+    assert feed["r-gate-del1"]["desks"] == ["desk-1"]
+    assert feed["r-gate-del1"]["handling"] == "internal"
+    assert feed["r-sick1042"]["desks"] == ["desk-2"]
+    assert feed["r-sick1042"]["handling"] == "recrew"
+
+
+def test_a_lapsing_certificate_shows_on_the_crew_members_page(api):
+    lapse = {"crew_id": "C-5417", "cert_type": "recurrent_training", "valid_to": "2026-09-17"}
+    filed(api.table, "r-cert5417", "certification_lapse", lapse)
+    holder = Caller("crew5417", frozenset({Role.CREW}), crew_id="C-5417")
+    (notice,) = api.my_roster(holder)["notices"]
+    assert notice["disruption_id"] == "r-cert5417"
+    assert "recurrent training expires on 2026-09-17" in notice["message"]
+    assert api.my_roster(CREW)["notices"] == []
+
+
+def test_reporters_get_what_a_report_can_name(api):
+    ref = api.reference(IMRAN)
+    assert "BLR-G2" in ref["gates"] and "VT-DXA" in ref["aircraft"]
+    assert any(c["crew_id"] == "C-1042" for c in ref["crew"])
+    assert any(f["flight_id"] == "DX412-2026-09-15" and f["gate"] for f in ref["flights"])
+    assert "recurrent_training" in ref["cert_types"]
+    with pytest.raises(ApiError):
+        api.reference(CREW)
+
+
+def test_rivals_carry_their_report_type(api):
+    disruption(api.table, "r-sick1938", "C-1938", "2026-09-15")
+    rivals = api.show(ROHIT, "r-sick1042")["contention"]["C-1526"]
+    assert rivals[0]["report_type"] == "crew_unavailable"
 
 
 def test_contention_is_only_for_trips_near_in_time(api):
