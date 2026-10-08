@@ -653,6 +653,24 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Suggestion: Release eslint-config-next with patched dependencies, or note in the audit
   output that only development tooling is affected.
 
+### FL-136: A fresh Next.js app reports errors for client-rendered pages
+
+- Date: 2026-10-08
+- Service / tool: Next.js 16.4 (create-next-app defaults: Cache Components and partial
+  prefetching on)
+- Severity: Medium (looked like the app was broken during the first live walkthrough)
+- Task attempted: Open the console and a disruption's full record in `npm run dev`.
+- Steps taken: Navigated between pages; the pages are client components that load data from
+  the app's own API routes.
+- Expected: No error for pages that render on the client by design.
+- Actual: The dev overlay and browser console showed `Error: Route "/console/[id]": Could
+  not validate that a segment in your UI has instant navigation. This segment was dropped
+  from rendering.` for every page, with a "1 Insight" badge.
+- Workaround: Turned off `cacheComponents` and `partialPrefetching`, which the scaffold
+  enables but these pages do not use.
+- Suggestion: Do not report client-only pages as dropped segments, or say in the scaffold
+  which kinds of app need these flags.
+
 ## 4. Our own code (found by tests, reviews, reference data and live runs)
 
 #### Legality engine and disruption impact
@@ -1484,6 +1502,19 @@ Entries in section 4 are about our own code, so they use a shorter form:
 
 #### MCP server, memory and notifications
 
+### FL-139: Whoever filed a report could read the desk's whole view of it
+
+- Date: 2026-10-08
+- Where: MCP server
+- Found by: review
+- Severity: High
+- What went wrong: A reporter or crew member reading their own report got the trip's crew
+  names and ids, the ranked replacements with costs, the plans, the audit trail and, once
+  added, other open disruptions and their desks (for example r-sick1938 on desk-1).
+- Cause: The filer was let in for the same full record as staff.
+- Fix: A filer who is not staff gets only the status, a plain outcome ("Crew control is
+  arranging cover.") and their own report.
+
 ### FL-017: A server's "forbidden" told a caller which disruptions exist
 
 - Date: 2026-10-07
@@ -1734,6 +1765,72 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Fix: Escape closes the sheet and the menu, the first field takes focus, cards set
   aria-expanded, the banner is a polite live region, and the menu uses plain buttons with
   aria-current.
+
+### FL-137: Every web action started a new server session, so pages loaded slowly
+
+- Date: 2026-10-08
+- Where: web app, MCP client
+- Found by: live run
+- Severity: Medium
+- What went wrong: Opening a full record took a long time: each tool call opened a new MCP
+  session, and AgentCore gave each new session a fresh server instance, which loaded the
+  whole operation before answering.
+- Cause: The web server connected, called and closed for every request.
+- Fix: One connected MCP client per signed-in session is kept for up to four minutes, so
+  calls reuse the same warm instance and skip the handshake; reads retry once on a new
+  connection if AgentCore has ended the session, writes never retry.
+
+### FL-138: Usability problems found in the first live walkthrough
+
+- Date: 2026-10-08
+- Where: web console and full record
+- Found by: live run (the project owner)
+- Severity: Medium
+- What went wrong: Cancelling was a line of small text instead of an option; the
+  recommendation was a dense machine summary ("L. Verma (C-3231) unavailable (sick): P-2224
+  Captain: Assign Captain M. Pillai (C-3315) (reserve callout), ₹18,500"); options sat in a
+  narrow column on the left; a controller's figures showed approvals they cannot act on;
+  approving showed as two audit rows, approved and committed; nothing showed whose desk a
+  disruption belonged to or whether another desk wanted the same crew.
+- Cause: The first design followed the data's shape rather than the controller's questions.
+- Fix: A recommendation card, cancellation as the last ranked option, a two-column record
+  with coverage figures, the trip's flights and crew, role-specific figures and actions, one
+  "Approved and committed" row, a desk banner, and "Also wanted by" on options another open
+  disruption ranks within a day of this one.
+
+### FL-140: A dropped connection broke every later write until a read
+
+- Date: 2026-10-08
+- Where: web MCP client
+- Found by: review
+- Severity: Medium
+- What went wrong: After a transport failure on a write (an ended AgentCore session), the
+  broken client stayed cached, so every following write failed with "CrewOps is
+  unreachable".
+- Cause: Only reads replaced a failed connection.
+- Fix: Any transport failure drops that connection, only if it is still the cached one;
+  reads alone retry.
+
+### FL-141: "Close without a plan" showed when only some seats lacked cover
+
+- Date: 2026-10-08
+- Where: web console
+- Found by: review
+- Severity: Low
+- What went wrong: On a disruption with one uncoverable seat among others, the close button
+  always ended in "still has legal cover".
+- Fix: Close shows only when no seat can be covered, and then Submit is hidden.
+
+### FL-142: Contention over-flagged on disruptions with several seats
+
+- Date: 2026-10-08
+- Where: web console and MCP server
+- Found by: review
+- Severity: Low
+- What went wrong: A person ranked only for one seat could be flagged against another
+  disruption that was near only a different seat's date.
+- Cause: Crew and dates were pooled across all seats.
+- Fix: Each seat's options are matched against trips near that seat's own dates.
 
 #### Evaluation and tests
 

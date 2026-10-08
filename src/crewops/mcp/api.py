@@ -24,6 +24,7 @@ from typing import Any
 from crewops.agent.context import Turn
 from crewops.agent.memory import ConversationMemory, valid_conversation
 from crewops.domain import DataError, Report, Role, authorize
+from crewops.mcp import views
 from crewops.notify.subscriptions import AlertError, AlertSubscriptions
 from crewops.plans.service import PlanError, Plans
 from crewops.plans.service import summary as plan_summary
@@ -40,6 +41,13 @@ on this server reload it at once; changes made elsewhere show within this time."
 READERS = frozenset({Role.CONTROLLER, Role.APPROVER, Role.AUDITOR, Role.ADMIN, Role.SUPER_ADMIN})
 ADMINS = frozenset({Role.ADMIN, Role.SUPER_ADMIN})
 FEED_STATUSES = ("REPORTED", "OPTIONS_READY", "SUBMITTED", "COMMITTED", "CLOSED")
+OUTCOME = {
+    "REPORTED": "Received; crew control is analysing it.",
+    "OPTIONS_READY": "Crew control is arranging cover.",
+    "SUBMITTED": "A plan is waiting for approval.",
+    "COMMITTED": "Cover has been arranged.",
+    "CLOSED": "Closed by crew control.",
+}
 
 
 def _seat(s: Mapping[str, Any]) -> dict[str, Any]:
@@ -265,15 +273,51 @@ class CrewOpsApi:
         # cannot be probed.
         if item is None or not (caller.roles & READERS or own):
             raise ApiError("NOT_FOUND", f"no disruption {disruption_id} that you may read")
+        if not caller.roles & READERS:
+            # The person who filed it hears how it stands, nothing about other crew,
+            # replacements, costs or other desks.
+            return {
+                "disruption_id": disruption_id,
+                "status": item["status"],
+                "outcome": OUTCOME.get(item["status"], item["status"]),
+                "report_type": report.get("type"),
+                "reported_utc": report.get("reported_utc"),
+                "reported_by": caller.user_id,
+                "details": report.get("details", {}),
+            }
         analysis = from_dynamo(item.get("analysis") or {})
+        tools = self.live().pipeline.tools
+        seats = [_seat(s) for s in analysis.get("seats", [])]
+        for seat in seats:
+            seat["context"] = views.seat_context(tools, seat)
+        desks = views.desks_of(tools, [s["pairing_id"] for s in seats])
+        joint = analysis.get("joint_plan")
         return {
             "disruption_id": disruption_id,
             "status": item["status"],
             "summary": analysis.get("summary", ""),
             "report_type": report.get("type"),
             "reported_utc": report.get("reported_utc"),
+            "reported_by": (report.get("reported_by") or {}).get("user_id"),
+            "details": report.get("details", {}),
+            "desks": desks,
+            "yours": bool(caller.desk) and any(d["desk_id"] == caller.desk for d in desks),
             # The ranked options each seat had when it was analysed; approval re-checks.
-            "seats": [_seat(s) for s in analysis.get("seats", [])],
+            "seats": seats,
+            "joint_plan": joint if joint and joint.get("assignments") else None,
+            # Who else wants these crew: other open disruptions and submitted plans.
+            "contention": views.contention(
+                tools,
+                self.table,
+                disruption_id,
+                [
+                    (
+                        {o["crew_id"] for o in s["options"] if o.get("crew_id")},
+                        set(s["impact"].get("affected_dates") or []),
+                    )
+                    for s in seats
+                ],
+            ),
             "plans": [
                 {"status": p["status"], **plan_summary(p)}
                 for p in plan_store.plans_for(self.table, disruption_id)

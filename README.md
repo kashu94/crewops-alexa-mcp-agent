@@ -365,7 +365,7 @@ cd web && npm install && npm run dev # http://localhost:3000
 
 | View | Who | What it does |
 |---|---|---|
-| Controller | controllers, auditors, admins | Live figures, the ingestion feed of disruptions, the Alexa+ voice module, and the solution engine: each seat's legal cover ranked by cost, with every rule's margin checked on demand and the plan submitted from there |
+| Controller | controllers, auditors, admins | Live figures for the role, the ingestion feed of disruptions, the Alexa+ voice module, and the solution engine: the recommendation, each seat's legal cover ranked by cost with cancellation last, every rule's margin checked on demand, crew another desk also wants, and the plan submitted from there. Each disruption's full record adds coverage figures, its desk, the trip's flights and crew, plans and the audit trail |
 | Approver | approvers, auditors | The four-eyes queue: each waiting plan, approved with a second confirming click or sent back with a reason |
 | Crew | crew | This week's duty calendar, my flights, duty-limit gauges, and reporting myself unavailable |
 | Admin | admins | Rule thresholds (tighten only), the system activity log, and alert addresses |

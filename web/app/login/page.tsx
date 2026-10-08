@@ -41,7 +41,7 @@ export default function Login() {
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/15 backdrop-blur">
             <Plane size={20} />
           </span>
-          <span className="text-lg font-semibold">CrewOps for Alexa+</span>
+          <span className="text-lg font-semibold">CrewOps with Alexa+</span>
         </div>
         <div className="relative">
           <h1 className="max-w-md text-4xl font-semibold leading-tight tracking-tight">

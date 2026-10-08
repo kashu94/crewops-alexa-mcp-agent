@@ -317,7 +317,15 @@ streamable HTTP, a code package on Linux ARM64, billed per second while a sessio
   events across the system for admins.
 - **Views for the web app.** `whoami` (who is signed in), `disruptions` (the desk's
   chronological feed), `my_roster` (a crew member's own pairings and duty clock), and
-  `show_disruption`, which includes each seat's ranked options from the analysis.
+  `show_disruption`, which includes each seat's ranked options from the analysis, the desks
+  it belongs to, the trip's flights and crew, and its cross-desk contention: for each option,
+  the other open disruptions on the same or adjacent days that rank the same person, and
+  the submitted plans that already use them, with their desks.
+- **Sessions.** The web app keeps one connected MCP client per access token (renewed
+  hourly), so its calls reuse the same warm server instance. A broken connection is
+  dropped; only reads are retried on a new one, since a write may already have happened.
+- **Who filed it.** A reporter or crew member reading their own report gets only its status
+  and a plain outcome, never the trip's crew, the replacements, costs or other desks.
 
 ## Web app
 

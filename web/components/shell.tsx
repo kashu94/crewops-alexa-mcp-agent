@@ -59,7 +59,7 @@ function TopBar() {
           </span>
           <span className="leading-tight">
             <span className="block text-sm font-semibold tracking-tight">CrewOps</span>
-            <span className="block text-[11px] text-muted">for Alexa+</span>
+            <span className="block text-[11px] text-muted">with Alexa+</span>
           </span>
         </Link>
 

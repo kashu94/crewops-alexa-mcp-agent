@@ -1,10 +1,11 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, ChevronDown, Clock, Plane, ShieldCheck, Users, XCircle } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, ChevronDown, Clock, Plane, ShieldCheck, Swords, Users, XCircle } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { tool } from "@/lib/client";
-import { byRule, type Legality, type Option, type Seat } from "@/lib/types";
+import { byRule, type Legality, type Option, type Rival, type Seat } from "@/lib/types";
 
 import { cx, Mono, rupees, Spinner } from "./ui";
 
@@ -25,7 +26,39 @@ const RULE_NAME: Record<string, string> = {
   "RULE-BASE-07": "Base",
 };
 
-function OptionCard({ option, best, pairingId }: { option: Option; best: number; pairingId: string }) {
+/** Other open disruptions, possibly on other desks, that want the same person. */
+function Rivals({ rivals }: { rivals: Rival[] }) {
+  return (
+    <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-amber-800">
+      <Swords size={12} />
+      Also wanted by
+      {rivals.map((r) => (
+        <Link
+          key={`${r.disruption_id}-${r.pairing_id}-${r.kind}-${r.rank ?? r.plan_id ?? ""}`}
+          href={`/console/${encodeURIComponent(r.disruption_id)}`}
+          onClick={(e) => e.stopPropagation()}
+          className="rounded bg-pending-soft px-1.5 py-0.5 font-mono hover:underline"
+          title={r.kind === "plan" ? `In plan ${r.plan_id}, awaiting approval` : `Ranked #${r.rank} there`}
+        >
+          {r.disruption_id} · {r.desks.join("/")}
+          {r.kind === "plan" ? " · in a plan" : ""}
+        </Link>
+      ))}
+    </span>
+  );
+}
+
+function OptionCard({
+  option,
+  best,
+  pairingId,
+  rivals,
+}: {
+  option: Option;
+  best: number;
+  pairingId: string;
+  rivals: Rival[];
+}) {
   const [open, setOpen] = useState(false);
   const [legality, setLegality] = useState<Legality | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -77,11 +110,12 @@ function OptionCard({ option, best, pairingId }: { option: Option; best: number;
               </span>
             )}
           </span>
+          {rivals.length > 0 && <Rivals rivals={rivals} />}
         </span>
         <span className="text-right">
           <span className="block font-mono text-sm font-semibold">{rupees(option.cost_inr)}</span>
           <span className={cx("block text-[11px]", extra === 0 ? "text-emerald-600" : "text-muted")}>
-            {extra === 0 ? "cheapest" : `+${rupees(extra)}`}
+            {extra !== 0 ? `+${rupees(extra)}` : option.rank === 1 ? "cheapest" : "same cost"}
           </span>
         </span>
         <ChevronDown size={16} className={cx("mt-1 shrink-0 text-muted transition", open && "rotate-180")} />
@@ -145,7 +179,33 @@ function OptionCard({ option, best, pairingId }: { option: Option; best: number;
   );
 }
 
-export function SeatOptions({ seat }: { seat: Seat }) {
+function CancelCard({ seat }: { seat: Seat }) {
+  const flights = seat.impact?.uncovered_flights ?? [];
+  return (
+    <li className="lift animate-rise flex items-start gap-3 rounded-xl border border-red-200 bg-critical-soft/40 p-3">
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-critical text-white">
+        <Ban size={14} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-semibold text-red-900">Cancel instead</span>
+        <span className="mt-1 block text-xs text-red-800/80">
+          {flights.length > 0
+            ? `${flights.map((f) => f.split("-")[0]).join(", ")} would not fly`
+            : "The affected flights would not fly"}
+          {seat.impact?.passengers !== undefined ? `, ${seat.impact.passengers} passengers` : ""}
+        </span>
+      </span>
+      <span className="text-right">
+        <span className="block font-mono text-sm font-semibold text-red-900">{rupees(seat.cancellation_cost_inr)}</span>
+        {seat.cancellation_multiple ? (
+          <span className="block text-[11px] text-red-800/80">{seat.cancellation_multiple}× the best cover</span>
+        ) : null}
+      </span>
+    </li>
+  );
+}
+
+export function SeatOptions({ seat, contention = {} }: { seat: Seat; contention?: Record<string, Rival[]> }) {
   const best = seat.options[0]?.cost_inr ?? 0;
   const impact = seat.impact ?? {};
   return (
@@ -182,18 +242,19 @@ export function SeatOptions({ seat }: { seat: Seat }) {
       {seat.status === "options" ? (
         <ol className="flex flex-col gap-2">
           {seat.options.map((o) => (
-            <OptionCard key={`${o.rank}-${o.crew_id}`} option={o} best={best} pairingId={seat.pairing_id} />
+            <OptionCard
+              key={`${o.rank}-${o.crew_id}`}
+              option={o}
+              best={best}
+              pairingId={seat.pairing_id}
+              rivals={(o.crew_id && contention[o.crew_id]) || []}
+            />
           ))}
+          {seat.cancellation_cost_inr !== null && <CancelCard seat={seat} />}
         </ol>
       ) : (
         <p className="rounded-lg bg-critical-soft px-3 py-2 text-xs text-red-900">
           {seat.status === "already_started" ? "This trip has already started." : "No legal cover."} {seat.note}
-        </p>
-      )}
-      {seat.cancellation_cost_inr !== null && seat.status === "options" && (
-        <p className="text-[11px] text-muted">
-          Cancelling instead: {rupees(seat.cancellation_cost_inr)}
-          {seat.cancellation_multiple ? `, ${seat.cancellation_multiple}× the best cover` : ""}.
         </p>
       )}
     </div>

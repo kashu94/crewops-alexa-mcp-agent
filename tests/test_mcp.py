@@ -171,6 +171,49 @@ def test_the_feed_lists_disruptions_for_staff(api):
         api.disruptions(CREW)
 
 
+def test_a_disruption_shows_its_desk_its_trip_and_who_else_wants_its_crew(api):
+    # C-1938 is out on P-2209 (VT-DXB, desk-1) on 15 Sep, the same day as C-1042's P-2291
+    # (VT-DXC, desk-2): both rank C-1526 and C-5566.
+    disruption(api.table, "r-sick1938", "C-1938", "2026-09-15")
+    shown = api.show(ROHIT, "r-sick1042")
+    assert shown["desks"] == [{"desk_id": "desk-2", "controller": "Rohit Malhotra"}]
+    assert shown["yours"] is True
+    context = shown["seats"][0]["context"]
+    assert context["aircraft"] == "VT-DXC" and context["aircraft_type"] == "A320"
+    assert [f["flight_no"] for f in context["flights"]][:3] == ["DX412", "DX413", "DX588"]
+    assert {f["state"] for f in context["flights"]} == {"uncrewed"}
+    assert {c["crew_id"] for c in context["crew"] if c["state"] == "out"} == {"C-1042"}
+    rivals = shown["contention"]["C-1526"]
+    assert rivals[0]["disruption_id"] == "r-sick1938" and rivals[0]["desks"] == ["desk-1"]
+    assert (
+        api.show(Caller("ananya", frozenset({Role.CONTROLLER}), desk="desk-1"), "r-sick1042")[
+            "yours"
+        ]
+        is False
+    )
+
+
+def test_whoever_filed_a_report_sees_only_how_it_stands(api):
+    disruption(api.table, "r-sick1938", "C-1938", "2026-09-15")
+    filer = api.show(Caller("u-1", frozenset({Role.REPORTER})), "r-sick1042")
+    assert filer["outcome"] == "Crew control is arranging cover."
+    assert set(filer) == {
+        "disruption_id",
+        "status",
+        "outcome",
+        "report_type",
+        "reported_utc",
+        "reported_by",
+        "details",
+    }
+    assert "r-sick1938" not in str(filer) and "C-3310" not in str(filer)
+
+
+def test_contention_is_only_for_trips_near_in_time(api):
+    disruption(api.table, "r-sick5837", "C-5837", "2026-09-20")  # P-2207, 20 Sep
+    assert "C-3983" not in api.show(ROHIT, "r-sick1042")["contention"]
+
+
 def test_a_disruption_shows_its_ranked_options(api):
     seats = api.show(ROHIT, "r-sick1042")["seats"]
     assert seats and seats[0]["pairing_id"] == "P-2291" and seats[0]["crew_out"] == "C-1042"

@@ -35,6 +35,38 @@ export type Seat = {
   delay_hours: number;
   impact: { affected_dates?: string[]; uncovered_flights?: string[]; at_risk_flights?: string[]; passengers?: number };
   options: Option[];
+  context?: SeatContext;
+};
+
+export type SeatContext = {
+  aircraft?: string;
+  aircraft_type?: string | null;
+  base?: string | null;
+  dates?: string[];
+  affected_dates?: string[];
+  requirement?: string;
+  flights?: {
+    flight_id: string;
+    flight_no: string;
+    date: string;
+    from: string;
+    to: string;
+    dep_utc: string;
+    arr_utc: string;
+    seats: number;
+    state: "uncrewed" | "at_risk" | "crewed";
+  }[];
+  crew?: { crew_id: string; name: string | null; role: string; state: "out" | "on" }[];
+};
+
+export type Rival = {
+  disruption_id: string;
+  status: string;
+  pairing_id: string;
+  rank?: number;
+  plan_id?: string;
+  desks: string[];
+  kind: "option" | "plan";
 };
 
 export type Plan = {
@@ -54,6 +86,12 @@ export type Detail = {
   summary: string;
   report_type: string | null;
   reported_utc: string | null;
+  reported_by?: string | null;
+  details?: Record<string, unknown>;
+  desks?: { desk_id: string; controller: string }[];
+  yours?: boolean;
+  joint_plan?: { assignments?: Record<string, unknown>[]; total_cost_inr?: number } | null;
+  contention?: Record<string, Rival[]>;
   seats: Seat[];
   plans: Plan[];
   audit: { at: string; action: string; actor: string; plan_id?: string; reason?: string }[];
