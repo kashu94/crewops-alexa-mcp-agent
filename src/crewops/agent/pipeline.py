@@ -1,6 +1,7 @@
 """One question in, one verified answer out.
 
-    route -> check what the question states -> planned tool calls -> follow-ups
+    (the previous turn, if any) -> route -> check what the question states
+          -> planned tool calls -> follow-ups
           -> (model draft, when one is plugged in) -> verify -> fall back to the template
           -> redact personal data
 
@@ -19,12 +20,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from crewops.agent.entities import Vocabulary
+from crewops.agent.context import Turn, as_reply, carry_ids
+from crewops.agent.entities import Vocabulary, extract
 from crewops.agent.intents import Intent, Tier
 from crewops.agent.pii import redact, redact_text
 from crewops.agent.planner import MISSING, ToolCall, false_premise, followup_calls, seed_calls
 from crewops.agent.render import render
-from crewops.agent.router import Route, Router
+from crewops.agent.router import Route, Router, route_by_rules
 from crewops.agent.verifier import Verification, keeps_every_fact, verify
 from crewops.tools import Caller, CrewOpsTools, TraceEntry, allowed_tools, dispatch
 from crewops.tools.errors import AMBIGUOUS_QUERY, NEEDS_CONFIRMATION
@@ -110,7 +112,9 @@ class Pipeline:
         """Rules and templates only: no embeddings, no model calls."""
         return cls(tools, Router(Vocabulary.from_world(tools.world), examples))
 
-    def answer(self, question: str, caller: Caller) -> Answer:
+    def answer(self, question: str, caller: Caller, previous: Turn | None = None) -> Answer:
+        """``previous``: the caller's last turn in this conversation, already checked to be
+        recent. It can only fill in what this question leaves out (see ``agent.context``)."""
         started = time.monotonic()
         question = (question or "").strip()
         if not question:
@@ -136,7 +140,15 @@ class Pipeline:
                 log.exception("question screening failed")
                 screening_note = f"question screening unavailable ({type(exc).__name__})"
 
+        context_notes: list[str] = []
+        reply = previous is not None and previous.awaiting == "detail"
+        own = extract(question, self.vocab) if reply else None
+        asks = reply and route_by_rules(question, own) is not None
+        if reply and (combined := as_reply(question, previous, own, asks)):
+            question = combined
+            context_notes.append("read together with the question it answers")
         route = self.router.route(question)
+        context_notes += carry_ids(question, route.entities, previous)
         if (
             caller.crew_id
             and not route.entities.crew_ids
@@ -154,7 +166,7 @@ class Pipeline:
         if premise := false_premise(question, route.entities, self.tools, self.vocab, may_see):
             return Answer(question, premise, route, source="clarify", awaiting="confirmation")
 
-        notes: list[str] = [screening_note] if screening_note else []
+        notes: list[str] = ([screening_note] if screening_note else []) + context_notes
         trace: list[TraceEntry] = []
         planned = seed_calls(route, question, self.vocab, self.tools)
         trace += self._run(planned, caller, allowed, notes)

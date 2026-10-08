@@ -17,6 +17,7 @@ from crewops_infra.data_stack import DataStack
 from crewops_infra.guardrail_stack import GuardrailStack
 from crewops_infra.ingestion_stack import IngestionStack
 from crewops_infra.mcp_stack import PACKAGE, McpStack
+from crewops_infra.notify_stack import NotifyStack
 from crewops_infra.search_stack import SearchStack
 
 from crewops.config import Settings, load_env_file
@@ -48,6 +49,14 @@ def main() -> None:
         app, f"CrewOps-{settings.stage}-Guardrail", settings=settings, env=env
     )
     auth = AuthStack(app, f"CrewOps-{settings.stage}-Auth", settings=settings, env=env)
+    notify = NotifyStack(
+        app,
+        f"CrewOps-{settings.stage}-Notify",
+        settings=settings,
+        table=data.table,
+        auth=auth,
+        env=env,
+    )
     if (PACKAGE / "main.py").exists():
         McpStack(
             app,
@@ -57,6 +66,7 @@ def main() -> None:
             queue=ingestion.queue,
             auth=auth,
             guardrail=guardrail,
+            notify=notify,
             env=env,
         )
     else:

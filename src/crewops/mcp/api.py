@@ -3,8 +3,12 @@
 Every operation takes the ``Caller`` made from the request's verified token, never anything
 the user typed about themselves. Questions go through the full answer pipeline (rules,
 tools, verifier, models); plans through ``crewops.plans`` with its four-eyes rules; reports
-onto the ingest queue with the sender's identity set here; and the deterministic tools
-through the same role-checked dispatch the advisor uses.
+onto the ingest queue with the sender's identity set here; the deterministic tools
+through the same role-checked dispatch the advisor uses; and alert addresses through
+``crewops.notify.subscriptions``, for admins only.
+
+A question asked with a conversation id is answered with that conversation's previous
+turn (``agent.context``), read from and written back to AgentCore Memory.
 """
 
 from __future__ import annotations
@@ -13,10 +17,14 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
+from crewops.agent.context import Turn
+from crewops.agent.memory import ConversationMemory, valid_conversation
 from crewops.domain import DataError, Report, Role, authorize
+from crewops.notify.subscriptions import AlertError, AlertSubscriptions
 from crewops.plans.service import PlanError, Plans
 from crewops.plans.service import summary as plan_summary
 from crewops.store import plans as plan_store
@@ -48,9 +56,13 @@ class CrewOpsApi:
         plans: Plans | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         cache_seconds: float = CACHE_SECONDS,
+        memory: ConversationMemory | None = None,
+        alerts: AlertSubscriptions | None = None,
     ) -> None:
         """``live_factory`` builds the answer pipeline over the current operation
-        (``agent.service.build``); ``send`` puts a report on the ingest queue."""
+        (``agent.service.build``); ``send`` puts a report on the ingest queue. Without
+        ``memory`` every question stands on its own; without ``alerts`` the alert tools
+        say alerts are not set up."""
         self.table = table
         self.live_factory = live_factory
         self.send = send
@@ -63,6 +75,10 @@ class CrewOpsApi:
         # The pipeline keeps per-question state (model usage, the advisor's last run), so
         # one question at a time uses it; tool calls run on other threads meanwhile.
         self._asking = threading.Lock()
+        self.memory = memory
+        self.alerts = alerts
+        # A turn is remembered after its answer is returned, never delaying it.
+        self._remembering = ThreadPoolExecutor(max_workers=2, thread_name_prefix="memory")
 
     # ------------------------------------------------------------------
     # Questions and tools
@@ -79,11 +95,27 @@ class CrewOpsApi:
         with self._loading:
             self._live = None
 
-    def ask(self, caller: Caller, question: str) -> dict[str, Any]:
+    def ask(self, caller: Caller, question: str, conversation_id: str = "") -> dict[str, Any]:
+        """``conversation_id``: the client's id for this conversation (letters, digits, - and
+        _). With one, the previous turn may fill in what this question leaves out."""
+        if conversation_id and not valid_conversation(conversation_id):
+            raise ApiError(
+                "INVALID",
+                "conversation_id: up to 100 letters, digits, - or _, not starting with - or _",
+            )
+        remembered = self.memory is not None and bool(conversation_id)
+        previous = None
+        if remembered:
+            previous = self.memory.last_turn(caller.user_id, conversation_id, self.clock())
         live = self.live()
         with self._asking:
-            answer, usage = live.ask(question, caller)
+            answer, usage = live.ask(question, caller, previous)
         record = answer.to_dict()
+        if remembered:
+            turn = Turn.of(answer, self.clock())
+            self._remembering.submit(
+                self.memory.remember, caller.user_id, conversation_id, turn, record["text"]
+            )
         return {
             "answer": record["text"],
             "verified": record["verified"],
@@ -176,6 +208,29 @@ class CrewOpsApi:
                 for e in plan_store.audit_trail(self.table, disruption_id)
             ],
         }
+
+    # ------------------------------------------------------------------
+    # Alert addresses (admins only)
+    # ------------------------------------------------------------------
+
+    def _alerts(self, call: Callable[[AlertSubscriptions], Any]) -> Any:
+        if self.alerts is None:
+            raise ApiError("UNAVAILABLE", "alerts are not set up on this server")
+        try:
+            return call(self.alerts)
+        except AlertError as exc:
+            raise ApiError(exc.code, exc.message) from None
+
+    def alert_addresses(self, caller: Caller) -> list[dict[str, Any]]:
+        return self._alerts(lambda a: a.list(caller))
+
+    def add_alert_address(self, caller: Caller, email: str, role: str) -> dict[str, Any]:
+        return self._alerts(lambda a: a.add(caller, email, role))
+
+    def remove_alert_address(self, caller: Caller, subscription_id: str) -> dict[str, Any]:
+        return self._alerts(lambda a: a.remove(caller, subscription_id))
+
+    # ------------------------------------------------------------------
 
     def _plan_action(self, action: Callable[..., Any], *args: Any) -> dict[str, Any]:
         try:

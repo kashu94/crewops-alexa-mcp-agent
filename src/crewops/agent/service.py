@@ -30,14 +30,15 @@ class LivePipeline:
     advisor: NovaAdvisor | None
     explainer: NovaExplainer | None
 
-    def ask(self, question: str, caller: Any) -> tuple[Any, dict[str, int]]:
-        """One question, and the model calls and tokens it alone used."""
+    def ask(self, question: str, caller: Any, previous: Any = None) -> tuple[Any, dict[str, int]]:
+        """One question, and the model calls and tokens it alone used. ``previous`` is the
+        conversation's last turn (``agent.context.Turn``), when there is one."""
         for role in (self.triage, self.explainer):
             if role is not None:
                 role.reset()
         if self.advisor is not None:
             self.advisor.reset()
-        answer = self.pipeline.answer(question, caller)
+        answer = self.pipeline.answer(question, caller, previous)
         return answer, self.usage()
 
     def usage(self) -> dict[str, int]:

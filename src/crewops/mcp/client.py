@@ -1,6 +1,7 @@
 """Call the deployed MCP server as a member of the team, the way any MCP host would.
 
     uv run python -m crewops.mcp.client --as rohit ask "Who covers C-1042 on 15 Sep?"
+    uv run python -m crewops.mcp.client --as rohit --conversation c1 ask "Captain"
     uv run python -m crewops.mcp.client --as rohit my_queue
     uv run python -m crewops.mcp.client --as meera approve_plan \
         '{"disruption_id": "r-...", "plan_id": "pl-..."}'
@@ -64,12 +65,26 @@ async def call(url: str, token: str, tool: str | None, arguments: dict[str, Any]
             return {"error": " ".join(getattr(c, "text", "") for c in result.content)}
         if result.structuredContent is not None:
             return result.structuredContent
-        return [getattr(c, "text", str(c)) for c in result.content]
+        return _parsed([getattr(c, "text", str(c)) for c in result.content])
+
+
+def _parsed(texts: list[str]) -> Any:
+    """Tool results arrive as JSON text, one item per list element: show them as JSON."""
+    values = []
+    for text in texts:
+        try:
+            values.append(json.loads(text))
+        except ValueError:
+            values.append(text)
+    return values[0] if len(values) == 1 else values
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--as", dest="user", required=True, help="team member's username")
+    parser.add_argument(
+        "--conversation", default="", help="for ask: one id per conversation, for follow-ups"
+    )
     parser.add_argument("tool", help="a tool name, 'ask', or 'tools' to list them")
     parser.add_argument("argument", nargs="?", default=None, help="question, or JSON arguments")
     args = parser.parse_args(argv)
@@ -92,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
         if not args.argument:
             parser.error("ask needs a question")
         tool, arguments = "ask", {"question": args.argument}
+        if args.conversation:
+            arguments["conversation_id"] = args.conversation
     else:
         tool = args.tool
         try:

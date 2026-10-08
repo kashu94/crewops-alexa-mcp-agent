@@ -1,8 +1,14 @@
 # Friction log
 
-Problems hit while building with Amazon's developer tools: Alexa, Bedrock, AgentCore, and the
-other AWS services this project uses. Each entry is written when the problem happens, with the
-real error text.
+Problems hit while building CrewOps, across the whole stack, each written when it happened
+with the real error text. Entries are grouped by where the problem was:
+
+1. **Amazon ecosystem:** Alexa, Amazon Bedrock and Nova, AgentCore, and the Model Context
+   Protocol (MCP) server and SDK.
+2. **AWS backend infrastructure:** accounts, CDK, DynamoDB, SQS, Lambda, streams.
+3. **Core software stack and local tooling:** Python, uv, Node, test tooling.
+
+Entry numbers run in the order the problems happened, across all three groups.
 
 Severity: **Blocker** (no way forward without a workaround), **High** (cost hours),
 **Medium** (cost under an hour), **Low** (annoyance).
@@ -13,6 +19,7 @@ Severity: **Blocker** (no way forward without a workaround), **High** (cost hour
 ### FL-NNN: <short title>
 
 - Date:
+- Area: Amazon ecosystem | AWS backend infrastructure | Core software stack
 - Service / tool:
 - Severity:
 - Task attempted:
@@ -20,10 +27,95 @@ Severity: **Blocker** (no way forward without a workaround), **High** (cost hour
 - Expected:
 - Actual: (exact error text, screenshot in docs/friction/ if useful)
 - Workaround:
-- Suggestion for Amazon:
+- Suggestion: (for Amazon, or for the tool's maintainers)
 ```
 
-## Entries
+## 1. Amazon ecosystem (Alexa, Bedrock and Nova, AgentCore, MCP)
+
+### FL-005: The MCP SDK's FastMCP runs plain-function tools on the event loop
+
+- Date: 2026-10-07
+- Service / tool: MCP Python SDK (`mcp` 1.30, FastMCP), hosted on AgentCore Runtime
+- Severity: Medium (found in review before deployment, about an hour)
+- Task attempted: Serve CrewOps' tools over streamable HTTP. The tools call DynamoDB,
+  Bedrock and Cognito's key endpoint, so each one blocks for up to several seconds.
+- Steps taken:
+  1. Declared the tools as ordinary `def` functions, as most FastMCP examples do.
+  2. Reviewed how FastMCP calls them: `func_metadata.call_fn_with_arg_validation` does
+     `return fn(**arguments_parsed_dict)` for a non-async tool, directly on the event loop.
+- Expected: A synchronous tool runs in a worker thread, as Starlette and FastAPI do for
+  sync endpoints, or the documentation warns that it will not.
+- Actual: No error and no warning. One slow question would hold every other request on
+  the server until it finished.
+- Workaround: Made every tool `async` and ran the blocking work with
+  `anyio.to_thread.run_sync`, with locks around the state the tools share.
+- Suggestion: Run sync tools in a thread pool by default, or say plainly in the FastMCP
+  documentation that sync tools block the server.
+
+### FL-006: FastMCP turns on DNS-rebinding protection silently, based on the host
+
+- Date: 2026-10-07
+- Service / tool: MCP Python SDK (`mcp` 1.30, FastMCP), streamable HTTP transport
+- Severity: Low (about 15 minutes)
+- Task attempted: Bind local runs of the MCP server to `127.0.0.1` (AgentCore needs
+  `0.0.0.0`), and keep the in-process protocol tests working.
+- Steps taken:
+  1. Changed the default host from `0.0.0.0` to `127.0.0.1`.
+  2. Ran the tests, which call the app through `httpx.ASGITransport` with base URL
+     `http://test`.
+- Expected: The bind address only decides where the server listens.
+- Actual: Four tests failed with `httpx.HTTPStatusError: Client error '421 Misdirected
+  Request' for url 'http://test/mcp'`. The only clue was a log line,
+  `WARNING mcp.server.transport_security: Invalid Host header: test`. FastMCP turns on
+  DNS-rebinding protection with a fixed host allow-list whenever the host is
+  `127.0.0.1`, `localhost` or `::1`, and not for `0.0.0.0`.
+- Workaround: The tests now use `http://127.0.0.1:8000`, as a real local client would.
+- Suggestion: Name the allowed hosts in the 421 response body, and document that the bind
+  address also switches this protection on.
+
+### FL-007: An MCP session manager can run only once, which breaks per-test reuse
+
+- Date: 2026-10-07
+- Service / tool: MCP Python SDK (`mcp` 1.30), `StreamableHTTPSessionManager`
+- Severity: Low (about 20 minutes)
+- Task attempted: Exercise the real MCP protocol in-process from several tests against one
+  server object.
+- Steps taken:
+  1. Built the FastMCP server once in a fixture and opened `server.session_manager.run()`
+     in each test.
+  2. Also replaced the client helper `streamablehttp_client`, now deprecated with the message
+     "Use `streamable_http_client` instead.", with `streamable_http_client` and an
+     explicit `httpx` client.
+- Expected: A session manager can be started again after it stops, or the fixture pattern
+  is documented.
+- Actual: From the second test on: `RuntimeError: StreamableHTTPSessionManager .run() can
+  only be called once per instance. Create a new instance if you need to run again.`
+- Workaround: Build a new server for each test.
+- Suggestion: Allow `run()` again after a clean shutdown, or add a testing helper that
+  serves an app in-process.
+
+### FL-009: Nova 2 Lite's reworded answer adds a number the tools never returned
+
+- Date: 2026-10-08
+- Service / tool: Amazon Bedrock, Amazon Nova 2 Lite (`global.amazon.nova-2-lite-v1:0`)
+  through the Converse API
+- Severity: Low (the verifier caught it; no wrong answer reached the user)
+- Task attempted: First live question through the deployed MCP server: "Who covers C-1042
+  on 15 Sep?", answered as Rohit (controller).
+- Steps taken:
+  1. The pipeline built the answer from the tools, then asked Nova 2 Lite to reword it for
+     speech, keeping exactly the same facts.
+  2. The verifier compared every id and number in the reworded text with the tool results.
+- Expected: The rewording keeps the template's facts and adds none, as the prompt asks.
+- Actual: The answer's notes read `model draft rejected: 1 unsourced claim(s) (number)`.
+  The reworded text contained a number found in no tool result, so the template answer
+  was given instead.
+- Workaround: None needed: every model draft is verified, and the deterministic template
+  is the fallback. This entry tracks how often it happens, for the evals.
+- Suggestion: A Converse option to constrain a rewrite to the numbers and ids in the input
+  (grounded rewording) would make the explainer usable more often.
+
+## 2. AWS backend infrastructure (accounts, CDK, DynamoDB, SQS, Lambda)
 
 ### FL-001: Project account denies CDK outside its home region, with no hint why
 
@@ -139,3 +231,44 @@ Severity: **Blocker** (no way forward without a workaround), **High** (cost hour
 - Suggestion for Amazon: Document clearly that a resource's `meta.client` uses the
   high-level, auto-converting interface. Have it detect already-typed values (a dict whose
   only key is a DynamoDB type tag) and raise an error that says so.
+
+### FL-008: A second queue policy silently replaces the one `enforce_ssl` created
+
+- Date: 2026-10-07
+- Service / tool: AWS CDK (`aws-cdk-lib` 2.272), Amazon SQS queue policies
+- Severity: Medium (found in review before deployment, about an hour)
+- Task attempted: Let only the MCP server's role send reports to the ingest queue, with a
+  Deny statement added from the MCP stack.
+- Steps taken:
+  1. The ingestion stack creates the queue with `enforce_ssl=True`, which makes CDK add an
+     `AWS::SQS::QueuePolicy` that refuses non-TLS requests.
+  2. The MCP stack created a second `sqs.QueuePolicy` for the same queue with the Deny.
+  3. Ran `cdk synth`: no warning, and both stacks synthesized.
+- Expected: A synth-time warning that the queue already has a policy, because a queue has
+  exactly one policy document.
+- Actual: Two `AWS::SQS::QueuePolicy` resources for one queue. Deploying both would leave
+  whichever was written last, silently dropping either the TLS rule or the sender rule.
+- Workaround: Moved the Deny into the ingestion stack with `queue.add_to_resource_policy`,
+  so both statements share one policy, and gave the AgentCore runtime a fixed-name
+  execution role so that policy can name it without a cross-stack reference.
+- Suggestion: Warn at synth when two `QueuePolicy` (or `TopicPolicy`, `BucketPolicy`)
+  resources target the same resource, and point to `add_to_resource_policy`.
+
+## 3. Core software stack and local tooling (Python, uv, Node)
+
+### FL-010: Every CDK synth and test run prints a Node end-of-life banner
+
+- Date: 2026-10-07
+- Service / tool: AWS CDK for Python (jsii runtime), Node.js 20
+- Severity: Low
+- Task attempted: Run the offline test suite, which synthesizes every CDK stack, and
+  inspect CDK classes from Python.
+- Steps taken: Ran `uv run pytest` and `python -c "from aws_cdk import ..."`.
+- Expected: Quiet output, or a single warning.
+- Actual: A 14-line banner on every process that loads `aws_cdk`, starting
+  `Node 20 has reached end-of-life on 2026-04-30 and will no longer be supported in new
+  releases after 2026-10-29.`, mixed into test and script output.
+- Workaround: `JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION=1` in the test command. Upgrade
+  Node before 2026-10-29.
+- Suggestion: Print the banner once per day per machine, or only from the `cdk` CLI, not
+  from every Python process.

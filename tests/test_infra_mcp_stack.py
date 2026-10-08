@@ -13,6 +13,7 @@ from crewops_infra.data_stack import DataStack  # noqa: E402
 from crewops_infra.guardrail_stack import GuardrailStack  # noqa: E402
 from crewops_infra.ingestion_stack import IngestionStack  # noqa: E402
 from crewops_infra.mcp_stack import McpStack, model_arns  # noqa: E402
+from crewops_infra.notify_stack import NotifyStack  # noqa: E402
 
 from crewops.config import Settings  # noqa: E402
 
@@ -30,6 +31,7 @@ def template(tmp_path_factory):
     ingestion = IngestionStack(app, "Ingestion", settings=settings, table=data.table, env=ENV)
     guardrail = GuardrailStack(app, "Guardrail", settings=settings, env=ENV)
     auth = AuthStack(app, "Auth", settings=settings, env=ENV)
+    notify = NotifyStack(app, "Notify", settings=settings, table=data.table, auth=auth, env=ENV)
     stack = McpStack(
         app,
         "Mcp",
@@ -38,6 +40,7 @@ def template(tmp_path_factory):
         queue=ingestion.queue,
         auth=auth,
         guardrail=guardrail,
+        notify=notify,
         package=package,
         env=ENV,
     )
@@ -90,8 +93,8 @@ def test_permissions_are_only_what_the_server_needs(template):
 
 
 def test_runtime_runs_as_the_role_the_queue_policy_names(template):
-    (role,) = template.find_resources("AWS::IAM::Role").values()
-    assert role["Properties"]["RoleName"] == "crewops-dev-mcp-runtime"
+    roles = template.find_resources("AWS::IAM::Role").values()
+    (role,) = [r for r in roles if r["Properties"].get("RoleName") == "crewops-dev-mcp-runtime"]
     (trust,) = role["Properties"]["AssumeRolePolicyDocument"]["Statement"]
     assert trust["Principal"] == {"Service": "bedrock-agentcore.amazonaws.com"}
     assert "runtime/crewops_dev_mcp*" in json.dumps(trust["Condition"]["ArnLike"])
@@ -105,6 +108,24 @@ def test_runtime_runs_as_the_role_the_queue_policy_names(template):
 
 def test_mcp_stack_leaves_the_queue_policy_to_the_ingestion_stack(template):
     assert template.find_resources("AWS::SQS::QueuePolicy") == {}
+
+
+def test_conversation_memory_is_short_term_and_the_server_may_use_it(template):
+    (memory,) = template.find_resources("AWS::BedrockAgentCore::Memory").values()
+    assert memory["Properties"]["Name"] == "crewops_dev_memory"
+    assert memory["Properties"]["EventExpiryDuration"] == 7
+    assert "MemoryStrategies" not in memory["Properties"]
+    (runtime,) = template.find_resources("AWS::BedrockAgentCore::Runtime").values()
+    env = runtime["Properties"]["EnvironmentVariables"]
+    assert "CREWOPS_MEMORY_ID" in env and "CREWOPS_ALERTS_TOPIC_ARN" in env
+    actions = {
+        a
+        for s in statements(template)
+        for a in (s["Action"] if isinstance(s["Action"], list) else [s["Action"]])
+    }
+    assert {"bedrock-agentcore:CreateEvent", "bedrock-agentcore:ListEvents"} <= actions
+    assert {"sns:Subscribe", "sns:Unsubscribe", "sns:GetSubscriptionAttributes"} <= actions
+    assert "sns:Publish" not in actions  # alerts are sent by the notifier, not the server
 
 
 def test_model_arns():

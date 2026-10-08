@@ -26,11 +26,15 @@ Audit event                     DISRUPTION#id / AUDIT#ts#action
 Rejected report                 REPORT#id / REJECTED
 User profile                    USER#username / PROFILE
 Roster version                  CREW#id / ROSTER_VERSION
+Alert address                   ALERTS / SUB#id
+Alert addresses added in a day  ALERTS / DAY#yyyy-mm-dd
+Alert audit event               ALERTS / AUDIT#ts#action#id
 ==============================  =========================  ===============================
 
 The operational records above are written by ``crewops.store.items``; disruptions, audit
 events and rejected reports by ``crewops.store.reports``; plans and their decisions by
-``crewops.store.plans``; user profiles by ``crewops.store.users``. A disruption is stored
+``crewops.store.plans``; user profiles by ``crewops.store.users``; alert addresses by
+``crewops.notify.subscriptions``. A disruption is stored
 exactly once by a conditional write on its id, so no separate idempotency marker is needed.
 ``gsi2`` is reserved for a second overloaded view (for example a controller's desk), so it
 can be added without recreating the table.

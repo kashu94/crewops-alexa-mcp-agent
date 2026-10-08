@@ -114,7 +114,13 @@ real Alexa voice as a second channel. A standard MCP host proves the server foll
 Reports go to SQS (with a dead-letter queue), a worker stores them, and DynamoDB Streams wake
 the disruption analysis. AppSync Events pushes updates to the console over WebSockets. SNS is
 used only for optional email alerts that the admin assigns to roles; nothing depends on them.
-Kinesis is unnecessary at this volume.
+Kinesis is unnecessary at this volume. One notifier on the stream feeds both, so whatever
+stores a change (the worker, the analysis, a plan action) is reported the same way.
+
+Conversation memory is deliberately narrow: AgentCore Memory keeps each conversation's
+previous turn, and only a short reply or a pronoun may borrow from it, with a note on the
+answer. Long-term extraction is not used: a remembered "fact" about a roster goes stale
+within hours, and pending work is always read from the table instead.
 
 ## D11. Agents recommend; people decide, with four eyes
 

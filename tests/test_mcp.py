@@ -93,8 +93,8 @@ class Live:
     def __init__(self, tools):
         self.pipeline = Pipeline.offline(tools, example_questions())
 
-    def ask(self, question, caller):
-        return self.pipeline.answer(question, caller), {"calls": 0}
+    def ask(self, question, caller, previous=None):
+        return self.pipeline.answer(question, caller, previous), {"calls": 0}
 
 
 @pytest.fixture
@@ -180,6 +180,72 @@ def test_direct_tools_follow_the_role(api):
     assert out["ok"] and out["result"]["recommended"]["crew_id"] == "C-3310"
 
 
+class Memory:
+    """Stands in for AgentCore Memory: one list of turns per (actor, conversation)."""
+
+    def __init__(self):
+        self.turns = {}
+
+    def last_turn(self, actor, conversation, now):
+        turns = self.turns.get((actor, conversation))
+        return turns[-1] if turns else None
+
+    def remember(self, actor, conversation, turn, answer_text):
+        self.turns.setdefault((actor, conversation), []).append(turn)
+
+
+class AtOnce:
+    """Runs a memory write straight away instead of after the answer is returned."""
+
+    def submit(self, fn, *args):
+        fn(*args)
+
+
+def test_a_conversation_reads_a_reply_with_its_question(api):
+    api.memory, api._remembering = Memory(), AtOnce()
+    first = api.ask(ROHIT, "Who can cover P-2291 on 15 Sep?", "conv-1")
+    assert first["awaiting"] == "detail"
+    reply = api.ask(ROHIT, "Captain", "conv-1")
+    assert "Captain seat on P-2291" in reply["answer"]
+    assert "read together with the question it answers" in reply["notes"]
+
+
+def test_conversations_are_kept_apart_by_person_and_id(api):
+    api.memory, api._remembering = Memory(), AtOnce()
+    api.ask(ROHIT, "Who can cover P-2291 on 15 Sep?", "conv-1")
+    assert api.memory.turns.keys() == {("rohit", "conv-1")}
+    other = api.ask(MEERA, "Captain", "conv-1")  # someone else, same id: nothing carried
+    assert "read together" not in " ".join(other["notes"])
+    no_id = api.ask(ROHIT, "Captain")
+    assert "read together" not in " ".join(no_id["notes"])
+    with pytest.raises(ApiError) as err:
+        api.ask(ROHIT, "Captain", "not ok!")
+    assert err.value.code == "INVALID"
+
+
+def test_alert_tools_say_when_alerts_are_not_set_up(api):
+    with pytest.raises(ApiError) as err:
+        api.alert_addresses(Caller("asha", frozenset({Role.ADMIN})))
+    assert err.value.code == "UNAVAILABLE"
+
+
+def test_alert_tools_are_for_admins(api):
+    import boto3
+
+    from crewops.notify.subscriptions import AlertSubscriptions
+
+    sns = boto3.client("sns", region_name="ap-southeast-2")
+    topic = sns.create_topic(Name="crewops-test-alerts")["TopicArn"]
+    api.alerts = AlertSubscriptions(sns, topic, api.table)
+    admin = Caller("asha", frozenset({Role.ADMIN}))
+    added = api.add_alert_address(admin, "ops@example.com", "approver")
+    assert [a["email"] for a in api.alert_addresses(admin)] == ["ops@example.com"]
+    with pytest.raises(ApiError) as err:
+        api.remove_alert_address(ROHIT, added["subscription_id"])
+    assert err.value.code == "FORBIDDEN"
+    assert api.remove_alert_address(admin, added["subscription_id"])["status"] == "removed"
+
+
 # -- The MCP protocol, in-process ---------------------------------------------------------
 
 
@@ -215,6 +281,7 @@ def server(api):
 def test_tools_are_listed(server):
     names = mcp_call(server, {}, None, {})
     assert {"ask", "my_queue", "submit_plan", "approve_plan", "crew_tool"} <= set(names)
+    assert {"alert_addresses", "add_alert_address", "remove_alert_address"} <= set(names)
 
 
 def test_a_call_without_a_token_does_nothing(server):
@@ -265,6 +332,15 @@ def test_invocation_url_encodes_the_runtime_arn():
         "arn%3Aaws%3Abedrock-agentcore%3Aap-southeast-2%3A111111111111%3Aruntime%2F"
         "crewops_dev_mcp-AbC/invocations?qualifier=DEFAULT"
     )
+
+
+def test_client_shows_results_as_json():
+    from crewops.mcp.client import _parsed
+
+    assert _parsed(['{"answer": "yes"}']) == {"answer": "yes"}
+    assert _parsed(['{"a": 1}', '{"b": 2}']) == [{"a": 1}, {"b": 2}]
+    assert _parsed(["plain words"]) == "plain words"
+    assert _parsed([]) == []
 
 
 def test_packaged_entry_point_finds_its_data():

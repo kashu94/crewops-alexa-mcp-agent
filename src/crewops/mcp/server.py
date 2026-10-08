@@ -31,13 +31,16 @@ log = logging.getLogger(__name__)
 INSTRUCTIONS = """\
 CrewOps answers airline crew-control questions from the live roster, with every figure
 checked against the legality engine. Use `ask` for questions in plain words ("who covers
-C-1042 tomorrow?"). Use `my_queue` for what is waiting for the signed-in person. Plans are
-submitted by a controller and approved by a different person; approving commits the roster.
+C-1042 tomorrow?"), with one `conversation_id` per conversation. Use `my_queue` for what is
+waiting for the signed-in person. Plans are submitted by a controller and approved by a
+different person; approving commits the roster.
 The tools available depend on the signed-in user's role."""
 
 READ = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
 COMMIT = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)
+OUTWARD = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True)
+"""Reaches outside CrewOps: AWS emails the address."""
 
 
 class Gate:
@@ -91,11 +94,14 @@ def build_server(
         return await anyio.to_thread.run_sync(work)
 
     @mcp.tool(annotations=READ)
-    async def ask(question: str, ctx: Context) -> dict:
+    async def ask(question: str, ctx: Context, conversation_id: str = "") -> dict:
         """Ask a crew-control question in plain words. The answer is built from the live
         roster and the legality engine, and every fact in it is checked before it is given.
-        `awaiting` says when the answer is a question back (which id, which date)."""
-        return await run(ctx, lambda c: api.ask(c, question))
+        `awaiting` says when the answer is a question back (which id, which date). Pass the
+        same `conversation_id` (letters, digits, - and _) on every question of one
+        conversation, so a short reply ("Captain") or "is she legal for P-2291?" is read
+        with the previous question."""
+        return await run(ctx, lambda c: api.ask(c, question, conversation_id))
 
     @mcp.tool(annotations=READ)
     async def my_queue(ctx: Context) -> list:
@@ -160,6 +166,24 @@ def build_server(
         return await run(ctx, lambda c: api.close(c, disruption_id, reason))
 
     @mcp.tool(annotations=READ)
+    async def alert_addresses(ctx: Context) -> list:
+        """Admin: the email addresses receiving alerts, the role each receives, and whether
+        it has been confirmed."""
+        return await run(ctx, lambda c: api.alert_addresses(c))
+
+    @mcp.tool(annotations=OUTWARD)
+    async def add_alert_address(email: str, role: str, ctx: Context) -> dict:
+        """Admin: send one role's alerts (controller: options ready or a plan sent back;
+        approver: a plan waiting) to an email address. AWS asks the address to confirm
+        first. Limited to a few new addresses a day."""
+        return await run(ctx, lambda c: api.add_alert_address(c, email, role))
+
+    @mcp.tool(annotations=COMMIT)
+    async def remove_alert_address(subscription_id: str, ctx: Context) -> dict:
+        """Admin: stop sending alerts to an address (its id from `alert_addresses`)."""
+        return await run(ctx, lambda c: api.remove_alert_address(c, subscription_id))
+
+    @mcp.tool(annotations=READ)
     async def list_crew_tools(ctx: Context) -> list:
         """The deterministic crew-operations tools the signed-in person may call directly
         with `crew_tool`, with their input schemas."""
@@ -179,8 +203,10 @@ def from_environment(host: str = "127.0.0.1") -> FastMCP:
     """The deployed server: settings from the environment the stack sets."""
     import boto3
 
+    from crewops.agent.memory import ConversationMemory, memory_client
     from crewops.agent.service import build
     from crewops.config import Settings
+    from crewops.notify.subscriptions import AlertSubscriptions
     from crewops.store.ops_store import table_for
     from crewops.store.users import get_profile
 
@@ -191,12 +217,23 @@ def from_environment(host: str = "127.0.0.1") -> FastMCP:
             "must be set"
         )
     table = table_for(settings)
-    sqs = boto3.Session(region_name=settings.aws_region).client("sqs")
+    session = boto3.Session(region_name=settings.aws_region)
+    sqs = session.client("sqs")
 
     def send(report: dict) -> None:
         sqs.send_message(QueueUrl=settings.ingest_queue_url, MessageBody=json.dumps(report))
 
-    api = CrewOpsApi(table, lambda: build(settings, table), send)
+    memory = (
+        ConversationMemory(memory_client(settings.aws_region), settings.memory_id)
+        if settings.memory_id
+        else None
+    )
+    alerts = (
+        AlertSubscriptions(session.client("sns"), settings.alerts_topic_arn, table)
+        if settings.alerts_topic_arn
+        else None
+    )
+    api = CrewOpsApi(table, lambda: build(settings, table), send, memory=memory, alerts=alerts)
     gate = Gate(
         TokenVerifier(settings.issuer, settings.user_pool_client_id),
         lambda username: get_profile(table, username),

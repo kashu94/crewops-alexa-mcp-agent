@@ -25,7 +25,7 @@ choosing which tools to call, and turning a verified answer into speech.
  │  Bedrock Guardrails on input                                 │          │
  │  router → [triage] → planner → advisor tool loop → verifier  │          │
  │  → explainer → PII redaction → Bedrock Guardrails on output  │          │
- │  AgentCore Memory: conversation context across sessions      │          │
+ │  AgentCore Memory: each conversation's previous turn         │          │
  └──────────────────────────────┬──────────────────────────────┘          │
                                 │ MCP client                              │
                                 ▼                                         ▼
@@ -51,7 +51,7 @@ choosing which tools to call, and turning a verified answer into speech.
  ┌──────────────┴─────────┐│ DISRUPTION ANALYSIS (Lambda)       │
  │ Live: report → SQS     ││ runs on its own when data changes: │
  │  (+DLQ) → worker Lambda││ ripple → cost-ranked options       │
- │ Batch: roster to S3 →  ││ → OPTIONS_READY → live console     │
+ │ Batch: roster to S3 →  ││ → OPTIONS_READY; notifier: console │
  │  loader Lambda         │└────────────────────────────────────┘
  └────────────────────────┘
 ```
@@ -151,7 +151,7 @@ auditor, an admin and a super admin (`data/team/demo_team.json`).
 
 - **Accounts** are created by an admin command, never by sign-up. They sign in with a
   username; no email or phone is stored, so nothing can ever be sent to them. Where an alert
-  should really arrive, the admin assigns a private address to a role (planned).
+  should really arrive, the admin subscribes an address to a role (see Notifications).
 - **Roles** are Cognito groups, which only an admin can change, and they reach the tools as
   the caller's roles.
 - **A crew member's own crew id and a controller's desk** live in a user profile in the
@@ -175,13 +175,29 @@ Cross-controller safety, built in stages:
   committed elsewhere, or reported unavailable, in the meantime becomes STALE instead of
   double-booking.
 
-## Notifications (planned)
+## Notifications
 
-Alerts will be optional and managed by the admin, never hard-coded: on the admin's
-Notifications page an email address is subscribed to a role (controllers receive "options ready", approvers
-"plan waiting for approval") through an SNS topic with a per-role filter. AWS asks each address
-to confirm before anything is delivered. Only the admin role can add addresses, with a daily
-cap, so a public demo cannot be used to send mail to strangers.
+A notifier Lambda reads the table's change stream, filtered to disruption items, and keeps
+the records whose status changed. Each change goes to two places:
+
+- **Live console.** Published to the `/ops/disruptions` channel of an AppSync Events API.
+  Only IAM can publish, and only the notifier may. People subscribe with their Cognito
+  sign-in, and the channel's subscribe handler admits only the roles that may read
+  disruptions (controller, approver, auditor, admin, super admin). The console reads the
+  details through the MCP server, with its role checks. Best effort: a failed publish is
+  logged, and the console catches up on its next read.
+- **Email alerts, optional and managed by the admin.** Three changes alert a role:
+  REPORTED to OPTIONS_READY (controllers: options ready), OPTIONS_READY to SUBMITTED
+  (approvers: a plan waiting) and SUBMITTED back to OPTIONS_READY (controllers: the plan was
+  rejected, withdrawn or went stale). Alerts go to an SNS topic tagged with the role, and an
+  address receives only the one role it was subscribed to. Only an admin can add or remove
+  addresses (MCP tools), AWS asks each address to confirm before anything is delivered, and
+  at most five addresses can be added a day and twenty held, so a public demo cannot be used
+  to send mail to strangers. A failed alert is retried from that record.
+
+Events and alerts carry the disruption id, its report type and the statuses, never a name or
+a crew id. Accounts still hold no email address: an alert address belongs to a role, not to
+a person's login.
 
 ## Disruption analysis
 
@@ -275,6 +291,19 @@ streamable HTTP, a code package on Linux ARM64, billed per second while a sessio
   the same as a missing one.
 - **Freshness.** The server keeps one loaded operation for up to a minute and reloads it
   after any plan action it handles; plan actions always read the live roster.
+- **Conversations.** A question sent with a conversation id is answered with that
+  conversation's previous turn, kept in AgentCore Memory (short-term events, seven days, no
+  extraction) under the signed-in user. Only two things carry over, both noted on the
+  answer: a reply that only gives the detail a question back asked for (a seat, a date or
+  one id) is read with that question ("Which seat?" then "Captain"), and "he", "she",
+  "that pairing" or "that flight" mean the one crew member, pairing or flight of the
+  previous turn. "They" is never carried, nor "he" or "she" in a question about the asker,
+  about several people or about a plan's decision. A turn older than 15 minutes
+  lends nothing, carried ids pass the same role checks as typed ones, and a memory failure
+  only means the question stands on its own. What is waiting for whom is always read from
+  the table, never from memory.
+- **Alert addresses.** Admins manage the email alert addresses with `alert_addresses`,
+  `add_alert_address` and `remove_alert_address` (see [Notifications](#notifications)).
 
 ## Flows
 
@@ -283,9 +312,10 @@ streamable HTTP, a code package on Linux ARM64, billed per second while a sessio
 | Starting data | A script validates the seed week and writes it to DynamoDB. |
 | Roster upload | An admin uploads a JSON file under `uploads/` in the roster bucket. The upload event runs a loader Lambda, which merges it over the current operation, validates the whole result with the same checks as the seed, and writes the uploaded records only if there are no errors. Every upload gets an accepted or rejected report under `results/`. |
 | Live report | A reporter or crew member reports by voice or web. The report goes to the SQS ingest queue. A worker Lambda validates it, checks the role the sender states (set by the MCP server from the user's verified login) and that every id it names exists, then stores it once as a REPORTED disruption with its first audit event, in one transaction conditioned on the id being new, so a redelivered message is a no-op. A report that fails a check is recorded as rejected and not retried; only unexpected failures are retried, moving to a dead-letter queue after three attempts. |
-| Disruption analysis | The DynamoDB stream, filtered to newly inserted disruptions, starts the analysis Lambda. It loads the operation, works out the blast radius, delay effects and ranked options (see Disruption analysis above), and stores them, moving the disruption from REPORTED to OPTIONS_READY with an audit event in one transaction, conditioned on it still being REPORTED, so a retried trigger cannot analyse twice. A disruption whose stored report cannot be analysed is recorded as ANALYSIS_FAILED; other failures are retried, then noted in a dead-letter queue. Either way it stays REPORTED and `crewops.analysis.run --pending` analyses it again. (Planned: the console updates live through AppSync Events; optional email alerts assigned by the admin.) |
+| Disruption analysis | The DynamoDB stream, filtered to newly inserted disruptions, starts the analysis Lambda. It loads the operation, works out the blast radius, delay effects and ranked options (see Disruption analysis above), and stores them, moving the disruption from REPORTED to OPTIONS_READY with an audit event in one transaction, conditioned on it still being REPORTED, so a retried trigger cannot analyse twice. A disruption whose stored report cannot be analysed is recorded as ANALYSIS_FAILED; other failures are retried, then noted in a dead-letter queue. Either way it stays REPORTED and `crewops.analysis.run --pending` analyses it again. |
+| Notification | Every disruption status change reaches the notifier Lambda through the same stream. It publishes the change to the live console channel and, for the changes that need someone, an email alert to the subscribed addresses of the role concerned (see Notifications above). |
 | Question | Any role asks by voice or chat. Router, advisor tools, verifier and explainer produce a cited answer. |
-| Decision | A controller submits a plan, a different approver approves it, legality is re-checked, and one transaction commits every assignment. The crew member is notified and the audit log updated. |
+| Decision | A controller submits a plan, a different approver approves it, legality is re-checked, and one transaction commits every assignment and the audit events. The console updates live; submitting also alerts the approvers' addresses. |
 | Search index | The rules, the gold example questions and past scenarios are embedded with Titan Text Embeddings V2 into three S3 Vectors indexes (`crewops.search.index`). Queries blend keyword (BM25) and semantic scores. |
 | Evaluation | Gold questions and held-out cases run against the agent and are scored. |
 
@@ -379,12 +409,14 @@ caller):
 ## Demo flow
 
 1. A crew member says "I'm sick tomorrow". The report goes through SQS and is stored.
-2. DynamoDB Streams starts the disruption analysis. It computes legal, cost-ranked options,
-   marks the disruption OPTIONS_READY, and the controller's console updates live.
+2. DynamoDB Streams starts the disruption analysis. It computes legal, cost-ranked options and
+   marks the disruption OPTIONS_READY; the console updates live, and any address subscribed
+   to controller alerts gets an email.
 3. The controller asks "Alexa, what are my options for P-2291?", picks the recommended reserve
    and says "Submit it". The plan waits for approval.
-4. Hours later, in a new session, the approver asks "Alexa, anything waiting for me?".
-   Memory restores the context and the plan card appears.
+4. Hours later, in a new session, the approver asks "Alexa, anything waiting for me?". What
+   is waiting is read from the table (`my_queue`), so it is there in any session, and the
+   plan card appears.
 5. The approver says "Approve it". Legality is checked again against the current state, all
    assignments are written in one DynamoDB transaction, and the crew member's schedule
    updates.
@@ -401,7 +433,7 @@ with a progressive response, and the template answer stands whenever a model is 
 | Step | Typical |
 |---|---|
 | Guardrail check on input | 100–200 ms |
-| Memory load (first turn of a session only) | 50–100 ms |
+| Memory read (questions with a conversation id; skipped after 1 s; the write happens after the answer) | not yet measured |
 | Router, or triage when needed | 0–600 ms |
 | Advisor loop (2–4 model calls, 2–4 tool calls) | 2–5 s |
 | Guardrail check on output | 100–200 ms |

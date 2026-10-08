@@ -22,9 +22,12 @@ anyone hears it.
   consequences ("both A320 captains are sick, what's the joint plan?").
 - **Reacts to disruptions on its own.** A sick call or an incident goes onto a queue. The
   disruption analysis works out the blast radius and legal, cost-ranked options before the
-  controller asks (the live console view is planned).
-- **Remembers across sessions.** "Alexa, anything waiting for me?" brings back pending work
-  hours later: a plan to review for a controller, a plan to sign off for an approver.
+  controller asks, and each change is pushed live to the console and, where the admin has
+  set it up, emailed to the role that must act.
+- **Picks up where you left off.** "Alexa, anything waiting for me?" brings back pending work
+  hours later: a plan to review for a controller, a plan to sign off for an approver. Within
+  a conversation, a reply such as "Captain" or "is she legal?" is read with the question
+  before it.
 - **Four-eyes on every crew change.** One person reports, a controller picks a plan, a different
   person approves it, and only then is it committed in one transaction. Role checks live in
   code, never in a prompt.
@@ -63,8 +66,9 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#roles-and-approvals).
         Legality engine (pure Python)    S3 Vectors + Titan V2
                     │
                     ▼
-        DynamoDB ──Streams──► disruption analysis (Lambda) ──► live console
-                    ▲
+        DynamoDB ──Streams──┬──► disruption analysis (Lambda)
+                    ▲       └──► notifier (Lambda) ──► live console (AppSync Events)
+                    │                              └─► email alerts (SNS, by role)
         SQS ingestion (live reports) · S3 roster uploads (batch)
 ```
 
@@ -106,6 +110,7 @@ src/crewops/
   auth/                 Sign-in: the team, token checks, claims to caller, account sync
   plans/                Plans and approvals, with the four-eyes rules
   mcp/                  The MCP server for AgentCore, its package builder and a client
+  notify/               Live console events and admin-managed email alerts
 infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
@@ -294,7 +299,7 @@ package is built first (it downloads ARM64 wheels; no Docker needed), then deplo
 
 ```bash
 uv run python -m crewops.mcp.package            # builds build/mcp_server
-scripts/cdk.sh deploy CrewOps-dev-Ingestion CrewOps-dev-Mcp
+scripts/cdk.sh deploy CrewOps-dev-Ingestion CrewOps-dev-Notify CrewOps-dev-Mcp
 ```
 
 Until the package is built, the CDK app leaves the MCP stack out and says so, so the other
@@ -315,8 +320,36 @@ uv run python -m crewops.mcp.client --as crew1042 report_disruption \
 
 Its tools: `ask` (the full verified answer pipeline), `my_queue`, `show_disruption`,
 `report_disruption`, the plan actions (`submit_plan`, `approve_plan`, `reject_plan`,
-`withdraw_plan`, `close_disruption`), and `list_crew_tools` / `crew_tool` for the
-deterministic tools directly. What each user may do depends on their role.
+`withdraw_plan`, `close_disruption`), `list_crew_tools` / `crew_tool` for the
+deterministic tools directly, and, for admins, `alert_addresses`, `add_alert_address` and
+`remove_alert_address`. What each user may do depends on their role.
+
+A follow-up needs the same conversation id on each question. The previous turn then fills
+in only what a reply giving just a seat, a date or an id, or a "he", "she" or "that
+pairing", leaves out, and the answer says so in its notes:
+
+```bash
+uv run python -m crewops.mcp.client --as rohit --conversation c1 ask "Who can cover P-2291 on 15 Sep?"
+uv run python -m crewops.mcp.client --as rohit --conversation c1 ask "Captain"
+```
+
+### Live updates and alerts
+
+Every disruption status change is published to the `/ops/disruptions` channel of an AppSync
+Events API, which staff (not crew or reporters) can subscribe to with their sign-in; the web
+console uses it to refresh. Email alerts are optional and only an admin can set them up:
+an address is subscribed to the controller or approver alerts, AWS emails it a link to
+confirm, and after that it receives that role's alerts (options ready, a plan sent back, a
+plan waiting for approval). An address holds one role, and at most five addresses can be
+added a day.
+
+```bash
+uv run python -m crewops.mcp.client --as priya add_alert_address \
+  '{"email": "you@example.com", "role": "approver"}'
+uv run python -m crewops.mcp.client --as priya alert_addresses
+```
+
+Alerts and events name the disruption and its status, never a person.
 
 ### Asking a question
 
@@ -345,8 +378,10 @@ Set the floor that `calibrate` recommends as `CREWOPS_ROUTER_SEMANTIC_FLOOR` in 
 
 ## Friction log
 
-Problems hit while building with Amazon's tools are recorded in
-[docs/FRICTION_LOG.md](docs/FRICTION_LOG.md).
+Problems hit while building are recorded as they happened in
+[docs/FRICTION_LOG.md](docs/FRICTION_LOG.md), in three groups: the Amazon ecosystem (Alexa,
+Bedrock and Nova, AgentCore, MCP), the AWS backend infrastructure, and the core software
+stack and local tooling.
 
 ## License
 

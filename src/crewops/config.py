@@ -187,6 +187,13 @@ class Settings:
     queue_senders: tuple[str, ...]
     """IAM principal ARNs, besides the MCP server, allowed to send reports straight to the
     queue (an operator testing with ``send_report``). Empty: only the server."""
+    memory_id: str | None
+    """AgentCore Memory holding each conversation's last turns. Unset: no memory, every
+    question stands on its own."""
+    alerts_topic_arn: str | None
+    """The SNS topic the admin subscribes alert addresses to."""
+    events_http_domain: str | None
+    """The AppSync Events API's HTTP domain, where live console updates are published."""
     response_budget_seconds: float
     """Time the voice path has to answer. Alexa allows 8 s; the rest is margin."""
 
@@ -231,6 +238,16 @@ class Settings:
     def alerts_topic(self) -> str:
         """Outbound alerts to officers. Never an ingestion path."""
         return f"{self.prefix}-alerts"
+
+    @property
+    def event_api_name(self) -> str:
+        """AppSync Events API pushing live updates to the console."""
+        return f"{self.prefix}-events"
+
+    @property
+    def memory_name(self) -> str:
+        """AgentCore Memory names allow letters, digits and underscores only."""
+        return f"crewops_{self.stage.replace('-', '_')}_memory"
 
     @property
     def issuer(self) -> str | None:
@@ -297,6 +314,9 @@ class Settings:
             user_pool_client_id=_get(env, "CREWOPS_USER_POOL_CLIENT_ID"),
             ingest_queue_url=_get(env, "CREWOPS_INGEST_QUEUE_URL"),
             queue_senders=_senders(env),
+            memory_id=_get(env, "CREWOPS_MEMORY_ID"),
+            alerts_topic_arn=_get(env, "CREWOPS_ALERTS_TOPIC_ARN"),
+            events_http_domain=_get(env, "CREWOPS_EVENTS_HTTP_DOMAIN"),
             response_budget_seconds=_float(env, "CREWOPS_RESPONSE_BUDGET_SECONDS", 6.0),
         )
 
