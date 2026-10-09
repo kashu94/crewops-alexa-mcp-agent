@@ -8,6 +8,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Actions,
   AuditTrail,
+  chosenFor,
+  CommittedPlan,
   type Choice,
   Coverage,
   DeskBanner,
@@ -15,10 +17,12 @@ import {
   PlanList,
   TripFacts,
 } from "@/components/disruption";
+import { AirlineBadge } from "@/components/airline";
 import { HandlingBanner, HandlingDetail, NoticeList } from "@/components/handling";
 import { useLiveListener } from "@/components/live";
 import { useMe } from "@/components/me";
-import { SeatWorkspace, seatKey } from "@/components/workspace";
+import { SeatOptions } from "@/components/solutions";
+import { CANCEL, SeatWorkspace, SHORT, seatKey } from "@/components/workspace";
 import { clock, day, Empty, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
 import { describe, shownStatus, type Detail } from "@/lib/types";
@@ -46,7 +50,12 @@ export default function DisruptionPage() {
   // seats), matched by trip and role in order as the server does; else the live top option.
   const recommended = useMemo(() => {
     const joint: Record<string, { crew_id: string; name?: string }[]> = {};
-    for (const a of (detail?.joint_plan?.assignments ?? []) as { pairing_id: string; role: string; crew_id: string; name?: string }[]) {
+    for (const a of (detail?.joint_plan?.assignments ?? []) as {
+      pairing_id: string;
+      role: string;
+      crew_id: string;
+      name?: string;
+    }[]) {
       (joint[`${a.pairing_id}/${a.role}`] ??= []).push(a);
     }
     const out: Record<string, { crewId: string; name: string } | null> = {};
@@ -55,7 +64,11 @@ export default function DisruptionPage() {
       const j = joint[`${s.pairing_id}/${s.role}`]?.shift();
       const top = s.live?.options[0];
       const name = (id: string) => s.live?.options.find((o) => o.crew_id === id)?.name ?? j?.name ?? id;
-      out[seatKey(s)] = j ? { crewId: j.crew_id, name: name(j.crew_id) } : top?.crew_id ? { crewId: top.crew_id, name: top.name } : null;
+      out[seatKey(s)] = j
+        ? { crewId: j.crew_id, name: name(j.crew_id) }
+        : top?.crew_id
+          ? { crewId: top.crew_id, name: top.name }
+          : null;
     }
     return out;
   }, [detail]);
@@ -67,18 +80,38 @@ export default function DisruptionPage() {
       (detail?.seats ?? []).flatMap((s): Choice[] => {
         const key = seatKey(s);
         const rec = recommended[key];
-        if (!rec) return [];
         const mine = chosen[key];
-        if (!mine || mine === rec.crewId) return [{ seat: key, crewId: rec.crewId, name: rec.name, overrides: false }];
+        if (!rec) {
+          // No legal crew: the seat can only be cancelled or flown short, and only on purpose.
+          if (s.status !== "no_legal_cover" || (mine !== CANCEL && mine !== SHORT)) return [];
+          const label = mine === CANCEL ? "Cancel the flights" : "Operate one cabin crew short";
+          return [
+            { seat: key, crewId: mine, name: label, overrides: true, stale: mine === SHORT && !s.live?.short_crew },
+          ];
+        }
+        const gone = detail?.unavailable_now ?? {};
+        if (!mine || mine === rec.crewId)
+          return [
+            { seat: key, crewId: rec.crewId, name: rec.name, overrides: false, stale: Boolean(gone[rec.crewId]) },
+          ];
+        if (mine === CANCEL || mine === SHORT) {
+          const label = mine === CANCEL ? "Cancel the flights" : "Operate one cabin crew short";
+          return [
+            { seat: key, crewId: mine, name: label, overrides: true, stale: mine === SHORT && !s.live?.short_crew },
+          ];
+        }
         const pick = s.live?.options.find((o) => o.crew_id === mine);
-        return [{ seat: key, crewId: mine, name: pick?.name ?? mine, overrides: true, stale: !pick }];
+        return [
+          { seat: key, crewId: mine, name: pick?.name ?? mine, overrides: true, stale: !pick || Boolean(gone[mine]) },
+        ];
       }),
     [detail, chosen, recommended],
   );
   useLiveListener(useCallback((e) => e.disruption_id === id && load(), [id, load]));
 
   // Back to where this role works: approvers come here from their queue.
-  const approverOnly = me.roles.includes("approver") && !me.roles.includes("controller") && !me.roles.includes("auditor");
+  const approverOnly =
+    me.roles.includes("approver") && !me.roles.includes("controller") && !me.roles.includes("auditor");
   const back = (
     <Link
       href={approverOnly ? "/approvals" : "/console"}
@@ -113,6 +146,9 @@ export default function DisruptionPage() {
             {describe({ report_type: detail.report_type, details: detail.details ?? {} })}
           </h1>
           <Status value={shownStatus(detail.status, detail.handling?.kind)} />
+          {(detail.airlines ?? []).map((a) => (
+            <AirlineBadge key={a.code} code={a.code} />
+          ))}
         </div>
         <p className="text-sm text-muted">
           <Mono>{detail.disruption_id}</Mono> · {(detail.report_type ?? "").replace(/_/g, " ")} · reported{" "}
@@ -147,28 +183,53 @@ export default function DisruptionPage() {
               )}
             </Panel>
           )}
+          <CommittedPlan detail={detail} />
           <HandlingDetail detail={detail} />
-          {detail.seats.length > 0 && (
+          {detail.seats.length > 0 &&
             detail.seats.map((s) => (
               <Panel
                 key={seatKey(s)}
                 title={`Cover for ${s.pairing_id} · ${s.role}${s.crew_out ? ` · for ${s.crew_out}` : ""}`}
                 icon={<Cpu size={14} className="text-accent" />}
               >
-                <SeatWorkspace
-                  seat={s}
-                  contention={detail.contention ?? {}}
-                  chosen={chosen[seatKey(s)] ?? null}
-                  recommendedId={recommended[seatKey(s)]?.crewId ?? null}
-                  onChoose={
-                    detail.yours && detail.status === "OPTIONS_READY" && s.status === "options"
-                      ? (crewId) => setChosen((c) => ({ ...c, [seatKey(s)]: crewId }))
-                      : undefined
-                  }
-                />
+                {detail.status === "COMMITTED" ? (
+                  <SeatOptions seat={s} chosen={chosenFor(detail, s)} />
+                ) : (
+                  <SeatWorkspace
+                    seat={s}
+                    contention={detail.contention ?? {}}
+                    chosen={chosen[seatKey(s)] ?? null}
+                    recommendedId={recommended[seatKey(s)]?.crewId ?? null}
+                    unavailable={detail.unavailable_now ?? {}}
+                    suggestions={(detail.suggestions ?? []).filter((sg) => sg.seat === seatKey(s))}
+                    onSuggest={
+                      !detail.yours && me.roles.includes("controller") && detail.status === "OPTIONS_READY"
+                        ? async (crewId, note) => {
+                            await tool("suggest_cover", {
+                              disruption_id: detail.disruption_id,
+                              seat: seatKey(s),
+                              crew_id: crewId,
+                              note,
+                            });
+                          }
+                        : undefined
+                    }
+                    onChoose={
+                      detail.yours &&
+                      detail.status === "OPTIONS_READY" &&
+                      (s.status === "options" || s.status === "no_legal_cover")
+                        ? (crewId) => {
+                            // A seat the analysis found no legal crew for may only be
+                            // cancelled or flown short; the server refuses anything else.
+                            if (s.status === "options" || crewId === CANCEL || crewId === SHORT)
+                              setChosen((c) => ({ ...c, [seatKey(s)]: crewId }));
+                          }
+                        : undefined
+                    }
+                  />
+                )}
               </Panel>
-            ))
-          )}
+            ))}
           <JointPlan detail={detail} />
           <NoticeList notices={detail.notices ?? []} />
         </div>

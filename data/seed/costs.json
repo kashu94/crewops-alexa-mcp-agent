@@ -8,5 +8,8 @@
  "delay_cost_per_duty_hour": 5400,
  "cancellation_per_flight": 250000,
  "hotel_overnight": 4200,
- "notes": "delay_cost_per_duty_hour is charged per hour the duty's first departure is delayed. Cancellation is per flight leg."
+ "notes": "delay_cost_per_duty_hour is charged per hour the duty's first departure is delayed. Cancellation is per flight leg. A callout also pays a seniority allowance per year of seniority and a travel allowance per 10 minutes the crew member needs to reach the airport.",
+ "seniority_allowance_pilot": 450,
+ "seniority_allowance_cabin": 150,
+ "travel_per_10_minutes": 180
 }

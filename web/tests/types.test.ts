@@ -5,13 +5,13 @@ import { byRule, describe as line, type Verdict } from "@/lib/types";
 describe("feed lines", () => {
   it("reads each report type at a glance", () => {
     expect(
-      line({ report_type: "crew_unavailable", details: { crew_id: "C-1042", from_date: "2026-09-15", to_date: "2026-09-16", reason: "sick" } }),
-    ).toBe("C-1042 unavailable 2026-09-15 to 2026-09-16 (sick)");
-    expect(line({ report_type: "flight_delay", details: { flight_id: "DX412-2026-09-15", delay_minutes: 90 } })).toBe(
-      "DX412-2026-09-15 delayed 90 min",
+      line({ report_type: "crew_unavailable", details: { crew_id: "C-1042", from_date: "2026-10-13", to_date: "2026-10-14", reason: "sick" } }),
+    ).toBe("C-1042 unavailable 2026-10-13 to 2026-10-14 (sick)");
+    expect(line({ report_type: "flight_delay", details: { flight_id: "KS412-2026-10-13", delay_minutes: 90 } })).toBe(
+      "KS412-2026-10-13 delayed 90 min",
     );
     expect(
-      line({ report_type: "station_disruption", details: { station: "BLR", from_utc: "2026-09-17T08:00:00Z", to_utc: "2026-09-17T14:00:00Z" } }),
+      line({ report_type: "station_disruption", details: { station: "BLR", from_utc: "2026-10-15T08:00:00Z", to_utc: "2026-10-15T14:00:00Z" } }),
     ).toBe("BLR closed 08:00–14:00Z");
   });
 });

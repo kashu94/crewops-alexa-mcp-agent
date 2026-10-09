@@ -20,7 +20,9 @@ import { useState } from "react";
 import { tool } from "@/lib/client";
 import type { Detail, Plan, Seat } from "@/lib/types";
 
+import { Info } from "./info";
 import { useMe } from "./me";
+import { seatKey } from "./workspace";
 import { Button, clock, cx, day, Mono, Notice, rupees, Status } from "./ui";
 
 const STRATEGY: Record<string, string> = {
@@ -28,6 +30,9 @@ const STRATEGY: Record<string, string> = {
   day_off_callout: "day-off callout",
   positioning: "positioning",
   cancel: "cancellation",
+  command_upgrade: "command-qualified first officer",
+  right_seat: "captain in the right seat",
+  short_crew: "operate one short",
 };
 
 /** Whose disruption this is, said plainly for each role. */
@@ -48,8 +53,9 @@ export function DeskBanner({ detail }: { detail: Detail }) {
       <p className="flex items-start gap-2 rounded-xl border border-amber-200 bg-pending-soft px-3 py-2 text-sm text-amber-900">
         <Swords size={15} className="mt-0.5 shrink-0" />
         <span>
-          This is <b>{names}</b>&apos;s disruption. You can read and analyse it; planning it is theirs. Where it
-          wants the same crew as yours, the options below say so: agree who takes whom before either plan is submitted.
+          This is <b>{names}</b>&apos;s disruption. You can read and analyse it; planning it is theirs.
+          {(detail.seats?.length ?? 0) > 0 &&
+            " You may suggest cover for a seat. Where it wants the same crew as yours, the options below say so: agree who takes whom before either plan is submitted."}
         </span>
       </p>
     );
@@ -94,7 +100,9 @@ export function Coverage({ detail }: { detail: Detail }) {
           <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
             <Icon size={12} /> {label}
           </span>
-          <span className="mt-1 block font-mono text-2xl font-semibold tabular-nums">{value.toLocaleString("en-IN")}</span>
+          <span className="mt-1 block font-mono text-2xl font-semibold tabular-nums">
+            {value.toLocaleString("en-IN")}
+          </span>
         </div>
       ))}
     </div>
@@ -147,11 +155,15 @@ export function TripFacts({ seat }: { seat: Seat }) {
       {c.requirement && <p className="rounded-lg bg-sunken px-3 py-2 text-xs text-slate-700">{c.requirement}</p>}
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
         <dt className="text-muted">Aircraft</dt>
-        <dd><Mono>{c.aircraft}</Mono> · {c.aircraft_type}</dd>
+        <dd>
+          <Mono>{c.aircraft}</Mono> · {c.aircraft_type}
+        </dd>
         {c.base && (
           <>
             <dt className="text-muted">Base</dt>
-            <dd><Mono>{c.base}</Mono></dd>
+            <dd>
+              <Mono>{c.base}</Mono>
+            </dd>
           </>
         )}
         <dt className="text-muted">Duty dates</dt>
@@ -164,7 +176,9 @@ export function TripFacts({ seat }: { seat: Seat }) {
             <Mono className="text-muted">
               {f.from}→{f.to}
             </Mono>
-            <Mono className="text-muted">{day(f.date)} {clock(f.dep_utc)}</Mono>
+            <Mono className="text-muted">
+              {day(f.date)} {clock(f.dep_utc)}
+            </Mono>
             <span
               className={cx(
                 "ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
@@ -210,7 +224,13 @@ export function mergeAudit(audit: AuditRow[]): (AuditRow & { label: string })[] 
       prev.label = "Approved and committed";
       continue;
     }
-    out.push({ ...a, label: a.action.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase()) });
+    out.push({
+      ...a,
+      label: a.action
+        .replace(/_/g, " ")
+        .toLowerCase()
+        .replace(/^\w/, (c) => c.toUpperCase()),
+    });
   }
   return out;
 }
@@ -225,8 +245,16 @@ export function AuditTrail({ audit }: { audit: AuditRow[] }) {
           <span className="min-w-0">
             <span className="block font-medium">{a.label}</span>
             <span className="block text-xs text-muted">
-              {a.actor} · <Mono>{day(a.at)} {clock(a.at)}</Mono>
-              {a.plan_id && <> · <Mono>{a.plan_id}</Mono></>}
+              {a.actor} ·{" "}
+              <Mono>
+                {day(a.at)} {clock(a.at)}
+              </Mono>
+              {a.plan_id && (
+                <>
+                  {" "}
+                  · <Mono>{a.plan_id}</Mono>
+                </>
+              )}
             </span>
             {a.reason && <span className="block text-xs text-slate-600">“{a.reason}”</span>}
           </span>
@@ -252,10 +280,14 @@ export function PlanList({ plans }: { plans: Plan[] }) {
           </p>
           <ul className="mt-2 flex flex-col gap-1 text-xs">
             {p.assignments.map((a) => (
-              <li key={a} className="rounded bg-sunken px-2 py-1 font-mono">{a}</li>
+              <li key={a} className="rounded bg-sunken px-2 py-1 font-mono">
+                {a}
+              </li>
             ))}
             {p.uncovered.map((u) => (
-              <li key={u} className="rounded bg-critical-soft px-2 py-1 text-red-900">Uncovered: {u}</li>
+              <li key={u} className="rounded bg-critical-soft px-2 py-1 text-red-900">
+                Uncovered: {u}
+              </li>
             ))}
           </ul>
           {p.reason && <p className="mt-1 text-xs text-muted">Reason: {p.reason}</p>}
@@ -266,6 +298,64 @@ export function PlanList({ plans }: { plans: Plan[] }) {
 }
 
 type Message = { tone: "ok" | "error"; text: string } | null;
+
+/** Who plans this disruption, said by name. */
+function owner(detail: Detail): string {
+  const desks = detail.desks ?? [];
+  return desks.length ? desks.map((d) => `${d.controller} (${d.desk_id})`).join(" or ") : "its desk's controller";
+}
+
+/** For a committed disruption, the crew id its plan put in this seat; null otherwise. */
+export function chosenFor(detail: Detail, seat: Seat): string | null {
+  const plan = detail.plans.find((p) => p.status === "COMMITTED");
+  if (!plan) return null;
+  const pick = (plan.picks ?? []).find(
+    (p) => p.pairing_id === seat.pairing_id && p.role === seat.role && (!seat.crew_out || p.replaces === seat.crew_out),
+  );
+  return pick?.crew_id ?? "";
+}
+
+/** The plan that was approved and committed: who replaced whom, decided by whom, when. */
+export function CommittedPlan({ detail }: { detail: Detail }) {
+  const plan = detail.plans.find((p) => p.status === "COMMITTED");
+  if (!plan) return null;
+  return (
+    <section className="animate-rise rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4">
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800">
+        <ShieldCheck size={13} /> Committed plan <Mono className="font-normal normal-case">{plan.plan_id}</Mono>
+      </p>
+      <ul className="mt-2 flex flex-col gap-1 text-sm">
+        {(plan.picks ?? []).map((p) => (
+          <li key={`${p.pairing_id}-${p.role}-${p.crew_id}`}>
+            <b>{p.name}</b> <Mono className="text-sky-700">{p.crew_id}</Mono> flies {p.role} on{" "}
+            <Mono>{p.pairing_id}</Mono>
+            {p.replaces && (
+              <>
+                {" "}
+                instead of <Mono>{p.replaces}</Mono>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-xs text-emerald-900/80">
+        {rupees(plan.total_cost_inr)} · submitted by {plan.submitted_by}
+        {plan.decided_by && (
+          <>
+            {" "}
+            · approved by <b>{plan.decided_by}</b>
+            {plan.decided_utc && (
+              <>
+                {" "}
+                on {day(plan.decided_utc)} <Mono>{clock(plan.decided_utc)}</Mono>
+              </>
+            )}
+          </>
+        )}
+      </p>
+    </section>
+  );
+}
 
 /** Only the actions the signed-in role may take on this disruption, as it stands. */
 export type Choice = { seat: string; crewId: string; name: string; overrides: boolean; stale?: boolean };
@@ -293,14 +383,19 @@ export function Actions({
   const canWithdraw = isController && pending && pending.submitted_by === me.user_id;
   // Some seats without cover: a plan can still go, with them acknowledged. No seat with
   // cover: the only way out is to close it, as the server requires.
-  const someUncovered = detail.seats.some((s) => s.status !== "options");
+  // A seat with no legal crew counts as handled once it is chosen to be cancelled or flown short.
+  const decided = new Set(choices.filter((c) => c.crewId === "CANCEL" || c.crewId === "SHORT").map((c) => c.seat));
+  const open = (s: Seat) => s.status !== "options" && !decided.has(seatKey(s));
+  const someUncovered = detail.seats.some(open);
   const overriding = choices.some((c) => c.overrides);
+  const cancelling = choices.some((c) => c.crewId === "CANCEL");
+  const short = choices.some((c) => c.crewId === "SHORT");
   // Only changed seats go: the server keeps the joint plan for the rest.
   const picked = Object.fromEntries(choices.filter((c) => c.overrides).map((c) => [c.seat, c.crewId]));
   const stale = choices.some((c) => c.stale);
   // No seat with cover (or none to cover at all): it is closed, or marked resolved with a
   // remark when it was handled outside crew control.
-  const noneCoverable = detail.seats.every((s) => s.status !== "options");
+  const noneCoverable = detail.seats.every(open);
   const internal = detail.handling?.kind === "internal";
 
   async function act(name: string, args: Record<string, unknown>, done: string) {
@@ -312,7 +407,10 @@ export function Actions({
         ...args,
       });
       const extra = [...(out.reasons ?? []), ...(out.contention ?? [])].join(" · ");
-      setMessage({ tone: out.status === "STALE" ? "error" : "ok", text: `${done}: ${out.status}${extra ? ` (${extra})` : ""}` });
+      setMessage({
+        tone: out.status === "STALE" ? "error" : "ok",
+        text: `${done}: ${out.status}${extra ? ` (${extra})` : ""}`,
+      });
       setReason("");
       setNote("");
       onChanged();
@@ -337,7 +435,7 @@ export function Actions({
                 ? "Waiting for a different approver."
                 : "A plan is waiting for an approver."
               : isController && !detail.yours
-                ? "Planning this is for its desk's controller."
+                ? `Only ${owner(detail)} can plan this one; you can read it.`
                 : "Nothing for your role to do here."}
       </p>
     );
@@ -352,7 +450,8 @@ export function Actions({
             <ul className="flex flex-col gap-1 rounded-lg bg-sunken p-2 text-xs">
               {choices.map((c) => (
                 <li key={c.seat} className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-muted">Submitting</span> <b>{c.name}</b> <Mono>{c.crewId}</Mono>
+                  <span className="text-muted">Submitting</span> <b>{c.name}</b>
+                  {c.crewId !== "CANCEL" && c.crewId !== "SHORT" && <Mono>{c.crewId}</Mono>}
                   <span className="text-muted">for {c.seat.split("/").slice(0, 2).join(" ")}</span>
                   {c.stale ? (
                     <span className="rounded-full bg-critical-soft px-2 py-0.5 font-semibold text-red-800">
@@ -369,24 +468,42 @@ export function Actions({
               ))}
             </ul>
           )}
+          {cancelling && (
+            <Notice tone="error">
+              This plan cancels flights. Passengers are rebooked and operations and customer care are told. Say why in
+              the note: the approver decides.
+            </Notice>
+          )}
+          {short && !cancelling && (
+            <Notice tone="info">
+              This plan operates a trip one cabin crew short, at the legal minimum. Say why in the note.
+            </Notice>
+          )}
           {!noneCoverable && (
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
               maxLength={500}
-              placeholder={overriding ? "Why this option over the recommended one? (required)" : "Note for the approver (optional)"}
+              placeholder={
+                overriding ? "Why this option over the recommended one? (required)" : "Note for the approver (optional)"
+              }
               className="rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-accent"
             />
           )}
           {!noneCoverable && (
             <Button
               type="button"
-              tone="accent"
+              tone={cancelling ? "danger" : "accent"}
               disabled={busy || stale || (overriding && !note.trim())}
               onClick={() => act("submit_plan", { note, accept_uncovered: false, choices: picked }, "Submitted")}
             >
-              <Send size={14} /> {overriding ? "Submit my choice for approval" : "Submit the recommended plan"}
+              <Send size={14} />{" "}
+              {cancelling
+                ? "Submit the cancellation for approval"
+                : overriding
+                  ? "Submit my choice for approval"
+                  : "Submit the recommended plan"}
             </Button>
           )}
           {someUncovered && !noneCoverable && (
@@ -434,15 +551,22 @@ export function Actions({
       {canDecide && pending && (
         <>
           <p className="text-xs text-muted">
-            Plan <Mono>{pending.plan_id}</Mono> by {pending.submitted_by}, {rupees(pending.total_cost_inr)}. Approving re-checks
-            every rule and changes the roster in the same step.
+            Plan <Mono>{pending.plan_id}</Mono> by {pending.submitted_by}, {rupees(pending.total_cost_inr)}. Approving
+            re-checks every rule and changes the roster in the same step.
           </p>
           {confirming ? (
             <div className="flex gap-2">
-              <Button type="button" tone="accent" disabled={busy} onClick={() => act("approve_plan", { plan_id: pending.plan_id }, "Approved")}>
+              <Button
+                type="button"
+                tone="accent"
+                disabled={busy}
+                onClick={() => act("approve_plan", { plan_id: pending.plan_id }, "Approved")}
+              >
                 <CheckCheck size={14} /> Confirm and commit
               </Button>
-              <Button type="button" tone="ghost" onClick={() => setConfirming(false)}>Cancel</Button>
+              <Button type="button" tone="ghost" onClick={() => setConfirming(false)}>
+                Cancel
+              </Button>
             </div>
           ) : (
             <Button type="button" tone="accent" disabled={busy} onClick={() => setConfirming(true)}>
@@ -457,13 +581,23 @@ export function Actions({
             placeholder="Reason to send it back"
             className="rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-critical"
           />
-          <Button type="button" tone="danger" disabled={busy || !reason.trim()} onClick={() => act("reject_plan", { plan_id: pending.plan_id, reason }, "Rejected")}>
+          <Button
+            type="button"
+            tone="danger"
+            disabled={busy || !reason.trim()}
+            onClick={() => act("reject_plan", { plan_id: pending.plan_id, reason }, "Rejected")}
+          >
             <X size={14} /> Send back
           </Button>
         </>
       )}
       {canWithdraw && pending && (
-        <Button type="button" tone="secondary" disabled={busy} onClick={() => act("withdraw_plan", { plan_id: pending.plan_id, reason }, "Withdrawn")}>
+        <Button
+          type="button"
+          tone="secondary"
+          disabled={busy}
+          onClick={() => act("withdraw_plan", { plan_id: pending.plan_id, reason }, "Withdrawn")}
+        >
           Withdraw my plan
         </Button>
       )}
@@ -477,7 +611,9 @@ export function JointPlan({ detail }: { detail: Detail }) {
   if (detail.seats.length < 2 || !joint?.assignments?.length) return null;
   return (
     <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3 text-xs">
-      <p className="mb-1 font-semibold text-indigo-900">Joint plan for every seat together</p>
+      <p className="mb-1 flex items-center gap-1 font-semibold text-indigo-900">
+        Joint plan for every seat together <Info term="joint" />
+      </p>
       <ul className="flex flex-col gap-1">
         {joint.assignments.map((a, i) => (
           <li key={i} className="font-mono text-indigo-900">
@@ -485,7 +621,9 @@ export function JointPlan({ detail }: { detail: Detail }) {
           </li>
         ))}
       </ul>
-      {joint.total_cost_inr !== undefined && <p className="mt-1 text-indigo-900">Total {rupees(joint.total_cost_inr)}</p>}
+      {joint.total_cost_inr !== undefined && (
+        <p className="mt-1 text-indigo-900">Total {rupees(joint.total_cost_inr)}</p>
+      )}
     </div>
   );
 }

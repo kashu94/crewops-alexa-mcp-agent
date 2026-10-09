@@ -1,11 +1,11 @@
 """Call the deployed MCP server as a member of the team, the way any MCP host would.
 
-    uv run python -m crewops.mcp.client --as rohit ask "Who covers C-1042 on 15 Sep?"
-    uv run python -m crewops.mcp.client --as rohit --conversation c1 ask "Captain"
-    uv run python -m crewops.mcp.client --as rohit my_queue
-    uv run python -m crewops.mcp.client --as meera approve_plan \
+    uv run python -m crewops.mcp.client --as rohit.malhotra ask "Who covers C-1042 on 13 Oct?"
+    uv run python -m crewops.mcp.client --as rohit.malhotra --conversation c1 ask "Captain"
+    uv run python -m crewops.mcp.client --as rohit.malhotra my_queue
+    uv run python -m crewops.mcp.client --as meera.bhatt approve_plan \
         '{"disruption_id": "r-...", "plan_id": "pl-..."}'
-    uv run python -m crewops.mcp.client --as rohit tools          # list the server's tools
+    uv run python -m crewops.mcp.client --as rohit.malhotra tools          # list the server's tools
 
 Signs in to the team's Cognito pool with the member's username and password (from
 ``CREWOPS_TEAM_PASSWORD`` or asked for), then calls the AgentCore runtime with the access

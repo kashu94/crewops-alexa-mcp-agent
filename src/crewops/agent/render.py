@@ -36,7 +36,7 @@ def _inr(value: Any) -> str:
 
 
 def _hhmm(iso: str | None) -> str:
-    """ "2026-09-15T06:00:00Z" -> "06:00Z"."""
+    """ "2026-10-13T06:00:00Z" -> "06:00Z"."""
     return f"{iso[11:16]}Z" if iso and len(iso) >= 16 else str(iso)
 
 
@@ -68,7 +68,7 @@ ROW: dict[str, Callable[[dict[str, Any]], str]] = {
     "flights": lambda r: (
         f"{r['flight_no']} {r['dep_station']} to {r['arr_station']} on {r['date']}, "
         f"departs {_hhmm(r['dep_utc'])}, {r['aircraft']}, {_n(r['seats'])} seats, "
-        f"{_n(r['block_hours'])} block hours"
+        f"{_n(r['block_hours'])} block hours" + (", cancelled" if r.get("cancelled") else "")
     ),
     "pairings": lambda r: f"{r['pairing_id']} on {r['aircraft']}, {', '.join(r['dates'])}",
     "pairing_crew": lambda r: f"{_who(r)}, {r['role']} on {r['pairing_id']} ({r['aircraft']})",
@@ -252,8 +252,6 @@ def _ripple(r: dict[str, Any], args: dict[str, Any]) -> str:
         + "; ".join(parts)
         + "."
     )
-    if r.get("desks"):
-        text += f" Desks: {_list(r['desks'])}."
     if r.get("already_departed"):
         text += " Flights that already departed are not counted."
     return text
@@ -376,8 +374,9 @@ def _suggest(r: dict[str, Any], args: dict[str, Any]) -> str:
 def _controllers(r: dict[str, Any], args: dict[str, Any]) -> str:
     return (
         "Controller desks: "
-        + "; ".join(f"{d['controller']} covers {_list(d['aircraft'])}" for d in r["desks"])
-        + "."
+        + "; ".join(f"{d['controller']} ({d['desk_id']})" for d in r["desks"])
+        + ". No desk owns an aircraft: each new disruption goes to the controller with the "
+        "fewest open ones."
     )
 
 
@@ -390,6 +389,22 @@ def _issues(r: dict[str, Any], args: dict[str, Any]) -> str:
     if r.get("unassigned"):
         text += f" Not tied to any desk: {', '.join(r['unassigned'])}."
     return text
+
+
+def _open(r: dict[str, Any], args: dict[str, Any]) -> str:
+    where = f" on {r['desk']}" if r.get("desk") else ""
+    rows = r["disruptions"]
+    if not rows:
+        return f"No open disruptions{where} right now."
+    head = f"{_n(r['count'])} open disruption{'s' if r['count'] != 1 else ''}{where}: "
+    shown = rows[:8]
+    text = head + "; ".join(
+        f"{d['disruption_id']}, {d['what']} ({d['status'].replace('_', ' ').lower()})"
+        for d in shown
+    )
+    if len(rows) > len(shown):
+        text += f"; and {_n(len(rows) - len(shown))} more"
+    return text + "."
 
 
 RENDERERS: dict[str, Callable[[dict[str, Any], dict[str, Any]], str]] = {
@@ -410,6 +425,7 @@ RENDERERS: dict[str, Callable[[dict[str, Any], dict[str, Any]], str]] = {
     "suggest_flight_nos": _suggest,
     "list_controllers": _controllers,
     "controller_issue_counts": _issues,
+    "list_open_disruptions": _open,
 }
 
 

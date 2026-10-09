@@ -28,7 +28,7 @@ def turn_after(pipeline, question, caller=CONTROLLER):
 
 
 def test_a_short_reply_is_read_with_the_question_it_answers(pipeline):
-    asked = turn_after(pipeline, "Who can cover P-2291 on 15 Sep?")
+    asked = turn_after(pipeline, "Who can cover P-2291 on 13 Oct?")
     assert asked.awaiting == "detail" and asked.pairing_ids == ("P-2291",)
     answer = pipeline.answer("Captain", CONTROLLER, asked)
     assert answer.awaiting is None and "Captain seat on P-2291" in answer.text
@@ -36,8 +36,8 @@ def test_a_short_reply_is_read_with_the_question_it_answers(pipeline):
 
 
 def test_a_new_question_after_a_question_back_stands_on_its_own(pipeline):
-    asked = turn_after(pipeline, "Who can cover P-2291 on 15 Sep?")
-    answer = pipeline.answer("Who is on reserve at BLR on 15 Sep?", CONTROLLER, asked)
+    asked = turn_after(pipeline, "Who can cover P-2291 on 13 Oct?")
+    answer = pipeline.answer("Who is on reserve at BLR on 13 Oct?", CONTROLLER, asked)
     assert "D. Reddy (C-3310)" in answer.text and not answer.notes
 
 
@@ -55,16 +55,16 @@ def test_she_means_the_one_crew_member_just_asked_about(pipeline):
     ["What is rule FDP-1?", "Reserves at BLR?", "Duty hours C-3310", "Thanks, that is all"],
 )
 def test_anything_but_the_missing_detail_is_a_new_question(pipeline, reply):
-    asked = turn_after(pipeline, "Who can cover P-2291 on 15 Sep?")
+    asked = turn_after(pipeline, "Who can cover P-2291 on 13 Oct?")
     together = pipeline.answer(reply, CONTROLLER, asked)
     alone = pipeline.answer(reply, CONTROLLER)
     assert together.text == alone.text
     assert "read together with the question it answers" not in together.notes
 
 
-@pytest.mark.parametrize("reply", ["Captain", "the first officer", "15 Sep", "C-1042"])
+@pytest.mark.parametrize("reply", ["Captain", "the first officer", "13 Oct", "C-1042"])
 def test_a_seat_a_date_or_one_id_answers_the_question_back(pipeline, reply):
-    asked = turn_after(pipeline, "Who can cover P-2291 on 15 Sep?")
+    asked = turn_after(pipeline, "Who can cover P-2291 on 13 Oct?")
     answer = pipeline.answer(reply, CONTROLLER, asked)
     assert "read together with the question it answers" in answer.notes
 
@@ -72,8 +72,8 @@ def test_a_seat_a_date_or_one_id_answers_the_question_back(pipeline, reply):
 @pytest.mark.parametrize(
     "question",
     [
-        "Who is on reserve at BLR on 15 Sep and are they rested?",
-        "List the reserves at BLR on 15 Sep with their duty hours",
+        "Who is on reserve at BLR on 13 Oct and are they rested?",
+        "List the reserves at BLR on 13 Oct with their duty hours",
         "Is there a plan waiting and has she approved it?",
         "Who is her captain on P-2291?",
     ],

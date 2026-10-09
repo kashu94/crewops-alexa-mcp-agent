@@ -42,6 +42,9 @@ class Assessment:
     """On call that day with a window covering the required report time."""
     days: tuple[DutyDay, ...]
     """The duty days as evaluated, after positioning and delay."""
+    reach_slip_hours: float = 0.0
+    """How late the first departure leaves because, called now, they cannot reach the
+    airport by report time (set by the option search, which judged them on that slip)."""
 
     @property
     def legal(self) -> bool:
@@ -53,8 +56,11 @@ class Assessment:
 
     @property
     def departure_slip_hours(self) -> float:
-        """How late the first departure leaves because of positioning."""
-        return self.positioning.delay_hours if self.positioning else 0.0
+        """How late the first departure leaves: positioning, or the time to reach the
+        airport when called now."""
+        if self.positioning:
+            return self.positioning.delay_hours
+        return self.reach_slip_hours
 
 
 def _intra_pairing_rest(days: list[DutyDay], world: World) -> list[RuleVerdict]:
@@ -133,6 +139,20 @@ def assess(
         positioned=positioning is not None or rostered_here,
     )
     verdicts += _intra_pairing_rest(days, world)
+
+    # Crew are employed by one airline and can only be rostered on its aircraft.
+    theirs = world.airline_of_crew.get(crew_id)
+    flies = world.airline_of_pairing(pairing_id)
+    if theirs and flies and theirs != flies:
+        names = world.airline_names
+        verdicts.append(
+            fail(
+                QUAL,
+                f"works for {names.get(theirs, theirs)}, not {names.get(flies, flies)}, "
+                f"which flies {world.pairing(pairing_id).aircraft}",
+                date=days[0].date,
+            )
+        )
 
     # Someone reported unavailable in another open disruption cannot cover these dates,
     # whatever the roster says. Shown as a qualification failure: "not available to fly".

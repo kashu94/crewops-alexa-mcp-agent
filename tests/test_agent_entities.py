@@ -12,19 +12,19 @@ def ents(text):
 def test_vocabulary_comes_from_the_roster():
     v = vocab()
     assert "BLR" in v.stations and "VT-DXA" in v.aircraft
-    assert str(v.week_start) == "2026-09-14" and str(v.week_end) == "2026-09-20"
-    assert str(v.today) == "2026-09-14"
+    assert str(v.week_start) == "2026-10-12" and str(v.week_end) == "2026-10-18"
+    assert str(v.today) == "2026-10-12"
 
 
 def test_ids_dates_roles_and_stations():
-    e = ents("Can Captain C-1042 cover P-2291 on 15 Sep out of BLR?")
+    e = ents("Can Captain C-1042 cover P-2291 on 13 Oct out of BLR?")
     assert e.crew_ids == ["C-1042"] and e.pairing_ids == ["P-2291"]
-    assert e.dates == ["2026-09-15"] and e.stations == ["BLR"] and e.roles == ["Captain"]
+    assert e.dates == ["2026-10-13"] and e.stations == ["BLR"] and e.roles == ["Captain"]
 
 
 def test_flight_id_is_not_also_a_bare_flight_number():
-    e = ents("Move C-2087 onto DX412-2026-09-15")
-    assert e.flight_ids == ["DX412-2026-09-15"] and e.flight_nos == []
+    e = ents("Move C-2087 onto KS412-2026-10-13")
+    assert e.flight_ids == ["KS412-2026-10-13"] and e.flight_nos == []
 
 
 def test_malformed_ids_are_kept_apart():
@@ -40,22 +40,22 @@ def test_cities_tails_and_unknown_codes():
 
 
 def test_date_forms():
-    assert ents("on 2026-09-16").dates == ["2026-09-16"]
-    assert ents("on Sep 17").dates == ["2026-09-17"]
-    assert ents("on the 18th").dates == ["2026-09-18"]
-    assert ents("out 15–16 Sep").dates == ["2026-09-15", "2026-09-16"]
-    assert ents("who is free today").dates == ["2026-09-14"]
-    assert ents("and tomorrow?").dates == ["2026-09-15"]
+    assert ents("on 2026-10-14").dates == ["2026-10-14"]
+    assert ents("on Oct 15").dates == ["2026-10-15"]
+    assert ents("on the 16th").dates == ["2026-10-16"]
+    assert ents("out 13–14 Oct").dates == ["2026-10-13", "2026-10-14"]
+    assert ents("who is free today").dates == ["2026-10-12"]
+    assert ents("and tomorrow?").dates == ["2026-10-13"]
     assert ents("on 31 Sep").dates == []
 
 
 def test_a_comparison_word_must_sit_beside_the_date():
-    assert ents("flights before 19 Sep").date_range == {"lt": "2026-09-19"}
-    assert ents("between 15 Sep and 17 Sep").date_range == {
-        "gte": "2026-09-15",
-        "lte": "2026-09-17",
+    assert ents("flights before 17 Oct").date_range == {"lt": "2026-10-17"}
+    assert ents("between 13 Oct and 15 Oct").date_range == {
+        "gte": "2026-10-13",
+        "lte": "2026-10-15",
     }
-    assert ents("VT-DXA is delayed 90 minutes before DX401 on 16 Sep").date_range is None
+    assert ents("VT-DXA is delayed 90 minutes before DX401 on 14 Oct").date_range is None
 
 
 def test_delay_horizon_times_gates_and_certs():
@@ -84,7 +84,7 @@ def test_stated_attributes():
 def test_ordinary_capitals_are_not_attempted_stations():
     for text in (
         "Which captains are rated on ATR-72?",
-        "Who covers DX412? FYI the CEO asked",
+        "Who covers KS412? FYI the CEO asked",
         "Send an SMS at 10:00 GMT",
     ):
         assert ents(text).unknown_stations == [], text
@@ -93,9 +93,9 @@ def test_ordinary_capitals_are_not_attempted_stations():
 
 
 def test_dates_review_cases():
-    e = ents("Who is on reserve at BLR between 15 and 17 Sep?")
-    assert e.dates == ["2026-09-15", "2026-09-17"]
-    assert e.date_range == {"gte": "2026-09-15", "lte": "2026-09-17"}
+    e = ents("Who is on reserve at BLR between 13 and 15 Oct?")
+    assert e.dates == ["2026-10-13", "2026-10-15"]
+    assert e.date_range == {"gte": "2026-10-13", "lte": "2026-10-15"}
     assert ents("Who may 3 captains replace?").dates == []
     assert ents("on 3 May").dates == ["2026-05-03"]
-    assert ents("Report at 2026-09-16T08:30:00Z").dates == ["2026-09-16"]
+    assert ents("Report at 2026-10-14T08:30:00Z").dates == ["2026-10-14"]

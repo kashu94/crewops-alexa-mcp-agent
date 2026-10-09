@@ -818,6 +818,59 @@ Entries in section 4 are about our own code, so they use a shorter form:
   all, and a 12-option cap per seat undercounted equal-cost ties.
 - Fix: Falls back to the best partial plan; ties are counted over more options.
 
+### FL-164: Crew of another airline passed a legality check
+
+- Date: 2026-10-09
+- Where: legality engine
+- Found by: test, while adding the three airlines
+- Severity: High
+- What went wrong: Asked directly, "is C-2210 legal for P-2291?" answered yes for a Deccan Express
+  captain on a Konkan Skyways trip.
+- Cause: Only the options search kept to the trip's airline; the legality check itself had no
+  airline rule.
+- Fix: The qualification rule fails crew of another airline: "works for Deccan Express, not
+  Konkan Skyways, which flies VT-DXC".
+
+### FL-165: Falling ill part-way through a day uncovered flights already flown
+
+- Date: 2026-10-09
+- Where: disruption analysis
+- Found by: the project owner's question
+- Severity: Medium
+- What went wrong: A crew member who flew the morning leg and fell ill after it was treated as out for
+  the whole day, so the leg already flown was counted as uncrewed.
+- Cause: An absence could only start on a date, never at a time.
+- Fix: A report may give the time it starts on its first day. Flights that left before it
+  stay with the crew member, and the analysis says where the cover joins and that
+  positioning there is not costed.
+
+### FL-166: Options still offered someone reported sick after they were ranked
+
+- Date: 2026-10-09
+- Where: options, console
+- Found by: the project owner
+- Severity: High
+- What went wrong: A reserve reported sick after a disruption's options were worked out stayed selectable
+  in that disruption.
+- Cause: Options are stored when a disruption is analysed; a later absence only affected
+  analyses run after it.
+- Fix: Every read flags options whose crew have since been reported unavailable, with the
+  report and time. The console strikes them through, and they cannot be chosen.
+
+### FL-167: A seat with no cover of its own rank went straight to cancelling the trip
+
+- Date: 2026-10-09
+- Where: options
+- Found by: the project owner
+- Severity: Medium
+- What went wrong: When no captain was legal, the only choice left was cancellation, as it was for a
+  missing cabin crew member on a trip that could legally fly one short.
+- Cause: Only crew of the seat's own rank were considered.
+- Fix: As regulation allows: a command-qualified first officer for a captain's seat, a
+  captain current in the right seat for a first officer's (never one pilot), and
+  operating one cabin crew short while one per 50 seats is kept. Each comes after the
+  seat's own rank, and cancelling is always last.
+
 #### Question pipeline, verifier and models
 
 ### FL-018: Follow-up context gave confident wrong answers
@@ -1200,6 +1253,30 @@ Entries in section 4 are about our own code, so they use a shorter form:
   tool configuration.
 - Fix: Such calls are dropped from the history.
 
+### FL-168: "What disruptions are on my desk" read out 150 risk scores
+
+- Date: 2026-10-09
+- Where: answer pipeline
+- Found by: live run (the project owner)
+- Severity: High
+- What went wrong: The question was answered with "150 risk scores: C-1017 has a risk score of 0.09 ...".
+- Cause: No tool listed open disruptions, so the router's nearest match was the risk lookup.
+  The first version of the new route also caught "impact on P-2291" and the evaluation's
+  disruption-risk question.
+- Fix: A read-only tool lists open disruptions, on the asker's desk when asked about "my
+  desk". Its route leaves impact, cover, legality, cancellation and risk questions alone.
+
+### FL-169: "Did you mean" ignored the crew member just discussed
+
+- Date: 2026-10-09
+- Where: answer pipeline
+- Found by: live run (the project owner)
+- Severity: Low
+- What went wrong: After a question about C-1042, "is there any crew C-123?" suggested C-1017 and C-1021
+  before C-1042.
+- Cause: Suggestions were ranked by spelling alone.
+- Fix: Ids from the conversation are offered first, then the closest spellings.
+
 #### Auth, roles and plans
 
 ### FL-077: Sign-in ignores case, but the profile lookup did not
@@ -1326,6 +1403,73 @@ Entries in section 4 are about our own code, so they use a shorter form:
   warnings ignored dates; a large plan could exceed DynamoDB's 100-action transaction limit.
 - Fix: A RETRY error leaves the plan submitted; contention is date-aware; plans are capped
   at 20 seats.
+
+### FL-170: Every disruption on an aircraft went to the same desk
+
+- Date: 2026-10-09
+- Where: analysis, desks
+- Found by: the project owner
+- Severity: Medium
+- What went wrong: Desks owned fixed aircraft, so one controller could hold every open disruption while
+  another had none, and "which desk covers VT-DXA" read back that fixed split.
+- Cause: A disruption's desk was worked out from the aircraft it touched.
+- Fix: Each analysed disruption goes to the desk with the fewest open disruptions, then the
+  fewest in all, then desk order. Desks own no aircraft. Older records keep the old
+  reading.
+
+### FL-171: Cancelling could not be chosen
+
+- Date: 2026-10-09
+- Where: plans, console
+- Found by: the project owner
+- Severity: Medium
+- What went wrong: The cancellation row was shown but could not be selected or submitted.
+- Cause: A plan held one crew id per seat; cancelling was shown for information only.
+- Fix: A plan may cancel the trip or operate one short, after a warning (made safe in
+  FL-184 to FL-186).
+
+### FL-184: Two seats flown short on one trip went below the cabin minimum
+
+- Date: 2026-10-09
+- Where: plans
+- Found by: independent review
+- Severity: High
+- What went wrong: A plan choosing "operate one short" for both of two sick cabin crew on P-2202 (162
+  seats, minimum four) was approved and left the trip with three.
+- Cause: Each seat was judged alone against the published roster, which still counted the
+  other missing crew member, and approval re-checked nobody for a seat left empty.
+- Fix: "One short" counts every cabin crew member reported unavailable on the trip's days. A
+  plan is refused if the trip would fall below one per 50 seats, counting the whole plan,
+  and approval checks again, so a later sick report makes the plan stale.
+
+### FL-185: Cancelling a captain's seat left the first officer alone on the trip
+
+- Date: 2026-10-09
+- Where: plans
+- Found by: independent review
+- Severity: High
+- What went wrong: Approving "cancel" for P-2291's captain removed only the captain, so the trip was rostered
+  with one pilot; a plan cancelling two seats of one trip counted its cancellation twice.
+- Cause: Cancelling was applied like an empty seat, not as the trip being cancelled.
+- Fix: Cancelling a seat cancels the whole trip: every seat of that trip in the plan must be
+  cancelled, the cost is counted once, and approval releases the trip's whole crew. A second
+  review found the cancelled flights still offered as positioning flights (KS589 for
+  P-2203's captain) and the trip still asking for cover: the operation now reads approved
+  cancellations when it loads, so those flights carry nobody, hold no gate, are marked
+  cancelled in lookups, and the trip has nothing to re-crew.
+
+### FL-186: A seat with no legal crew could not be cancelled
+
+- Date: 2026-10-09
+- Where: plans, console
+- Found by: independent review
+- Severity: Medium
+- What went wrong: Cancel and "one short" could be chosen only where some crew member was legal, the one
+  case they are not needed.
+- Cause: A seat with no legal cover was always listed as uncovered, before any choice was read,
+  and the console offered choices only on coverable seats.
+- Fix: A seat with no legal crew may be chosen to be cancelled or flown short, on the server
+  and on the record page, and counts as decided once it is.
 
 #### Ingestion, analysis, search and configuration
 
@@ -1500,6 +1644,72 @@ Entries in section 4 are about our own code, so they use a shorter form:
   scoring would have covered only the first page; the index command printed raw tracebacks.
 - Fix: Hyphenated ids split into parts, an index-size guard, one-line errors.
 
+### FL-172: Moving the demo week to October moved real dates too
+
+- Date: 2026-10-09
+- Where: seed data, docs
+- Found by: review of the shift
+- Severity: Medium
+- What went wrong: The first pass shifted "3 May", bare "the 14th" in prose, a docstring's flight list and
+  certificate start dates that lie before the demo week. Later, a review found an eval
+  note listing KS589 on "14/16/18/18 Oct", and the flight rename had turned the spoken
+  example "D X 412" into KS412 in the docs.
+- Cause: The shift matched every day-and-month and every ordinal.
+- Fix: Only ISO dates from 1 August 2026 and written dates in August or September move;
+  certificates were rebuilt from the original with that rule, and the ordinals were
+  checked by hand. The eval note now reads 12/14/16/18 Oct and the example DX412.
+
+### FL-173: Extra cabin crew were added to trips already flown
+
+- Date: 2026-10-09
+- Where: seed data
+- Found by: seed validation
+- Severity: Low
+- What went wrong: Two of the fifth cabin crew added for "operate one short" were on leave or resting on
+  trips that had already flown.
+- Cause: They were picked by base and rank only.
+- Fix: Removed from those two trips; the other six are legal on theirs.
+
+### FL-174: Gate closures had no emergency gates and no record of cause
+
+- Date: 2026-10-09
+- Where: gate analysis
+- Found by: the project owner
+- Severity: Medium
+- What went wrong: With every gate taken, a departure went straight to a remote stand, the other free
+  gates were not shown, and a closure from outside the airport (weather) was handled
+  like a jet-bridge fault.
+- Cause: Only ordinary gates were modelled, and a closure carried no cause.
+- Fix: Each station keeps emergency gates, used after the ordinary ones and before a remote
+  stand. Each move lists the other free gates, and an outside cause readies the
+  emergency gates and tells the operations teams.
+
+### FL-187: Falling ill after the trip's last leg still asked for a callout
+
+- Date: 2026-10-09
+- Where: disruption analysis
+- Found by: independent review
+- Severity: Medium
+- What went wrong: C-1569, reported ill 30 minutes after P-2202's last leg left, got a recommended
+  callout of ₹10,910 for a seat with no flight left.
+- Cause: A seat stayed in the analysis even when every one of its legs had flown.
+- Fix: Such a seat is dropped with a note; with none left, there is nothing to cover. The
+  cabin minimum also counts that person as present on the trip they finished, so a second
+  absence on it can still be flown one short.
+
+### FL-189: Re-seeding a changed week would have kept the old week beside it
+
+- Date: 2026-10-09
+- Where: seed loader
+- Found by: check before redeploying the October week
+- Severity: High
+- What went wrong: Loading the October week into the dev table would have left every
+  September flight, gate slot, reserve and old disruption in place, and the engine reads
+  the whole table, so both weeks would have been planned against together.
+- Cause: The loader only writes items; nothing removed records no longer in the seed.
+- Fix: `--replace` empties the table first, on the disposable dev and test stages only;
+  any other stage refuses it.
+
 #### MCP server, memory and notifications
 
 ### FL-139: Whoever filed a report could read the desk's whole view of it
@@ -1579,6 +1789,41 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - What went wrong: Removing an unconfirmed address failed without a reason, and lapsed
   unconfirmed addresses stayed listed and counted toward the limit.
 - Fix: The tools explain both; removal works once confirmed or after the address lapses.
+
+### FL-175: A crew member's sick report landed nowhere
+
+- Date: 2026-10-09
+- Where: MCP server
+- Found by: live run (the project owner)
+- Severity: High
+- What went wrong: A crew member reported sick from their page; the reporter never saw it, and neither
+  did the crew member.
+- Cause: A refused report was stored without a link to whoever filed it, and "My reports"
+  listed only disruptions.
+- Fix: Every report is recorded under its filer when sent. "My reports" shows each one as
+  waiting, refused with the reason, or its disruption's status, and a reporter also sees
+  crew members' own reports.
+
+### FL-176: The same sick days could be reported twice
+
+- Date: 2026-10-09
+- Where: MCP server
+- Found by: the project owner
+- Severity: Medium
+- What went wrong: A crew member could report the same days again, opening a second disruption.
+- Cause: Nothing checked for an open absence covering those days.
+- Fix: An overlapping absence is refused with DUPLICATE, and the crew page shows the days
+  already reported.
+
+### FL-188: The same days could be reported twice while the first was still queued
+
+- Date: 2026-10-09
+- Where: MCP server
+- Found by: independent review
+- Severity: Low
+- What went wrong: Two reports of the same sick days sent before the worker stored the first both passed.
+- Cause: The check read only stored disruptions.
+- Fix: It also reads reports filed but not yet stored or refused.
 
 #### Rule settings
 
@@ -2099,6 +2344,76 @@ Entries in section 4 are about our own code, so they use a shorter form:
   highlighted (and marked while it is spoken); Alexa+ has its own page, two columns wide,
   opened from a round button in the corner of every page.
 
+### FL-177: The app opened on the last user's console
+
+- Date: 2026-10-09
+- Where: web sign-in
+- Found by: the project owner
+- Severity: Medium
+- What went wrong: Opening the app went straight to the controller console of whoever signed in last,
+  days earlier.
+- Cause: The session cookie outlived the browser, and "/" redirected to the role's home.
+- Fix: "/" opens sign-in, which offers to continue as the signed-in user or sign in as
+  someone else; the cookie ends with the browser. Different users at once need separate
+  browser profiles or a private window, since tabs share cookies.
+
+### FL-178: The voice module kept listening and showed nothing
+
+- Date: 2026-10-09
+- Where: web Alexa+ module
+- Found by: live run (the project owner)
+- Severity: Medium
+- What went wrong: After a question was spoken the listening bars kept moving, nothing appeared, and
+  asking again had no effect.
+- Cause: A second tap of the microphone was ignored while listening, so a speech service that
+  never returned a result left it listening for good.
+- Fix: Tapping again stops and sends what was heard, ten seconds of silence ends listening,
+  partial transcripts are kept and errors are shown.
+
+### FL-179: "2 waiting for you" for one disruption
+
+- Date: 2026-10-09
+- Where: web console
+- Found by: the project owner
+- Severity: Low
+- What went wrong: After an approver sent one plan back, the controller's console said "2 waiting".
+- Cause: The queue lists a disruption both as ready and as sent back, and the count was the
+  number of rows.
+- Fix: Disruptions are counted once.
+
+### FL-180: A committed disruption showed today's options
+
+- Date: 2026-10-09
+- Where: web console
+- Found by: the project owner
+- Severity: Medium
+- What went wrong: Opening a decided disruption showed options worked out now, not those the controller
+  chose from, and not the choice itself.
+- Cause: The page always rendered the live workspace.
+- Fix: A committed disruption shows the options as they stood, the choice made, and who
+  approved it and when.
+
+### FL-181: A report's end date could be before its start
+
+- Date: 2026-10-09
+- Where: web report and crew pages
+- Found by: the project owner
+- Severity: Medium
+- What went wrong: "To" earlier than "from" was accepted on the report and crew pages.
+- Cause: The pages relied on the server's checks, which only some forms reached.
+- Fix: Every date range is checked before it is sent ("Until must be on or after From"),
+  and the crew page's date picker offers no day before "From".
+
+### FL-182: KPI boxes were clipped at the panel edges
+
+- Date: 2026-10-09
+- Where: web console
+- Found by: the project owner
+- Severity: Low
+- What went wrong: "Open disruptions" lost its left edge and "Resolved" its right.
+- Cause: Their outline was drawn outside the box, and the workspace clips its overflow.
+- Fix: A border inside the box.
+
 #### Evaluation and tests
 
 ### FL-019: Two evaluation checks could never fail
@@ -2168,6 +2483,18 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - What went wrong: The "found by paraphrase" test shared the words rest, release, next and
   report with the rule, so it tested keywords, not meaning.
 - Fix: A query sharing no word with any document.
+
+### FL-183: Tests pinned to a fixed "now" broke when the data moved
+
+- Date: 2026-10-09
+- Where: tests
+- Found by: full test run after the October move
+- Severity: Medium
+- What went wrong: Plan and analysis-runner tests failed on audit order (["OPTIONS_READY",
+  "REPORTED"]), and a report-worker test was refused as "from the future".
+- Cause: Their fixed times now fell after the real clock, which the store compares against.
+- Fix: Times that must order against the real clock come from it (an hour ago); the gold
+  costs were recomputed by an independent formula, not from the engine.
 
 #### Documentation
 

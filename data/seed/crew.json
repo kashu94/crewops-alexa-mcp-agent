@@ -8,8 +8,11 @@
    "A320"
   ],
   "seniority": 16,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 35,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 23,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-1021",
@@ -21,8 +24,10 @@
    "ATR72"
   ],
   "seniority": 16,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 65,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 22
  },
  {
   "crew_id": "C-1042",
@@ -33,8 +38,11 @@
    "A320"
   ],
   "seniority": 22,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 60,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 28,
+  "right_seat_qualified": false
  },
  {
   "crew_id": "C-1313",
@@ -45,8 +53,11 @@
    "ATR72"
   ],
   "seniority": 15,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 110,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 21,
+  "command_qualified": false
  },
  {
   "crew_id": "C-1317",
@@ -57,8 +68,11 @@
    "ATR72"
   ],
   "seniority": 8,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 95,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 14,
+  "command_qualified": false
  },
  {
   "crew_id": "C-1326",
@@ -69,8 +83,10 @@
    "ATR72"
   ],
   "seniority": 9,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 60,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 14
  },
  {
   "crew_id": "C-1329",
@@ -82,8 +98,10 @@
    "ATR72"
   ],
   "seniority": 8,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 35,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 11
  },
  {
   "crew_id": "C-1385",
@@ -94,8 +112,10 @@
    "A320"
   ],
   "seniority": 22,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 105,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 29
  },
  {
   "crew_id": "C-1414",
@@ -106,8 +126,10 @@
    "A320"
   ],
   "seniority": 17,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 50,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 21
  },
  {
   "crew_id": "C-1443",
@@ -118,8 +140,11 @@
    "A320"
   ],
   "seniority": 14,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 45,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 22,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-1510",
@@ -130,8 +155,11 @@
    "A320"
   ],
   "seniority": 14,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 70,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 20,
+  "command_qualified": false
  },
  {
   "crew_id": "C-1526",
@@ -142,8 +170,11 @@
    "A320"
   ],
   "seniority": 16,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 110,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 20,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-1542",
@@ -154,8 +185,10 @@
    "A320"
   ],
   "seniority": 12,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 90,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 20
  },
  {
   "crew_id": "C-1564",
@@ -166,8 +199,11 @@
    "A320"
   ],
   "seniority": 2,
-  "reachability_minutes": 90,
-  "status": "leave"
+  "reachability_minutes": 65,
+  "status": "leave",
+  "airline": "DX",
+  "experience_years": 8,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-1568",
@@ -178,8 +214,10 @@
    "ATR72"
   ],
   "seniority": 22,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 45,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 27
  },
  {
   "crew_id": "C-1569",
@@ -190,8 +228,10 @@
    "A320"
   ],
   "seniority": 11,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 110,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 14
  },
  {
   "crew_id": "C-1594",
@@ -202,8 +242,10 @@
    "ATR72"
   ],
   "seniority": 21,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 85,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 25
  },
  {
   "crew_id": "C-1600",
@@ -214,8 +256,11 @@
    "ATR72"
   ],
   "seniority": 18,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 90,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 22,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-1606",
@@ -227,8 +272,10 @@
    "ATR72"
   ],
   "seniority": 20,
-  "reachability_minutes": 75,
-  "status": "leave"
+  "reachability_minutes": 30,
+  "status": "leave",
+  "airline": "KS",
+  "experience_years": 25
  },
  {
   "crew_id": "C-1622",
@@ -239,8 +286,10 @@
    "A320"
   ],
   "seniority": 15,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 50,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 17
  },
  {
   "crew_id": "C-1671",
@@ -252,7 +301,10 @@
   ],
   "seniority": 20,
   "reachability_minutes": 75,
-  "status": "active"
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 24,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-1694",
@@ -263,8 +315,11 @@
    "A320"
   ],
   "seniority": 2,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 55,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 9,
+  "command_qualified": false
  },
  {
   "crew_id": "C-1748",
@@ -276,8 +331,10 @@
    "ATR72"
   ],
   "seniority": 20,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 70,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 28
  },
  {
   "crew_id": "C-1823",
@@ -289,8 +346,10 @@
    "ATR72"
   ],
   "seniority": 3,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 60,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 6
  },
  {
   "crew_id": "C-1873",
@@ -301,8 +360,10 @@
    "A320"
   ],
   "seniority": 16,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 100,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 19
  },
  {
   "crew_id": "C-1895",
@@ -313,8 +374,11 @@
    "A320"
   ],
   "seniority": 8,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 70,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 11,
+  "command_qualified": false
  },
  {
   "crew_id": "C-1938",
@@ -325,8 +389,11 @@
    "A320"
   ],
   "seniority": 11,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 105,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 16,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-1970",
@@ -338,8 +405,10 @@
    "ATR72"
   ],
   "seniority": 11,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 45,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 18
  },
  {
   "crew_id": "C-2083",
@@ -350,8 +419,10 @@
    "A320"
   ],
   "seniority": 17,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 55,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 22
  },
  {
   "crew_id": "C-2085",
@@ -362,8 +433,11 @@
    "ATR72"
   ],
   "seniority": 9,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 85,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 11,
+  "command_qualified": false
  },
  {
   "crew_id": "C-2087",
@@ -374,8 +448,11 @@
    "A320"
   ],
   "seniority": 5,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 35,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 12,
+  "right_seat_qualified": false
  },
  {
   "crew_id": "C-2091",
@@ -386,8 +463,11 @@
    "ATR72"
   ],
   "seniority": 4,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 45,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 12,
+  "right_seat_qualified": false
  },
  {
   "crew_id": "C-2100",
@@ -398,8 +478,10 @@
    "ATR72"
   ],
   "seniority": 5,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 70,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 10
  },
  {
   "crew_id": "C-2111",
@@ -411,8 +493,10 @@
    "ATR72"
   ],
   "seniority": 8,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 15,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 10
  },
  {
   "crew_id": "C-2143",
@@ -423,8 +507,11 @@
    "A320"
   ],
   "seniority": 19,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 55,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 26,
+  "right_seat_qualified": false
  },
  {
   "crew_id": "C-2148",
@@ -435,8 +522,10 @@
    "A320"
   ],
   "seniority": 10,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 55,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 13
  },
  {
   "crew_id": "C-2165",
@@ -448,8 +537,10 @@
    "ATR72"
   ],
   "seniority": 21,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 40,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 28
  },
  {
   "crew_id": "C-2210",
@@ -460,8 +551,11 @@
    "A320"
   ],
   "seniority": 2,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 45,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 7,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-2221",
@@ -472,8 +566,11 @@
    "ATR72"
   ],
   "seniority": 19,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 70,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 27,
+  "right_seat_qualified": false
  },
  {
   "crew_id": "C-2248",
@@ -485,8 +582,10 @@
    "ATR72"
   ],
   "seniority": 20,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 35,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 27
  },
  {
   "crew_id": "C-2252",
@@ -497,8 +596,10 @@
    "A320"
   ],
   "seniority": 19,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 60,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 21
  },
  {
   "crew_id": "C-2286",
@@ -510,8 +611,10 @@
    "ATR72"
   ],
   "seniority": 11,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 95,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 14
  },
  {
   "crew_id": "C-2295",
@@ -522,8 +625,11 @@
    "A320"
   ],
   "seniority": 10,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 25,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 14,
+  "command_qualified": false
  },
  {
   "crew_id": "C-2303",
@@ -534,8 +640,10 @@
    "A320"
   ],
   "seniority": 10,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 85,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 13
  },
  {
   "crew_id": "C-2341",
@@ -546,8 +654,11 @@
    "A320"
   ],
   "seniority": 20,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 40,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 28,
+  "command_qualified": true
  },
  {
   "crew_id": "C-2352",
@@ -558,8 +669,10 @@
    "A320"
   ],
   "seniority": 2,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 55,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 9
  },
  {
   "crew_id": "C-2435",
@@ -571,8 +684,10 @@
    "ATR72"
   ],
   "seniority": 22,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 35,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 28
  },
  {
   "crew_id": "C-2442",
@@ -583,8 +698,11 @@
    "A320"
   ],
   "seniority": 9,
-  "reachability_minutes": 90,
-  "status": "leave"
+  "reachability_minutes": 115,
+  "status": "leave",
+  "airline": "DX",
+  "experience_years": 15,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-2561",
@@ -596,8 +714,10 @@
    "ATR72"
   ],
   "seniority": 10,
-  "reachability_minutes": 90,
-  "status": "leave"
+  "reachability_minutes": 85,
+  "status": "leave",
+  "airline": "KS",
+  "experience_years": 18
  },
  {
   "crew_id": "C-2569",
@@ -609,8 +729,10 @@
    "ATR72"
   ],
   "seniority": 10,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 25,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 15
  },
  {
   "crew_id": "C-2751",
@@ -621,8 +743,10 @@
    "A320"
   ],
   "seniority": 7,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 55,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 9
  },
  {
   "crew_id": "C-2791",
@@ -633,8 +757,11 @@
    "A320"
   ],
   "seniority": 21,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 40,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 23,
+  "command_qualified": true
  },
  {
   "crew_id": "C-2796",
@@ -645,8 +772,10 @@
    "A320"
   ],
   "seniority": 17,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 65,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 25
  },
  {
   "crew_id": "C-2840",
@@ -657,8 +786,10 @@
    "A320"
   ],
   "seniority": 2,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 45,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 4
  },
  {
   "crew_id": "C-2875",
@@ -669,8 +800,11 @@
    "A320"
   ],
   "seniority": 12,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 120,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 16,
+  "command_qualified": false
  },
  {
   "crew_id": "C-2876",
@@ -681,8 +815,10 @@
    "A320"
   ],
   "seniority": 14,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 60,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 21
  },
  {
   "crew_id": "C-2888",
@@ -693,8 +829,11 @@
    "A320"
   ],
   "seniority": 19,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 120,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 23,
+  "command_qualified": true
  },
  {
   "crew_id": "C-2907",
@@ -705,8 +844,10 @@
    "A320"
   ],
   "seniority": 10,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 80,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 14
  },
  {
   "crew_id": "C-2993",
@@ -717,8 +858,11 @@
    "A320"
   ],
   "seniority": 13,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 110,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 19,
+  "command_qualified": false
  },
  {
   "crew_id": "C-3005",
@@ -729,8 +873,10 @@
    "A320"
   ],
   "seniority": 4,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 50,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 7
  },
  {
   "crew_id": "C-3046",
@@ -741,8 +887,10 @@
    "A320"
   ],
   "seniority": 19,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 50,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 24
  },
  {
   "crew_id": "C-3057",
@@ -753,8 +901,11 @@
    "ATR72"
   ],
   "seniority": 22,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 75,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 29,
+  "command_qualified": true
  },
  {
   "crew_id": "C-3116",
@@ -765,8 +916,11 @@
    "A320"
   ],
   "seniority": 19,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 75,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 23,
+  "command_qualified": true
  },
  {
   "crew_id": "C-3136",
@@ -777,8 +931,11 @@
    "ATR72"
   ],
   "seniority": 9,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 85,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 17,
+  "command_qualified": false
  },
  {
   "crew_id": "C-3145",
@@ -789,8 +946,10 @@
    "ATR72"
   ],
   "seniority": 5,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 110,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 12
  },
  {
   "crew_id": "C-3167",
@@ -802,8 +961,10 @@
    "ATR72"
   ],
   "seniority": 19,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 25,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 25
  },
  {
   "crew_id": "C-3171",
@@ -814,8 +975,10 @@
    "A320"
   ],
   "seniority": 15,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 105,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 19
  },
  {
   "crew_id": "C-3187",
@@ -827,7 +990,10 @@
   ],
   "seniority": 22,
   "reachability_minutes": 60,
-  "status": "active"
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 24,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-3211",
@@ -838,8 +1004,10 @@
    "A320"
   ],
   "seniority": 12,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 35,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 16
  },
  {
   "crew_id": "C-3231",
@@ -850,8 +1018,11 @@
    "ATR72"
   ],
   "seniority": 18,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 110,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 20,
+  "right_seat_qualified": false
  },
  {
   "crew_id": "C-3249",
@@ -862,8 +1033,10 @@
    "A320"
   ],
   "seniority": 10,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 65,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 13
  },
  {
   "crew_id": "C-3266",
@@ -874,8 +1047,10 @@
    "ATR72"
   ],
   "seniority": 12,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 40,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 19
  },
  {
   "crew_id": "C-3271",
@@ -886,8 +1061,10 @@
    "A320"
   ],
   "seniority": 22,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 105,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 26
  },
  {
   "crew_id": "C-3305",
@@ -898,8 +1075,11 @@
    "A320"
   ],
   "seniority": 10,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 30,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 13,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-3310",
@@ -910,8 +1090,11 @@
    "A320"
   ],
   "seniority": 9,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 30,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 14,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-3311",
@@ -922,8 +1105,11 @@
    "A320"
   ],
   "seniority": 9,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 30,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 17,
+  "command_qualified": false
  },
  {
   "crew_id": "C-3312",
@@ -934,8 +1120,11 @@
    "A320"
   ],
   "seniority": 6,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 30,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 14,
+  "command_qualified": false
  },
  {
   "crew_id": "C-3315",
@@ -946,8 +1135,11 @@
    "ATR72"
   ],
   "seniority": 5,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 20,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 13,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-3316",
@@ -958,8 +1150,11 @@
    "ATR72"
   ],
   "seniority": 19,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 20,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 25,
+  "command_qualified": true
  },
  {
   "crew_id": "C-3334",
@@ -970,8 +1165,10 @@
    "ATR72"
   ],
   "seniority": 11,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 60,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 16
  },
  {
   "crew_id": "C-3430",
@@ -982,8 +1179,10 @@
    "A320"
   ],
   "seniority": 20,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 110,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 26
  },
  {
   "crew_id": "C-3460",
@@ -994,8 +1193,11 @@
    "A320"
   ],
   "seniority": 15,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 40,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 19,
+  "command_qualified": false
  },
  {
   "crew_id": "C-3545",
@@ -1007,8 +1209,10 @@
    "ATR72"
   ],
   "seniority": 5,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 100,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 13
  },
  {
   "crew_id": "C-3555",
@@ -1019,8 +1223,10 @@
    "A320"
   ],
   "seniority": 14,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 35,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 19
  },
  {
   "crew_id": "C-3569",
@@ -1031,8 +1237,10 @@
    "A320"
   ],
   "seniority": 20,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 80,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 27
  },
  {
   "crew_id": "C-3619",
@@ -1043,8 +1251,10 @@
    "A320"
   ],
   "seniority": 6,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 55,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 9
  },
  {
   "crew_id": "C-3677",
@@ -1056,8 +1266,10 @@
    "ATR72"
   ],
   "seniority": 17,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 15,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 24
  },
  {
   "crew_id": "C-3721",
@@ -1068,8 +1280,11 @@
    "ATR72"
   ],
   "seniority": 5,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 40,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 8,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-3757",
@@ -1080,8 +1295,10 @@
    "A320"
   ],
   "seniority": 14,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 75,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 17
  },
  {
   "crew_id": "C-3791",
@@ -1093,8 +1310,10 @@
    "ATR72"
   ],
   "seniority": 5,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 55,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 10
  },
  {
   "crew_id": "C-3816",
@@ -1105,8 +1324,11 @@
    "A320"
   ],
   "seniority": 16,
-  "reachability_minutes": 75,
-  "status": "training"
+  "reachability_minutes": 35,
+  "status": "training",
+  "airline": "KS",
+  "experience_years": 19,
+  "command_qualified": false
  },
  {
   "crew_id": "C-3864",
@@ -1118,7 +1340,9 @@
   ],
   "seniority": 12,
   "reachability_minutes": 75,
-  "status": "active"
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 15
  },
  {
   "crew_id": "C-3897",
@@ -1129,8 +1353,10 @@
    "ATR72"
   ],
   "seniority": 2,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 100,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 10
  },
  {
   "crew_id": "C-3940",
@@ -1141,8 +1367,11 @@
    "A320"
   ],
   "seniority": 10,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 95,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 17,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-3973",
@@ -1153,8 +1382,10 @@
    "A320"
   ],
   "seniority": 3,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 115,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 5
  },
  {
   "crew_id": "C-3983",
@@ -1165,8 +1396,11 @@
    "A320"
   ],
   "seniority": 12,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 65,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 15,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-3988",
@@ -1178,7 +1412,9 @@
   ],
   "seniority": 13,
   "reachability_minutes": 60,
-  "status": "active"
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 16
  },
  {
   "crew_id": "C-4104",
@@ -1189,8 +1425,11 @@
    "A320"
   ],
   "seniority": 7,
-  "reachability_minutes": 90,
-  "status": "training"
+  "reachability_minutes": 70,
+  "status": "training",
+  "airline": "DX",
+  "experience_years": 14,
+  "command_qualified": false
  },
  {
   "crew_id": "C-4242",
@@ -1201,8 +1440,10 @@
    "ATR72"
   ],
   "seniority": 16,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 65,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 21
  },
  {
   "crew_id": "C-4273",
@@ -1213,8 +1454,10 @@
    "A320"
   ],
   "seniority": 22,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 115,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 26
  },
  {
   "crew_id": "C-4280",
@@ -1226,8 +1469,10 @@
    "ATR72"
   ],
   "seniority": 12,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 55,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 17
  },
  {
   "crew_id": "C-4296",
@@ -1238,8 +1483,10 @@
    "A320"
   ],
   "seniority": 7,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 105,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 14
  },
  {
   "crew_id": "C-4326",
@@ -1250,8 +1497,10 @@
    "A320"
   ],
   "seniority": 8,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 45,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 13
  },
  {
   "crew_id": "C-4395",
@@ -1262,8 +1511,10 @@
    "A320"
   ],
   "seniority": 14,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 55,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 16
  },
  {
   "crew_id": "C-4458",
@@ -1274,8 +1525,10 @@
    "A320"
   ],
   "seniority": 14,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 40,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 16
  },
  {
   "crew_id": "C-4462",
@@ -1286,8 +1539,10 @@
    "A320"
   ],
   "seniority": 6,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 90,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 9
  },
  {
   "crew_id": "C-4465",
@@ -1298,8 +1553,11 @@
    "A320"
   ],
   "seniority": 6,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 70,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 9,
+  "command_qualified": false
  },
  {
   "crew_id": "C-4520",
@@ -1310,8 +1568,11 @@
    "ATR72"
   ],
   "seniority": 11,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 85,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 14,
+  "command_qualified": false
  },
  {
   "crew_id": "C-4531",
@@ -1322,8 +1583,10 @@
    "A320"
   ],
   "seniority": 15,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 70,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 18
  },
  {
   "crew_id": "C-4574",
@@ -1334,8 +1597,10 @@
    "ATR72"
   ],
   "seniority": 5,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 30,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 10
  },
  {
   "crew_id": "C-4588",
@@ -1346,8 +1611,10 @@
    "A320"
   ],
   "seniority": 5,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 120,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 11
  },
  {
   "crew_id": "C-4621",
@@ -1359,8 +1626,10 @@
    "ATR72"
   ],
   "seniority": 5,
-  "reachability_minutes": 45,
-  "status": "leave"
+  "reachability_minutes": 70,
+  "status": "leave",
+  "airline": "NG",
+  "experience_years": 8
  },
  {
   "crew_id": "C-4622",
@@ -1371,8 +1640,10 @@
    "A320"
   ],
   "seniority": 17,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 70,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 20
  },
  {
   "crew_id": "C-4679",
@@ -1383,8 +1654,10 @@
    "A320"
   ],
   "seniority": 2,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 85,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 5
  },
  {
   "crew_id": "C-4763",
@@ -1395,8 +1668,11 @@
    "A320"
   ],
   "seniority": 14,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 40,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 22,
+  "command_qualified": false
  },
  {
   "crew_id": "C-4806",
@@ -1407,8 +1683,11 @@
    "A320"
   ],
   "seniority": 19,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 65,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 25,
+  "command_qualified": true
  },
  {
   "crew_id": "C-4809",
@@ -1420,8 +1699,10 @@
    "ATR72"
   ],
   "seniority": 7,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 20,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 10
  },
  {
   "crew_id": "C-4839",
@@ -1433,8 +1714,10 @@
    "ATR72"
   ],
   "seniority": 15,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 110,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 17
  },
  {
   "crew_id": "C-4874",
@@ -1445,8 +1728,10 @@
    "A320"
   ],
   "seniority": 5,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 80,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 9
  },
  {
   "crew_id": "C-4999",
@@ -1457,8 +1742,10 @@
    "A320"
   ],
   "seniority": 12,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 85,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 15
  },
  {
   "crew_id": "C-5015",
@@ -1469,8 +1756,11 @@
    "A320"
   ],
   "seniority": 6,
-  "reachability_minutes": 90,
-  "status": "leave"
+  "reachability_minutes": 35,
+  "status": "leave",
+  "airline": "KS",
+  "experience_years": 13,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-5020",
@@ -1481,8 +1771,11 @@
    "A320"
   ],
   "seniority": 4,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 40,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 9,
+  "command_qualified": false
  },
  {
   "crew_id": "C-5089",
@@ -1493,8 +1786,10 @@
    "A320"
   ],
   "seniority": 6,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 80,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 10
  },
  {
   "crew_id": "C-5119",
@@ -1505,8 +1800,10 @@
    "A320"
   ],
   "seniority": 14,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 95,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 18
  },
  {
   "crew_id": "C-5158",
@@ -1517,8 +1814,10 @@
    "A320"
   ],
   "seniority": 22,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 100,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 29
  },
  {
   "crew_id": "C-5168",
@@ -1530,8 +1829,10 @@
    "ATR72"
   ],
   "seniority": 9,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 45,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 11
  },
  {
   "crew_id": "C-5211",
@@ -1542,8 +1843,10 @@
    "A320"
   ],
   "seniority": 17,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 110,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 25
  },
  {
   "crew_id": "C-5363",
@@ -1554,8 +1857,11 @@
    "A320"
   ],
   "seniority": 17,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 105,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 20,
+  "command_qualified": true
  },
  {
   "crew_id": "C-5375",
@@ -1566,8 +1872,11 @@
    "A320"
   ],
   "seniority": 16,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 60,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 24,
+  "command_qualified": false
  },
  {
   "crew_id": "C-5392",
@@ -1578,8 +1887,11 @@
    "ATR72"
   ],
   "seniority": 7,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 35,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 15,
+  "right_seat_qualified": false
  },
  {
   "crew_id": "C-5417",
@@ -1590,8 +1902,10 @@
    "A320"
   ],
   "seniority": 14,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 50,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 19
  },
  {
   "crew_id": "C-5418",
@@ -1604,7 +1918,9 @@
   ],
   "seniority": 9,
   "reachability_minutes": 45,
-  "status": "active"
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 12
  },
  {
   "crew_id": "C-5444",
@@ -1616,8 +1932,10 @@
    "ATR72"
   ],
   "seniority": 3,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 70,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 10
  },
  {
   "crew_id": "C-5522",
@@ -1628,8 +1946,10 @@
    "A320"
   ],
   "seniority": 13,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 115,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 19
  },
  {
   "crew_id": "C-5533",
@@ -1641,8 +1961,10 @@
    "ATR72"
   ],
   "seniority": 17,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 50,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 25
  },
  {
   "crew_id": "C-5566",
@@ -1653,8 +1975,11 @@
    "A320"
   ],
   "seniority": 16,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 30,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 21,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-5597",
@@ -1665,8 +1990,10 @@
    "A320"
   ],
   "seniority": 15,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 50,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 18
  },
  {
   "crew_id": "C-5647",
@@ -1677,8 +2004,11 @@
    "A320"
   ],
   "seniority": 17,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 70,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 21,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-5666",
@@ -1689,8 +2019,10 @@
    "A320"
   ],
   "seniority": 21,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 90,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 28
  },
  {
   "crew_id": "C-5716",
@@ -1701,8 +2033,10 @@
    "A320"
   ],
   "seniority": 15,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 75,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 22
  },
  {
   "crew_id": "C-5723",
@@ -1713,8 +2047,10 @@
    "ATR72"
   ],
   "seniority": 2,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 25,
+  "status": "active",
+  "airline": "NG",
+  "experience_years": 4
  },
  {
   "crew_id": "C-5751",
@@ -1725,8 +2061,10 @@
    "A320"
   ],
   "seniority": 16,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 75,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 19
  },
  {
   "crew_id": "C-5788",
@@ -1737,8 +2075,11 @@
    "A320"
   ],
   "seniority": 14,
-  "reachability_minutes": 75,
-  "status": "active"
+  "reachability_minutes": 85,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 17,
+  "command_qualified": false
  },
  {
   "crew_id": "C-5795",
@@ -1750,8 +2091,10 @@
    "ATR72"
   ],
   "seniority": 12,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 85,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 14
  },
  {
   "crew_id": "C-5820",
@@ -1762,8 +2105,11 @@
    "A320"
   ],
   "seniority": 4,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 100,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 7,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-5837",
@@ -1774,8 +2120,11 @@
    "A320"
   ],
   "seniority": 2,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 25,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 10,
+  "right_seat_qualified": true
  },
  {
   "crew_id": "C-5848",
@@ -1786,8 +2135,10 @@
    "A320"
   ],
   "seniority": 4,
-  "reachability_minutes": 90,
-  "status": "active"
+  "reachability_minutes": 70,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 6
  },
  {
   "crew_id": "C-5881",
@@ -1798,8 +2149,10 @@
    "A320"
   ],
   "seniority": 10,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 110,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 18
  },
  {
   "crew_id": "C-5906",
@@ -1810,8 +2163,10 @@
    "A320"
   ],
   "seniority": 2,
-  "reachability_minutes": 45,
-  "status": "active"
+  "reachability_minutes": 30,
+  "status": "active",
+  "airline": "DX",
+  "experience_years": 6
  },
  {
   "crew_id": "C-5994",
@@ -1823,7 +2178,9 @@
    "ATR72"
   ],
   "seniority": 22,
-  "reachability_minutes": 60,
-  "status": "active"
+  "reachability_minutes": 95,
+  "status": "active",
+  "airline": "KS",
+  "experience_years": 30
  }
 ]

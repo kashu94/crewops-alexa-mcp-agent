@@ -2,6 +2,7 @@
 
 import json
 import time
+from datetime import UTC, datetime
 
 import anyio
 import httpx
@@ -97,11 +98,22 @@ class Live:
         return self.pipeline.answer(question, caller, previous), {"calls": 0}
 
 
+def assign(table, disruption_id, desk):
+    """Record the desk a disruption was given (the runner picks the least-loaded one)."""
+    table.update_item(
+        Key={"pk": f"DISRUPTION#{disruption_id}", "sk": "META"},
+        UpdateExpression="SET #a.#d = :desk",
+        ExpressionAttributeNames={"#a": "analysis", "#d": "desk"},
+        ExpressionAttributeValues={":desk": desk},
+    )
+
+
 @pytest.fixture
 def api(ops_table):
     seed = load_seed()
     OpsStore(ops_table).put_seed(seed)
-    disruption(ops_table, "r-sick1042", "C-1042", "2026-09-15", "2026-09-16")
+    disruption(ops_table, "r-sick1042", "C-1042", "2026-10-13", "2026-10-14")
+    assign(ops_table, "r-sick1042", "desk-2")  # Rohit's: the next one analysed goes to desk-1
     sent = []
     built = []
 
@@ -115,7 +127,7 @@ def api(ops_table):
 
 
 def test_ask_answers_as_the_caller(api):
-    out = api.ask(ROHIT, "Who is on reserve at BLR on 15 Sep?")
+    out = api.ask(ROHIT, "Who is on reserve at BLR on 13 Oct?")
     assert out["verified"] and "D. Reddy (C-3310)" in out["answer"]
     mine = api.ask(CREW, "How many duty hours do I have?")
     assert "A. Nair (C-1042)" in mine["answer"]
@@ -172,19 +184,19 @@ def test_the_feed_lists_disruptions_for_staff(api):
 
 
 def test_a_disruption_shows_its_desk_its_trip_and_who_else_wants_its_crew(api):
-    # C-1938 is out on P-2209 (VT-DXB, desk-1) on 15 Sep, the same day as C-1042's P-2291
-    # (VT-DXC, desk-2): both rank C-1526 and C-5566.
-    disruption(api.table, "r-sick1938", "C-1938", "2026-09-15")
+    # C-1443 is out on P-2216 on 13 Oct, the same day as C-1042's P-2291: both Konkan
+    # Skyways trips, so both rank C-1526 and C-5566. It is analysed second: desk-1.
+    disruption(api.table, "r-sick1443", "C-1443", "2026-10-13")
     shown = api.show(ROHIT, "r-sick1042")
     assert shown["desks"] == [{"desk_id": "desk-2", "controller": "Rohit Malhotra"}]
     assert shown["yours"] is True
     context = shown["seats"][0]["context"]
     assert context["aircraft"] == "VT-DXC" and context["aircraft_type"] == "A320"
-    assert [f["flight_no"] for f in context["flights"]][:3] == ["DX412", "DX413", "DX588"]
+    assert [f["flight_no"] for f in context["flights"]][:3] == ["KS412", "KS413", "KS588"]
     assert {f["state"] for f in context["flights"]} == {"uncrewed"}
     assert {c["crew_id"] for c in context["crew"] if c["state"] == "out"} == {"C-1042"}
     rivals = shown["contention"]["C-1526"]
-    assert rivals[0]["disruption_id"] == "r-sick1938" and rivals[0]["crew_out"] == "C-1938"
+    assert rivals[0]["disruption_id"] == "r-sick1443" and rivals[0]["crew_out"] == "C-1443"
     assert rivals[0]["desks"] == [{"desk_id": "desk-1", "controller": "Ananya Iyer"}]
     live = shown["seats"][0]["live"]
     assert (
@@ -204,7 +216,7 @@ def test_a_disruption_shows_its_desk_its_trip_and_who_else_wants_its_crew(api):
 
 
 def test_whoever_filed_a_report_sees_only_how_it_stands(api):
-    disruption(api.table, "r-sick1938", "C-1938", "2026-09-15")
+    disruption(api.table, "r-sick1938", "C-1938", "2026-10-13")
     filer = api.show(Caller("u-1", frozenset({Role.REPORTER})), "r-sick1042")
     assert filer["outcome"] == "Crew control is arranging cover."
     assert set(filer) == {
@@ -229,33 +241,34 @@ def filed(table, report_id, type_, details, by="u-1", roles=("reporter",)):
 
     from crewops.analysis.runner import Operation, analyse_by_id
     from crewops.domain import Report
-    from crewops.store.reports import store_report
+    from crewops.store.reports import record_filed, store_report
 
     doc = report(type_, details, report_id=report_id, roles=roles)
     doc["reported_by"]["user_id"] = by
+    record_filed(table, Report.from_dict(doc))  # as the API does when it queues one
     store_report(table, Report.from_dict(doc), AT)
     assert analyse_by_id(table, report_id, Operation.load(table)).outcome == "stored"
 
 
 def test_a_delayed_seat_is_searched_on_the_day_of_the_delay(api):
-    # DX412 on 15 Sep is the second day of P-2291's crew: live options must be worked out
+    # KS412 on 13 Oct is the second day of P-2291's crew: live options must be worked out
     # for that day, as approval re-checks them.
     filed(
         api.table,
         "r-late412",
         "flight_delay",
-        {"flight_id": "DX412-2026-09-15", "delay_minutes": 180},
+        {"flight_id": "KS412-2026-10-13", "delay_minutes": 180},
     )
     seats = api.show(ROHIT, "r-late412")["seats"]
-    assert seats and all(s["delay_date"] == "2026-09-15" for s in seats)
+    assert seats and all(s["delay_date"] == "2026-10-13" for s in seats)
 
 
 ANANYA = Caller("ananya", frozenset({Role.CONTROLLER}), desk="desk-1")
 IMRAN = Caller("imran", frozenset({Role.REPORTER}))
 GATE_CLOSED = {
     "gate": "DEL-G1",
-    "from_utc": "2026-09-15T04:00:00Z",
-    "to_utc": "2026-09-15T06:00:00Z",
+    "from_utc": "2026-10-13T04:00:00Z",
+    "to_utc": "2026-10-13T06:00:00Z",
     "reason": "security sweep",
 }
 
@@ -265,7 +278,8 @@ def test_a_gate_closure_is_handled_internally_and_resolved_with_a_remark(api):
     shown = api.show(ANANYA, "r-gate-del1")  # DX402 flies VT-DXA, desk-1
     assert shown["yours"] is True and shown["seats"] == []
     assert shown["handling"]["kind"] == "internal"
-    assert [(m["flight_no"], m["to_gate"]) for m in shown["stands"]] == [("DX402", "remote stand")]
+    # DEL's only ordinary gate is closed: DX402 takes the station's emergency gate.
+    assert [(m["flight_no"], m["to_gate"]) for m in shown["stands"]] == [("DX402", "DEL-E1")]
     assert any(f["flight_no"] == "DX402" and f["booked"] == 134 for f in shown["flights"])
     assert {n["team"] for n in shown["notices"]} >= {"gate_control", "station_ops", "flight_info"}
     assert api.show(ROHIT, "r-gate-del1")["yours"] is False
@@ -299,12 +313,12 @@ def test_the_feed_carries_desks_and_how_each_is_handled(api):
 
 
 def test_a_lapsing_certificate_shows_on_the_crew_members_page(api):
-    lapse = {"crew_id": "C-5417", "cert_type": "recurrent_training", "valid_to": "2026-09-17"}
+    lapse = {"crew_id": "C-5417", "cert_type": "recurrent_training", "valid_to": "2026-10-15"}
     filed(api.table, "r-cert5417", "certification_lapse", lapse)
     holder = Caller("crew5417", frozenset({Role.CREW}), crew_id="C-5417")
     (notice,) = api.my_roster(holder)["notices"]
     assert notice["disruption_id"] == "r-cert5417"
-    assert "recurrent training expires on 2026-09-17" in notice["message"]
+    assert "recurrent training expires on 2026-10-15" in notice["message"]
     assert api.my_roster(CREW)["notices"] == []
 
 
@@ -312,20 +326,20 @@ def test_reporters_get_what_a_report_can_name(api):
     ref = api.reference(IMRAN)
     assert "BLR-G2" in ref["gates"] and "VT-DXA" in ref["aircraft"]
     assert any(c["crew_id"] == "C-1042" for c in ref["crew"])
-    assert any(f["flight_id"] == "DX412-2026-09-15" and f["gate"] for f in ref["flights"])
+    assert any(f["flight_id"] == "KS412-2026-10-13" and f["gate"] for f in ref["flights"])
     assert "recurrent_training" in ref["cert_types"]
     with pytest.raises(ApiError):
         api.reference(CREW)
 
 
 def test_rivals_carry_their_report_type(api):
-    disruption(api.table, "r-sick1938", "C-1938", "2026-09-15")
+    disruption(api.table, "r-sick1443", "C-1443", "2026-10-13")
     rivals = api.show(ROHIT, "r-sick1042")["contention"]["C-1526"]
     assert rivals[0]["report_type"] == "crew_unavailable"
 
 
 def test_contention_is_only_for_trips_near_in_time(api):
-    disruption(api.table, "r-sick5837", "C-5837", "2026-09-20")  # P-2207, 20 Sep
+    disruption(api.table, "r-sick5837", "C-5837", "2026-10-18")  # P-2207, 18 Oct
     assert "C-3983" not in api.show(ROHIT, "r-sick1042")["contention"]
 
 
@@ -333,12 +347,12 @@ def test_a_disruption_shows_its_ranked_options(api):
     seats = api.show(ROHIT, "r-sick1042")["seats"]
     assert seats and seats[0]["pairing_id"] == "P-2291" and seats[0]["crew_out"] == "C-1042"
     best = seats[0]["options"][0]
-    assert best["crew_id"] == "C-3310" and best["cost_inr"] == 18500
+    assert best["crew_id"] == "C-3310" and best["cost_inr"] == 23090
 
 
 def test_reports_carry_the_signed_in_sender(api):
     out = api.report(
-        CREW, "crew_unavailable", {"crew_id": "C-1042", "from_date": "2026-09-17", "reason": "sick"}
+        CREW, "crew_unavailable", {"crew_id": "C-1042", "from_date": "2026-10-15", "reason": "sick"}
     )
     (sent,) = api.sent
     assert sent["report_id"] == out["report_id"] and out["status"] == "queued"
@@ -347,7 +361,7 @@ def test_reports_carry_the_signed_in_sender(api):
         api.report(
             CREW,
             "crew_unavailable",
-            {"crew_id": "C-3310", "from_date": "2026-09-17", "reason": "sick"},
+            {"crew_id": "C-3310", "from_date": "2026-10-15", "reason": "sick"},
         )
     assert err.value.code == "FORBIDDEN"
     with pytest.raises(ApiError) as err:
@@ -357,7 +371,7 @@ def test_reports_carry_the_signed_in_sender(api):
 
 
 def test_plans_through_the_api_reload_the_operation(api):
-    api.ask(ROHIT, "Who is on reserve at BLR on 15 Sep?")
+    api.ask(ROHIT, "Who is on reserve at BLR on 13 Oct?")
     submitted = api.submit(ROHIT, "r-sick1042")
     assert submitted["status"] == "SUBMITTED" and api._live is None  # reloaded next time
     with pytest.raises(ApiError) as err:
@@ -415,7 +429,7 @@ class AtOnce:
 
 def test_a_conversation_reads_a_reply_with_its_question(api):
     api.memory, api._remembering = Memory(), AtOnce()
-    first = api.ask(ROHIT, "Who can cover P-2291 on 15 Sep?", "conv-1")
+    first = api.ask(ROHIT, "Who can cover P-2291 on 13 Oct?", "conv-1")
     assert first["awaiting"] == "detail"
     reply = api.ask(ROHIT, "Captain", "conv-1")
     assert "Captain seat on P-2291" in reply["answer"]
@@ -424,7 +438,7 @@ def test_a_conversation_reads_a_reply_with_its_question(api):
 
 def test_conversations_are_kept_apart_by_person_and_id(api):
     api.memory, api._remembering = Memory(), AtOnce()
-    api.ask(ROHIT, "Who can cover P-2291 on 15 Sep?", "conv-1")
+    api.ask(ROHIT, "Who can cover P-2291 on 13 Oct?", "conv-1")
     assert api.memory.turns.keys() == {("rohit", "conv-1")}
     other = api.ask(MEERA, "Captain", "conv-1")  # someone else, same id: nothing carried
     assert "read together" not in " ".join(other["notes"])
@@ -575,3 +589,117 @@ def test_packaged_entry_point_finds_its_data():
 
     compile(MAIN, "main.py", "exec")
     assert "CREWOPS_DATA_DIR" in MAIN and 'main(host="0.0.0.0")' in MAIN
+
+
+# -- Reports as filed, refusals and the reporting desk ---------------------------------
+
+
+def test_every_report_can_be_followed_by_whoever_filed_it(api):
+    from crewops.store.reports import store_rejection
+
+    crew = Caller("crew2087", frozenset({Role.CREW}), crew_id="C-2087")
+    queued = api.report(
+        crew, "crew_unavailable", {"crew_id": "C-2087", "from_date": "2026-10-16", "reason": "sick"}
+    )
+    (mine,) = api.my_reports(crew)
+    assert mine["disruption_id"] == queued["report_id"] and mine["status"] == "QUEUED"
+    # The worker refuses it: the person who sent it sees why.
+    store_rejection(
+        api.table, queued["report_id"], "unknown crew C-2087", "{}", datetime.now(UTC), "m-1"
+    )
+    (mine,) = api.my_reports(crew)
+    assert mine["status"] == "REJECTED" and "unknown crew C-2087" in mine["outcome"]
+    # The reporting desk sees what crew report about themselves; crew control too.
+    inbox = api.my_reports(IMRAN, "crew")
+    assert [r["disruption_id"] for r in inbox] == [queued["report_id"]]
+    assert inbox[0]["reported_by"] == "crew2087"
+    with pytest.raises(ApiError):
+        api.my_reports(crew, "crew")
+
+
+def test_the_same_days_cannot_be_reported_twice(api):
+    # r-sick1042 already has C-1042 out on 13 and 14 Oct.
+    with pytest.raises(ApiError) as err:
+        api.report(
+            CREW,
+            "crew_unavailable",
+            {"crew_id": "C-1042", "from_date": "2026-10-14", "reason": "sick"},
+        )
+    assert err.value.code == "DUPLICATE" and "r-sick1042" in err.value.message
+    queued = api.report(
+        CREW, "crew_unavailable", {"crew_id": "C-1042", "from_date": "2026-10-15", "reason": "sick"}
+    )
+    assert api.my_roster(CREW)["reported_unavailable"][0]["disruption_id"] == "r-sick1042"
+    # Still in the queue, not yet stored: sending the same day again is refused too.
+    with pytest.raises(ApiError) as err:
+        api.report(
+            CREW,
+            "crew_unavailable",
+            {"crew_id": "C-1042", "from_date": "2026-10-15", "reason": "sick"},
+        )
+    assert err.value.code == "DUPLICATE" and queued["report_id"] in err.value.message
+
+
+def test_an_option_reported_sick_later_is_flagged_with_when(api):
+    # C-3310 is the top option for r-sick1042; then they report sick for 13 Oct.
+    filed(
+        api.table,
+        "r-sick3310",
+        "crew_unavailable",
+        {"crew_id": "C-3310", "from_date": "2026-10-13", "reason": "sick"},
+    )
+    gone = api.show(ROHIT, "r-sick1042")["unavailable_now"]
+    assert gone["C-3310"]["disruption_id"] == "r-sick3310" and gone["C-3310"]["reason"] == "sick"
+
+
+def test_open_disruptions_are_listed_live_and_by_desk():
+    from crewops.tools import CrewOpsTools
+
+    seed = load_seed()
+    items = [
+        {
+            "disruption_id": "r-sick1042",
+            "status": "OPTIONS_READY",
+            "analysis": {"desk": "desk-2", "seats": []},  # as analysed: assigned to desk-2
+            "report": {
+                "report_id": "r-sick1042",
+                "type": "crew_unavailable",
+                "reported_by": {"user_id": "u-1", "roles": ["reporter"], "crew_id": None},
+                "reported_utc": "2026-10-12T19:00:00Z",
+                "details": {
+                    "crew_id": "C-1042",
+                    "from_date": "2026-10-13",
+                    "to_date": "2026-10-13",
+                    "reason": "sick",
+                },
+                "narrative": "",
+            },
+        }
+    ]
+    tools = CrewOpsTools(build_world(seed), seed, open_disruptions=lambda: items)
+    everyone = tools.list_open_disruptions()
+    assert everyone["count"] == 1 and everyone["disruptions"][0]["desks"] == ["desk-2"]
+    assert everyone["disruptions"][0]["what"] == "C-1042 unavailable 2026-10-13 (sick)"
+    assert tools.list_open_disruptions(desk="desk-1")["count"] == 0
+
+
+def test_another_desk_suggests_cover_and_the_owner_sees_it(api):
+    seat = "P-2291/Captain/C-1042"
+    out = api.suggest(ANANYA, "r-sick1042", seat, "C-3983", "rested and nearby")
+    assert out["status"] == "suggested"
+    (s,) = api.show(ROHIT, "r-sick1042")["suggestions"]
+    assert (s["by"], s["desk"], s["seat"], s["crew_id"], s["name"], s["note"]) == (
+        "ananya",
+        "desk-1",
+        seat,
+        "C-3983",
+        "N. Chandra",
+        "rested and nearby",
+    )
+    for caller, code in ((ROHIT, "INVALID"), (CREW, "FORBIDDEN"), (MEERA, "FORBIDDEN")):
+        with pytest.raises(ApiError) as err:
+            api.suggest(caller, "r-sick1042", seat, "C-3983")
+        assert err.value.code == code
+    with pytest.raises(ApiError) as err:
+        api.suggest(ANANYA, "r-sick1042", "P-9999/Captain/-", "C-3983")
+    assert err.value.code == "INVALID"

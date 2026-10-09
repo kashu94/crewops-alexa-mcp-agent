@@ -30,7 +30,7 @@ def test_seed_counts(seed):
     assert len(seed.duty_clocks) == 150
     assert len(seed.rules) == 7
     assert len(seed.gates) == 147
-    assert seed.snapshot_utc.isoformat() == "2026-09-14T18:00:00+00:00"
+    assert seed.snapshot_utc.isoformat() == "2026-10-12T18:00:00+00:00"
 
 
 def test_seed_has_no_errors(seed):
@@ -75,7 +75,7 @@ def test_double_booking_is_an_error(seed):
 
 def test_unknown_flight_in_pairing_is_an_error(seed):
     p = seed.pairings[0]
-    day = replace(p.first_day, flight_ids=("DX999-2026-09-14",))
+    day = replace(p.first_day, flight_ids=("DX999-2026-10-12",))
     broken = replace(seed, pairings=(replace(p, days=(day,)), *seed.pairings[1:]))
     assert any("unknown flight DX999" in i.message for i in errors(validate(broken)))
 
@@ -116,3 +116,30 @@ def test_duplicate_keyed_records_are_errors(seed):
     cert = seed.certifications[0]
     broken = replace(seed, certifications=(*seed.certifications, cert))
     assert any("duplicate certification" in i.message for i in errors(validate(broken)))
+
+
+def test_three_airlines_each_with_its_own_aircraft_and_crew(seed):
+    assert [a.code for a in seed.airlines] == ["DX", "KS", "NG"]
+    owner = {tail: a.code for a in seed.airlines for tail in a.aircraft}
+    assert all(f.flight_no.startswith(owner[f.aircraft]) for f in seed.flights)
+    crew = {c.crew_id: c for c in seed.crew}
+    for p in seed.pairings:
+        assert {crew[s.crew_id].airline for s in p.crew} == {owner[p.aircraft]}, p.pairing_id
+    assert {g.station for g in seed.emergency_gates} == {f.dep_station for f in seed.flights}
+
+
+def test_crew_rostered_for_another_airline_is_an_error(seed):
+    p = seed.pairings[0]  # a Deccan Express trip
+    stranger = next(c for c in seed.crew if c.airline == "KS" and c.rank is Rank.CAPTAIN)
+    seats = (PairingSeat(stranger.crew_id, Rank.CAPTAIN), *p.crew[1:])
+    broken = replace(seed, pairings=(replace(p, crew=seats), *seed.pairings[1:]))
+    assert any("works for KS, not DX" in i.message for i in errors(validate(broken)))
+
+
+def test_a_command_upgrade_is_only_for_first_officers(seed):
+    captain = next(c for c in seed.crew if c.rank is Rank.CAPTAIN)
+    broken = replace(
+        seed,
+        crew=tuple(replace(c, command_qualified=True) if c is captain else c for c in seed.crew),
+    )
+    assert any("only a first officer" in i.message for i in errors(validate(broken)))

@@ -29,13 +29,13 @@ CREW = {
 }
 
 FLIGHT = {
-    "flight_id": "DX401-2026-09-14",
+    "flight_id": "DX401-2026-10-12",
     "flight_no": "DX401",
-    "date": "2026-09-14",
+    "date": "2026-10-12",
     "dep_station": "BLR",
     "arr_station": "DEL",
-    "dep_utc": "2026-09-14T02:30:00Z",
-    "arr_utc": "2026-09-14T05:15:00Z",
+    "dep_utc": "2026-10-12T02:30:00Z",
+    "arr_utc": "2026-10-12T05:15:00Z",
     "block_hours": 2.75,
     "aircraft": "VT-DXA",
     "aircraft_type": "A320",
@@ -74,18 +74,18 @@ def test_boolean_is_not_an_integer():
 
 def test_timestamps_are_aware_utc():
     f = Flight.from_dict(FLIGHT)
-    assert f.dep_utc == datetime(2026, 9, 14, 2, 30, tzinfo=UTC)
+    assert f.dep_utc == datetime(2026, 10, 12, 2, 30, tzinfo=UTC)
     assert f.dep_utc.tzinfo is not None
 
 
 def test_naive_timestamp_is_rejected():
     with pytest.raises(DataError, match="no timezone"):
-        parse_utc("2026-09-14T02:30:00")
+        parse_utc("2026-10-12T02:30:00")
 
 
 def test_flight_must_land_after_departure():
     with pytest.raises(DataError, match="not after departure"):
-        Flight.from_dict({**FLIGHT, "arr_utc": "2026-09-14T02:00:00Z"})
+        Flight.from_dict({**FLIGHT, "arr_utc": "2026-10-12T02:00:00Z"})
 
 
 def test_pairing_days_sorted_and_helpers():
@@ -95,16 +95,16 @@ def test_pairing_days_sorted_and_helpers():
             "aircraft": "VT-DXA",
             "days": [
                 {
-                    "date": "2026-09-15",
+                    "date": "2026-10-13",
                     "flights": ["B"],
-                    "report_utc": "2026-09-15T01:00:00Z",
-                    "release_utc": "2026-09-15T09:00:00Z",
+                    "report_utc": "2026-10-13T01:00:00Z",
+                    "release_utc": "2026-10-13T09:00:00Z",
                 },
                 {
-                    "date": "2026-09-14",
+                    "date": "2026-10-12",
                     "flights": ["A"],
-                    "report_utc": "2026-09-14T01:00:00Z",
-                    "release_utc": "2026-09-14T09:00:00Z",
+                    "report_utc": "2026-10-12T01:00:00Z",
+                    "release_utc": "2026-10-12T09:00:00Z",
                 },
             ],
             "crew": [
@@ -113,7 +113,7 @@ def test_pairing_days_sorted_and_helpers():
             ],
         }
     )
-    assert p.first_day.date == date(2026, 9, 14)
+    assert p.first_day.date == date(2026, 10, 12)
     assert p.flight_ids == ("A", "B")
     assert p.holder(Rank.CAPTAIN) == ("C-1",)
     assert p.holder(Rank.FIRST_OFFICER) == ()
@@ -129,15 +129,15 @@ def test_reserve_window_covers_report_inside_window_only():
         {
             "crew_id": "C-3310",
             "base": "BLR",
-            "dates": ["2026-09-15"],
+            "dates": ["2026-10-13"],
             "oncall_window_utc": {"start": "06:00", "end": "18:00"},
         }
     )
     assert r.window_start == time(6, 0)
-    assert r.covers(datetime(2026, 9, 15, 6, 0, tzinfo=UTC))
-    assert r.covers(datetime(2026, 9, 15, 18, 0, tzinfo=UTC))
-    assert not r.covers(datetime(2026, 9, 15, 5, 59, tzinfo=UTC))
-    assert not r.covers(datetime(2026, 9, 16, 9, 0, tzinfo=UTC))
+    assert r.covers(datetime(2026, 10, 13, 6, 0, tzinfo=UTC))
+    assert r.covers(datetime(2026, 10, 13, 18, 0, tzinfo=UTC))
+    assert not r.covers(datetime(2026, 10, 13, 5, 59, tzinfo=UTC))
+    assert not r.covers(datetime(2026, 10, 14, 9, 0, tzinfo=UTC))
 
 
 def test_reserve_window_must_be_ordered():
@@ -162,7 +162,7 @@ def test_risk_score_bounded():
         RiskSignal.from_dict(
             {
                 "crew_id": "C-1",
-                "as_of_utc": "2026-09-14T18:00:00Z",
+                "as_of_utc": "2026-10-12T18:00:00Z",
                 "disruption_risk_score": 1.5,
                 "drivers": [],
             }

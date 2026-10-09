@@ -103,6 +103,7 @@ const STATUS: Record<string, string> = {
   COMMITTED: "bg-ok-soft text-emerald-800 ring-emerald-200",
   CLOSED: "bg-slate-100 text-slate-700 ring-slate-200",
   REJECTED: "bg-critical-soft text-red-800 ring-red-200",
+  QUEUED: "bg-slate-100 text-slate-700 ring-slate-200",
   WITHDRAWN: "bg-slate-100 text-slate-700 ring-slate-200",
   STALE: "bg-orange-100 text-orange-800 ring-orange-200",
 };

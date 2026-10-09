@@ -139,9 +139,19 @@ becomes a costed option or drops out at the first stage they fail: qualified, ce
 position, rested, within limits. That funnel, with a reason for every drop, answers "why not
 C-2087?" without another calculation. The engine also precomputes every comparison an
 answer might speak: the premium of the next price tier, how many options tie, and how many
-times the recommendation's cost cancelling would be. Seniority and the provided risk score
-are shown next to each option and never change its rank. Candidate search ranks every legal option by cost across four strategies:
-reserve callout, day-off callout, deadhead, and cancellation as the explicit last resort.
+times the recommendation's cost cancelling would be. A callout's cost is the callout fee,
+a seniority allowance per year and a travel allowance for the time to reach the airport, so
+seniority and reach rank only through what they pay; the provided risk score is shown next
+to each option and never changes its rank. Candidates come only from the airline that
+flies the trip. Candidate search ranks every legal option by cost across the strategies:
+reserve callout, day-off callout, positioning from another base, and, when fewer than
+three of the seat's own rank are legal, the regulated substitutes after them (a
+command-qualified first officer for a captain, a captain current in the right seat for a
+first officer, most experienced first). A cabin crew seat may instead operate one short
+when the trip still has one cabin crew per 50 seats without them. Cancellation is always
+the explicit last resort; no two-pilot aircraft is ever offered with one pilot. A
+replacement who cannot reach the airport by report time slips the departure, judged
+against the rules on that slip and costed per hour.
 
 Ids that do not exist are never silently corrected. A transposed id gets a "did you mean?"
 question, because acting on the wrong id dispatches the wrong person.
@@ -149,9 +159,11 @@ question, because acting on the wrong id dispatches the wrong person.
 ## Demo team
 
 The demo runs with a small team, so anyone trying it can sign in as each role and see the
-cross-controller safety at work: three controllers, each owning a desk of two aircraft
-(VT-DXA/DXB, VT-DXC/DXD, VT-DXE/DXF), three approvers, two reporters, four crew members, an
-auditor, an admin and a super admin (`data/team/demo_team.json`).
+cross-controller safety at work: three controllers, one per desk, three approvers, two
+reporters, four crew members, an auditor, an admin and a super admin
+(`data/team/demo_team.json`). Usernames are first name and surname (`rohit.malhotra`); a crew
+member's starts with their crew number (`c1042.nair`). Crew control works for three airlines
+(Deccan Express, Konkan Skyways and Nilgiri Connect), each with its own aircraft and crew.
 
 - **Accounts** are created by an admin command, never by sign-up. They sign in with a
   username; no email or phone is stored, so nothing can ever be sent to them. Where an alert
@@ -219,7 +231,7 @@ Every report becomes a decision-ready analysis, computed by the engine with no m
 | Several crew unavailable | The same for everyone named, together. They are all marked unavailable before the search, so none is offered to cover another, and one joint plan covers every seat with a different person. Trips losing more than one crew member are named. |
 | Flight delay, aircraft fault | What the delay does to that duty day: its new duty period against the limit, which rostered crew stop being legal and why, and, when the day is too long for anyone, the fewest trailing legs that must come off this crew and what cancelling them costs. The late leg and every later leg that day leave late; each keeps its gate until it leaves, and the next departure due at that gate within three hours is named, and moved to a free gate (or a remote stand) when the gate is still taken. |
 | Station closure | Every flight departing or landing in the closure, delayed to reopening plus a 30-minute turnaround, and the same delay and gate effects for each affected duty day. |
-| Gate closure | Every departure holding the gate during the closure moves to the first gate at the station free for its whole slot, each move counted before the next. With none free it boards from a remote stand by bus, 15 minutes later, and that delay is checked against crew duty like any other. |
+| Gate closure | Every departure holding the gate during the closure moves to the first gate at the station free for its whole slot, each move counted before the next, and lists the other gates free for it. With no ordinary gate free it takes one of the station's emergency gates; with none of those either it boards from a remote stand by bus, 15 minutes later, and that delay is checked against crew duty like any other. A closure from outside the airport (weather or a natural event) also has station operations ready the emergency gates. |
 | Gate change | Whether the new gate is free for the flight's boarding window, or which flight holds it; when it is taken, keep the flight at its own gate, or else the first gate free for it. |
 
 Each analysis also says how the disruption gets resolved, in one sentence on its record:
@@ -232,8 +244,14 @@ Each analysis also says how the disruption gets resolved, in one sentence on its
   member absorbs). The desk's controller marks it resolved with a remark, which goes on the
   audit trail and to whoever reported it.
 
-A disruption with no seat belongs to the desks of the aircraft its flights fly; one touching
-no aircraft at all (a closed gate nobody was using) is any controller's.
+Each disruption goes to one desk when it is analysed, never chosen by the reporter: the
+desk with the fewest open disruptions, then the fewest in all, then desk order. Desks own no
+aircraft. A controller on another desk may suggest cover for a seat; the suggestion goes on
+the record for the owning desk, which alone may submit a plan.
+
+A crew member taken ill part-way through a day may be reported from a time: flights that
+left before it stay with them, and the cover joins at the next departure, positioned there
+if based elsewhere.
 
 ### Who is told
 
@@ -298,7 +316,7 @@ The advisor and the MCP server reach the operation through 17 tools in
 | `check_gate` | Gate claims, delay conflicts at a gate, occupancy and inventory |
 | `explain_rule`, `search_rules` | A rule by id, or the rules closest to a paraphrased question |
 | `suggest_crew_ids`, `suggest_pairing_ids`, `suggest_flight_nos` | Real ids near a wrong one, for the user to choose from |
-| `list_controllers`, `controller_issue_counts` | The three controller desks, and open disruptions per desk from the live store |
+| `list_controllers`, `controller_issue_counts`, `list_open_disruptions` | The three controller desks, open disruptions per desk, and the open disruptions themselves (on the asker's desk when asked), all from the live store |
 
 Three rules hold for every tool:
 
@@ -498,12 +516,20 @@ every assignment in one DynamoDB transaction in the same request: each affected 
 the audit events. No person commits separately, and the auditor only reads. A rejected,
 withdrawn or stale plan sends the disruption back to OPTIONS_READY for a new plan.
 
-A disruption belongs to every desk whose aircraft it touches, and any of those controllers
-may plan it. A seat is a pairing, a role and the crew member being replaced; each chosen
-cover must be a legal option when submitted, and the default is the analysis's
-recommendation (its joint plan when several seats compete). A seat with no legal cover, or
-already started, is listed in the plan as uncovered and must be acknowledged; a disruption
-with nothing coverable is closed with a reason instead.
+A disruption belongs to the desk it was assigned when analysed, and only that desk's
+controller may plan it. A seat is a pairing, a role and the crew member being replaced; each
+chosen cover must be a legal option when submitted, or, after a warning, cancelling the trip
+or operating one cabin crew short where the analysis offered it, and the default is the analysis's
+recommendation (its joint plan when several seats compete). Cancelling a seat cancels its
+whole trip: every seat of that trip in the plan is cancelled, the cost is counted once, and
+approval releases the trip's whole crew, so no aircraft is left with one pilot. From then on
+its flights are cancelled everywhere: nobody positions on them, they hold no gate, lookups
+mark them cancelled, and the trip has nothing to re-crew. Flying one cabin crew short is
+refused if the trip would fall below one cabin crew per 50 seats, counting the whole plan
+and everyone on the trip reported unavailable (except someone who fell ill only after its
+last leg), at submission and again at approval. A seat with no legal crew may still be cancelled or flown short; one that
+is neither, or already started, is listed in the plan as uncovered and must be acknowledged;
+a disruption with nothing coverable is closed with a reason instead.
 
 Each crew member a commit moves has a roster version that the commit bumps, conditioned on
 the version read before the re-check; storing a report that takes someone out bumps it too.

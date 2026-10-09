@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
+import { AIRLINES, AirlineBadge, airlineOf } from "@/components/airline";
 import { Button, clock, cx, day, Empty, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
 import { describe, shownStatus, type MyReport, type Reference } from "@/lib/types";
@@ -157,6 +158,12 @@ function Fields({ kind, reference, crewIds, setCrewIds }: { kind: Kind; referenc
             <input name="crew_id" list="crew-list" required placeholder="C-1042" className={input} />
           </Label>
           {dates}
+          <Label
+            text="Unavailable from (UTC, optional)"
+            hint="Taken ill part-way through a day: flights before this time are still flown by them"
+          >
+            <input name="from_time" type="time" className={input} />
+          </Label>
           {reason}
         </>
       );
@@ -190,14 +197,18 @@ function Fields({ kind, reference, crewIds, setCrewIds }: { kind: Kind; referenc
               <input name="valid_to" type="date" required min={first} max={last} className={input} />
             </Label>
           </div>
-          <p className="text-xs text-muted">The crew member sees a notice on their CrewOps page; training and crew records are emailed.</p>
+          <p className="text-xs text-muted">
+            This reports the date the certificate stops being valid (failed medical, missed training). It never edits
+            the crew member&apos;s records: crew control takes them off trips after that date, the crew member sees a
+            notice on their page, and training and crew records are emailed to renew it.
+          </p>
         </>
       );
     case "flight_delay":
       return (
         <>
-          <Label text="Flight" hint="Number and date, e.g. DX412-2026-09-15">
-            <input name="flight_id" list="flight-list" required placeholder="DX412-2026-09-15" className={input} />
+          <Label text="Flight" hint="Number and date, e.g. KS412-2026-10-13">
+            <input name="flight_id" list="flight-list" required placeholder="KS412-2026-10-13" className={input} />
           </Label>
           <Label text="Delay (minutes)">
             <input name="delay_minutes" type="number" min={1} max={1440} required defaultValue={60} className={input} />
@@ -222,6 +233,23 @@ function Fields({ kind, reference, crewIds, setCrewIds }: { kind: Kind; referenc
           <Label text="Reason">
             <input name="reason" required maxLength={200} placeholder="Jet bridge fault" className={input} />
           </Label>
+          <fieldset className="flex flex-col gap-1.5 text-sm">
+            <legend className="mb-1 font-medium text-slate-700">Cause</legend>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ["internal", "Internal", "Equipment or staff at the gate: the station fixes it"],
+                ["external", "External", "Weather or a natural event: more gates may close"],
+              ].map(([value, label, hint], i) => (
+                <label key={value} className="cursor-pointer">
+                  <input type="radio" name="cause" value={value} defaultChecked={i === 0} className="peer sr-only" />
+                  <span className="block rounded-lg border border-line px-3 py-2 text-xs transition peer-checked:border-accent peer-checked:bg-accent-soft">
+                    <b className="block">{label}</b>
+                    <span className="text-muted">{hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
         </>
       );
     case "station_disruption":
@@ -244,7 +272,7 @@ function Fields({ kind, reference, crewIds, setCrewIds }: { kind: Kind; referenc
       return (
         <>
           <Label text="Flight">
-            <input name="flight_id" list="flight-list" required placeholder="DX401-2026-09-15" className={input} />
+            <input name="flight_id" list="flight-list" required placeholder="DX401-2026-10-13" className={input} />
           </Label>
           <Label text="New gate">
             <select name="new_gate" required className={input}>
@@ -275,7 +303,13 @@ function detailsOf(kind: Kind, f: FormData, crewIds: string[]): Record<string, u
   const dates = () => ({ from_date: text(f.get("from_date")), to_date: text(f.get("to_date")) || text(f.get("from_date")) });
   switch (kind) {
     case "crew_unavailable":
-      return { crew_id: text(f.get("crew_id")).toUpperCase(), ...dates(), reason: text(f.get("reason")) };
+      return {
+        crew_id: text(f.get("crew_id")).toUpperCase(),
+        ...dates(),
+        reason: text(f.get("reason")),
+        // Taken ill part-way through the first day: legs before this are still flown.
+        ...(text(f.get("from_time")) ? { from_utc: `${text(f.get("from_date"))}T${text(f.get("from_time"))}:00Z` } : {}),
+      };
     case "multiple_crew_unavailable":
       return { crew_ids: crewIds, ...dates(), reason: text(f.get("reason")) };
     case "certification_lapse":
@@ -283,7 +317,13 @@ function detailsOf(kind: Kind, f: FormData, crewIds: string[]): Record<string, u
     case "flight_delay":
       return { flight_id: text(f.get("flight_id")).toUpperCase(), delay_minutes: Number(f.get("delay_minutes")) };
     case "gate_closure":
-      return { gate: text(f.get("gate")), from_utc: utc(f.get("from_utc")), to_utc: utc(f.get("to_utc")), reason: text(f.get("reason")) };
+      return {
+        gate: text(f.get("gate")),
+        from_utc: utc(f.get("from_utc")),
+        to_utc: utc(f.get("to_utc")),
+        reason: text(f.get("reason")),
+        cause: text(f.get("cause")) || "internal",
+      };
     case "station_disruption":
       return { station: text(f.get("station")), from_utc: utc(f.get("from_utc")), to_utc: utc(f.get("to_utc")), reason: text(f.get("reason")) };
     case "gate_change":
@@ -293,10 +333,36 @@ function detailsOf(kind: Kind, f: FormData, crewIds: string[]): Record<string, u
   }
 }
 
-function MyReports({ reports, onRefresh }: { reports: MyReport[] | null; onRefresh: () => void }) {
+function MyReports({
+  reports,
+  onRefresh,
+  scope,
+  onScope,
+}: {
+  reports: MyReport[] | null;
+  onRefresh: () => void;
+  scope: "mine" | "crew";
+  onScope: (s: "mine" | "crew") => void;
+}) {
   return (
     <Panel
-      title="My reports"
+      title={
+        <span className="flex items-center gap-1">
+          {(["mine", "crew"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => onScope(k)}
+              className={cx(
+                "rounded-md px-2 py-0.5 normal-case tracking-normal",
+                scope === k ? "bg-accent-soft text-sky-800" : "text-muted hover:text-foreground",
+              )}
+            >
+              {k === "mine" ? "My reports" : "From crew"}
+            </button>
+          ))}
+        </span>
+      }
       icon={<Inbox size={14} className="text-accent" />}
       action={
         <button onClick={onRefresh} className="rounded-md p-1 text-muted hover:bg-sunken hover:text-foreground" title="Refresh">
@@ -313,13 +379,20 @@ function MyReports({ reports, onRefresh }: { reports: MyReport[] | null; onRefre
           {reports.map((r) => (
             <li key={r.disruption_id} className="rounded-xl border border-line px-3 py-2.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-sm font-medium">{describe(r)}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <AirlineBadge compact code={airlineOf(String(r.details.flight_id ?? ""))} />
+                  <span className="truncate text-sm font-medium">{describe(r)}</span>
+                </span>
                 <Status value={shownStatus(r.status, r.handled ? "internal" : null)} />
               </div>
               <p className="mt-0.5 text-[11px] text-muted">
                 <Mono>{r.disruption_id}</Mono> · {day(r.reported_utc)} <Mono>{clock(r.reported_utc)}</Mono>
+                {scope === "crew" && r.reported_by && <> · by {r.reported_by}</>}
               </p>
-              <p className="mt-1.5 text-xs text-slate-700">{r.handled ?? r.outcome}</p>
+              {r.narrative && <p className="mt-1 text-xs italic text-slate-600">“{r.narrative}”</p>}
+              <p className={cx("mt-1.5 text-xs", r.status === "REJECTED" ? "text-critical" : "text-slate-700")}>
+                {r.handled ?? r.outcome}
+              </p>
               {r.remark && (
                 <p className="mt-1 rounded-lg bg-ok-soft px-2 py-1 text-xs text-emerald-900">
                   Crew control: {r.remark}
@@ -342,9 +415,10 @@ export default function ReportPage() {
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [scope, setScope] = useState<"mine" | "crew">("mine");
   const loadReports = useCallback(() => {
-    tool<MyReport[]>("my_reports").then(setReports, () => setReports([]));
-  }, []);
+    tool<MyReport[]>("my_reports", { scope }).then(setReports, () => setReports([]));
+  }, [scope]);
 
   useEffect(() => {
     tool<Reference>("report_reference").then(setReference, (err: Error) => setError(err.message));
@@ -352,7 +426,7 @@ export default function ReportPage() {
   }, [loadReports]);
 
   // A new report is analysed within a minute: look again while one is still being read.
-  const waiting = useMemo(() => (reports ?? []).some((r) => r.status === "REPORTED"), [reports]);
+  const waiting = useMemo(() => (reports ?? []).some((r) => r.status === "REPORTED" || r.status === "QUEUED"), [reports]);
   useEffect(() => {
     if (!waiting) return;
     const t = setInterval(loadReports, 10_000);
@@ -364,6 +438,16 @@ export default function ReportPage() {
     const form = e.currentTarget;
     if (kind === "multiple_crew_unavailable" && crewIds.length < 2) {
       setMessage({ tone: "error", text: "Add at least two crew members." });
+      return;
+    }
+    const f0 = new FormData(form);
+    const toDate = text(f0.get("to_date"));
+    if (toDate && toDate < text(f0.get("from_date"))) {
+      setMessage({ tone: "error", text: "'Until' must be on or after 'From'." });
+      return;
+    }
+    if (f0.get("from_utc") && f0.get("to_utc") && text(f0.get("to_utc")) <= text(f0.get("from_utc"))) {
+      setMessage({ tone: "error", text: "'Until' must be after 'From'." });
       return;
     }
     setBusy(true);
@@ -428,7 +512,7 @@ export default function ReportPage() {
 
               <div key={kind} className="animate-rise flex flex-col gap-3">
                 <Fields kind={kind} reference={reference} crewIds={crewIds} setCrewIds={setCrewIds} />
-                <Label text="Anything crew control should know" hint="Optional">
+                <Label text="Anything crew controller should know" hint="Optional">
                   <input name="narrative" maxLength={500} className={input} />
                 </Label>
               </div>
@@ -442,6 +526,7 @@ export default function ReportPage() {
                 {reference.crew.map((c) => (
                   <option key={c.crew_id} value={c.crew_id}>
                     {c.name}, {c.rank}, {c.base}
+                    {c.airline ? `, ${AIRLINES[c.airline]?.name ?? c.airline}` : ""}
                   </option>
                 ))}
               </datalist>
@@ -455,7 +540,15 @@ export default function ReportPage() {
             </form>
           )}
         </Panel>
-        <MyReports reports={reports} onRefresh={loadReports} />
+        <MyReports
+          reports={reports}
+          onRefresh={loadReports}
+          scope={scope}
+          onScope={(k) => {
+            setReports(null);
+            setScope(k);
+          }}
+        />
       </div>
     </div>
   );

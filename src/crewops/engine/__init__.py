@@ -9,6 +9,7 @@ from crewops.engine.options import (
     Option,
     OptionsResult,
     Strategy,
+    TripCancelled,
     find_options,
 )
 from crewops.engine.rules import ALL_RULES, RuleBook, RuleVerdict, Verdict
@@ -24,6 +25,7 @@ __all__ = [
     "RuleBook",
     "RuleVerdict",
     "Strategy",
+    "TripCancelled",
     "UnknownEntity",
     "Verdict",
     "World",

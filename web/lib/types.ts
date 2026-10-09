@@ -11,6 +11,17 @@ export type FeedItem = {
   /** recrew: crew control covers seats; decision: no legal cover; internal: handled elsewhere. */
   handling?: "recrew" | "decision" | "internal" | null;
   desks?: string[];
+  airlines?: string[];
+};
+
+export type Suggestion = {
+  by: string;
+  desk: string;
+  seat: string;
+  crew_id: string;
+  name: string | null;
+  note: string;
+  at: string;
 };
 
 /** Someone told about a disruption besides crew control, and what. */
@@ -36,6 +47,8 @@ export type StandMove = {
   booked: number | null;
   delay_minutes: number;
   why: string;
+  alternatives?: string[];
+  emergency?: boolean;
 };
 
 export type NextAtGate = {
@@ -60,10 +73,21 @@ export type FlightRow = {
   booked: number | null;
 };
 
+/** A crew member reported unavailable after the options were worked out. */
+export type Unavailable = {
+  disruption_id: string;
+  reported_utc: string | null;
+  reason: string | null;
+  from_date: string;
+  to_date: string;
+};
+
 export type Handling = { kind: "recrew" | "decision" | "internal"; text: string };
 
 export type MyReport = {
   disruption_id: string;
+  reported_by?: string | null;
+  narrative?: string;
   status: string;
   outcome: string;
   report_type: string | null;
@@ -74,7 +98,8 @@ export type MyReport = {
 };
 
 export type Reference = {
-  crew: { crew_id: string; name: string; rank: string; base: string }[];
+  crew: { crew_id: string; name: string; rank: string; base: string; airline: string | null }[];
+  airlines: { code: string; name: string; color: string; aircraft: string[] }[];
   flights: { flight_id: string; flight_no: string; date: string; from: string; to: string; dep_utc: string; gate: string | null }[];
   aircraft: string[];
   gates: string[];
@@ -119,6 +144,7 @@ export type LiveOption = Option & {
   risk_score: number | null;
   resilience: number | null;
   positioning_flight: string | null;
+  experience_years?: number | null;
 };
 
 export type LiveSearch = {
@@ -126,6 +152,7 @@ export type LiveSearch = {
   policies: Record<string, LiveOption | null>;
   strategies: LiveOption[];
   cancellation: LiveOption | null;
+  short_crew?: LiveOption | null;
   legal_options: number;
   funnel: { stage: string; remaining: number; dropped: number; reason: string }[];
   excluded: { crew_id: string; name: string; stage: string; rule_ids: string[]; reasons: string[] }[];
@@ -176,6 +203,17 @@ export type Plan = {
   assignments: string[];
   uncovered: string[];
   reason: string | null;
+  picks?: {
+    pairing_id: string;
+    role: string;
+    crew_id: string | null;
+    name: string;
+    replaces: string | null;
+    strategy?: string;
+  }[];
+  submitted_utc?: string | null;
+  decided_by?: string | null;
+  decided_utc?: string | null;
 };
 
 export type Detail = {
@@ -190,6 +228,9 @@ export type Detail = {
   yours?: boolean;
   joint_plan?: { assignments?: Record<string, unknown>[]; total_cost_inr?: number } | null;
   contention?: Record<string, Rival[]>;
+  unavailable_now?: Record<string, Unavailable>;
+  suggestions?: Suggestion[];
+  airlines?: { code: string; name: string; color: string }[];
   handling?: Handling | null;
   notices?: TeamNotice[];
   stands?: StandMove[];

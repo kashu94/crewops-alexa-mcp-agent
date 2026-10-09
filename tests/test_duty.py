@@ -9,9 +9,9 @@ from crewops.engine.rules import RuleBook
 
 def day(report_h: int = 6, release_h: int = 15, sectors: int = 3) -> DutyDay:
     return DutyDay(
-        date=date(2026, 9, 15),
-        report_utc=datetime(2026, 9, 15, report_h, tzinfo=UTC),
-        release_utc=datetime(2026, 9, 15, release_h, tzinfo=UTC),
+        date=date(2026, 10, 13),
+        report_utc=datetime(2026, 10, 13, report_h, tzinfo=UTC),
+        release_utc=datetime(2026, 10, 13, release_h, tzinfo=UTC),
         n_sectors=sectors,
         block_hours=6.0,
         aircraft_type=AircraftType.A320,
@@ -27,8 +27,8 @@ def test_fdp_limit_shrinks_after_second_sector(sectors, limit):
 
 
 def test_calendar_window_is_inclusive():
-    assert calendar_window(date(2026, 9, 14), 7) == (date(2026, 9, 8), date(2026, 9, 14))
-    assert calendar_window(date(2026, 9, 14), 1) == (date(2026, 9, 14), date(2026, 9, 14))
+    assert calendar_window(date(2026, 10, 12), 7) == (date(2026, 10, 6), date(2026, 10, 12))
+    assert calendar_window(date(2026, 10, 12), 1) == (date(2026, 10, 12), date(2026, 10, 12))
 
 
 @pytest.mark.parametrize(
@@ -39,8 +39,8 @@ def test_format_hours(hours, text):
 
 
 def test_hours_between_rounds():
-    a = datetime(2026, 9, 15, 6, tzinfo=UTC)
-    b = datetime(2026, 9, 15, 15, 30, tzinfo=UTC)
+    a = datetime(2026, 10, 13, 6, tzinfo=UTC)
+    b = datetime(2026, 10, 13, 15, 30, tzinfo=UTC)
     assert hours_between(a, b) == 9.5
 
 

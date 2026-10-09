@@ -12,7 +12,7 @@ from crewops.ingestion.seed import load_seed
 from crewops.store.ops_store import OpsStore
 from crewops.store.reports import disruptions_with_status, get_disruption, rejections_for
 
-NOW = datetime(2026, 9, 15, 5, 1, tzinfo=UTC)
+NOW = datetime(2026, 10, 13, 5, 1, tzinfo=UTC)
 
 
 @pytest.fixture(scope="module")
@@ -74,17 +74,17 @@ def test_duplicate_delivery_is_stored_once(table):
         (report(roles=("admin",)), "may not file reports"),
         (report(roles=("crew",), crew_id="C-2087"), "their own unavailability"),
         (
-            report(details={"crew_id": "C-0000", "from_date": "2026-09-15", "reason": "sick"}),
+            report(details={"crew_id": "C-0000", "from_date": "2026-10-13", "reason": "sick"}),
             "unknown crew C-0000",
         ),
         (
-            report("flight_delay", {"flight_id": "DX999-2026-09-15", "delay_minutes": 30}),
+            report("flight_delay", {"flight_id": "DX999-2026-10-13", "delay_minutes": 30}),
             "unknown flight",
         ),
         (
             report(
                 "multiple_crew_unavailable",
-                {"crew_ids": ["C-1042", "C-0000"], "from_date": "2026-09-15", "reason": "sick"},
+                {"crew_ids": ["C-1042", "C-0000"], "from_date": "2026-10-13", "reason": "sick"},
             ),
             "unknown crew C-0000",
         ),
@@ -93,8 +93,8 @@ def test_duplicate_delivery_is_stored_once(table):
                 "gate_closure",
                 {
                     "gate": "BLR-G9",
-                    "from_utc": "2026-09-16T06:00:00Z",
-                    "to_utc": "2026-09-16T07:00:00Z",
+                    "from_utc": "2026-10-14T06:00:00Z",
+                    "to_utc": "2026-10-14T07:00:00Z",
                     "reason": "x",
                 },
             ),
@@ -105,8 +105,8 @@ def test_duplicate_delivery_is_stored_once(table):
                 "aircraft_technical",
                 {
                     "aircraft": "VT-ZZZ",
-                    "from_utc": "2026-09-16T06:00:00Z",
-                    "to_utc": "2026-09-16T07:00:00Z",
+                    "from_utc": "2026-10-14T06:00:00Z",
+                    "to_utc": "2026-10-14T07:00:00Z",
                 },
             ),
             "unknown aircraft VT-ZZZ",
@@ -114,7 +114,7 @@ def test_duplicate_delivery_is_stored_once(table):
         (
             report(
                 "certification_lapse",
-                {"crew_id": "C-1042", "cert_type": "dangerous_goods", "valid_to": "2026-09-17"},
+                {"crew_id": "C-1042", "cert_type": "dangerous_goods", "valid_to": "2026-10-15"},
             )
             | {"report_id": "r-certcheck"},
             None,  # C-1042 does hold that certificate: accepted
@@ -136,7 +136,7 @@ def test_certificate_not_on_record_is_rejected(table):
     table.delete_item(Key={"pk": "CREW#C-1042", "sk": "CERT#licence"})
     doc = report(
         "certification_lapse",
-        {"crew_id": "C-1042", "cert_type": "licence", "valid_to": "2026-09-17"},
+        {"crew_id": "C-1042", "cert_type": "licence", "valid_to": "2026-10-15"},
     )
     outcome = handle(table, doc)
     assert outcome.status == "rejected" and "no licence certification" in outcome.reason
@@ -153,7 +153,7 @@ def test_malformed_messages_are_rejected_not_retried(table):
 
 def test_rejected_payload_with_decimals_is_stored_as_text(table):
     doc = report(report_id="r-decimals")
-    doc["details"] = {"crew_id": "C-1042", "from_date": "2026-09-15", "reason": "sick", "x": 1.5}
+    doc["details"] = {"crew_id": "C-1042", "from_date": "2026-10-13", "reason": "sick", "x": 1.5}
     doc["type"] = "volcano"
     outcome = handle(table, doc)
     assert outcome.status == "rejected"
@@ -161,9 +161,14 @@ def test_rejected_payload_with_decimals_is_stored_as_text(table):
 
 
 def test_handler_reports_only_unexpected_failures_for_retry(table, monkeypatch):
-    good = {"messageId": "m-1", "body": json.dumps(report())}
+    # The handler stamps arrival with the real clock: report "now", as the server does.
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    good = {"messageId": "m-1", "body": json.dumps(report(reported_utc=now))}
     bad_data = {"messageId": "m-2", "body": "{nope"}
-    boom = {"messageId": "m-3", "body": json.dumps(report(report_id="r-explodes"))}
+    boom = {
+        "messageId": "m-3",
+        "body": json.dumps(report(report_id="r-explodes", reported_utc=now)),
+    }
 
     real = report_worker.store_report
 
@@ -231,25 +236,25 @@ def test_id_reused_for_different_content_is_refused(table):
 
 
 def test_report_from_the_future_is_refused(table):
-    doc = report(reported_utc="2026-09-15T06:00:00Z")  # 59 minutes after NOW
+    doc = report(reported_utc="2026-10-13T06:00:00Z")  # 59 minutes after NOW
     outcome = handle(table, doc)
     assert outcome.status == "rejected" and "ahead of the time it arrived" in outcome.reason
-    small_skew = report(report_id="r-skewok01", reported_utc="2026-09-15T05:04:00Z")
+    small_skew = report(report_id="r-skewok01", reported_utc="2026-10-13T05:04:00Z")
     assert handle(table, small_skew).status == "stored"
 
 
 def test_resend_with_a_new_timestamp_is_a_duplicate(table):
     # A client resending a report stamps it again; that is still the same report.
     assert handle(table, report()).status == "stored"
-    restamped = report(reported_utc="2026-09-15T05:00:45Z")
+    restamped = report(reported_utc="2026-10-13T05:00:45Z")
     assert handle(table, restamped).status == "duplicate"
     assert rejections_for(table, "r-00000001") == []
     stored = get_disruption(table, "r-00000001")
-    assert stored["report"]["reported_utc"] == "2026-09-15T05:00:00Z"  # first copy kept
+    assert stored["report"]["reported_utc"] == "2026-10-13T05:00:00Z"  # first copy kept
 
 
 def test_resend_with_changed_details_is_still_a_conflict(table):
     assert handle(table, report()).status == "stored"
-    changed = report(details={"crew_id": "C-1042", "from_date": "2026-09-15", "reason": "fatigue"})
+    changed = report(details={"crew_id": "C-1042", "from_date": "2026-10-13", "reason": "fatigue"})
     outcome = handle(table, changed)
     assert outcome.status == "rejected" and "different report" in outcome.reason

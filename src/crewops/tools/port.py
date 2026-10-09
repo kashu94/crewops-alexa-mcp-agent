@@ -20,7 +20,7 @@ from typing import Any
 
 from crewops.analysis.disruption import option_dict
 from crewops.domain import DataError, Rank, Report, ReportType, parse_utc
-from crewops.domain.desks import DESKS, desks_for
+from crewops.domain.desks import DESKS, owning_desks
 from crewops.domain.reports import crew_out_of
 from crewops.engine import AlreadyStarted, World, assess, find_options
 from crewops.engine.duty import calendar_window
@@ -96,7 +96,7 @@ class CrewOpsTools:
         self.seed = seed
         self.search = search
         self.open_disruptions = open_disruptions
-        self.rows = rowlib.build_rows(seed)
+        self.rows = rowlib.build_rows(seed, world.cancelled)
         self.rules = {r.rule_id: r for r in seed.rules}
         self.gates = sorted(seed.gates, key=lambda g: (g.gate, g.start_utc, g.flight_id))
         self.flight_pairing: dict[str, tuple[str, date]] = {}
@@ -634,6 +634,7 @@ class CrewOpsTools:
             "legal_options": len(crew_opts),
             "options": [option_dict(o) | _extras(o) for o in crew_opts[:TOP_OPTIONS]],
             "cancellation": option_dict(result.cancellation),
+            "short_crew": option_dict(result.short_crew) if result.short_crew else None,
             "strategies": [option_dict(o) for o in result.strategies],
             "policies": {k: option_dict(o) for k, o in result.policies.items()},
             "equal_cost_alternatives": result.equal_cost_alternatives,
@@ -832,7 +833,6 @@ class CrewOpsTools:
             "at_risk_flights": sum(len(r["at_risk_flights"]) for r in rows),
             "passengers": sum(r["passengers"] for r in rows),
             "aircraft": aircraft_hit,
-            "desks": [d.controller for d in desks_for(set(aircraft_hit))],
         }
         if departed:
             out["already_departed"] = sorted(set(departed))
@@ -863,7 +863,7 @@ class CrewOpsTools:
             "affected_dates": sorted({f.date.isoformat() for f in direct}),
             "directly_affected_flights": [f.flight_id for f in direct],
             "at_risk_flights": [f.flight_id for f in later],
-            "passengers": sum(f.seats for f in direct),
+            "passengers": sum(f.booked if f.booked is not None else f.seats for f in direct),
         }
 
     def simulate(self, event: Mapping[str, Any]) -> dict[str, Any]:
@@ -1169,8 +1169,14 @@ class CrewOpsTools:
                 out.append(candidate)
         return out[:limit]
 
-    def suggest_crew_ids(self, near: str, limit: int = 3) -> dict[str, Any]:
-        found = self._suggest(list(self.world.crew), near.strip().upper(), limit)
+    def suggest_crew_ids(
+        self, near: str, limit: int = 3, prefer: Sequence[str] = ()
+    ) -> dict[str, Any]:
+        # Who the conversation was just about comes first: "C-123" right after asking about
+        # C-1042 most likely means C-1042.
+        first = [c for c in prefer if c in self.world.crew]
+        rest = self._suggest(list(self.world.crew), near.strip().upper(), limit)
+        found = (first + [c for c in rest if c not in first])[:limit]
         return {
             "near": near,
             "suggestions": [
@@ -1224,27 +1230,33 @@ class CrewOpsTools:
 
     def list_controllers(self) -> dict[str, Any]:
         return {
-            "desks": [
-                {"desk_id": d.desk_id, "controller": d.controller, "aircraft": list(d.aircraft)}
-                for d in DESKS
-            ],
+            "desks": [{"desk_id": d.desk_id, "controller": d.controller} for d in DESKS],
+            "assignment": "each new disruption goes to the controller with the fewest open ones",
             "note": "Controllers dispatch; they are not crew and are not on the roster.",
         }
 
+    def _owners(self, item: Mapping[str, Any]) -> list[Any]:
+        """The desks that plan a stored disruption (see ``domain.desks.owning_desks``)."""
+        analysis = from_dynamo(item.get("analysis") or {})
+        if not analysis:
+            return []  # not analysed yet: not assigned yet
+
+        def aircraft(pairing_id: str) -> str | None:
+            p = self.world.pairings.get(pairing_id)
+            return p.aircraft if p else None
+
+        return owning_desks(analysis, aircraft)
+
     def controller_issue_counts(self) -> dict[str, Any]:
-        """Open disruptions per desk, from the live store. One touching two desks counts twice."""
+        """Open disruptions per desk, from the live store; ones not yet analysed (so not yet
+        assigned) are listed apart."""
         if self.open_disruptions is None:
             raise ToolError(UNAVAILABLE, "the disruption store is not connected")
         per_desk: dict[str, list[str]] = {d.desk_id: [] for d in DESKS}
         unassigned: list[str] = []
         for item in self.open_disruptions():
             disruption_id = str(item.get("disruption_id") or item.get("pk") or "unknown")
-            try:
-                report = Report.from_dict(from_dynamo(item["report"]))
-            except (DataError, KeyError, TypeError):
-                unassigned.append(disruption_id)
-                continue
-            desks = desks_for(self.report_aircraft(report))
+            desks = self._owners(item)
             if not desks:
                 unassigned.append(disruption_id)
             for d in desks:
@@ -1254,7 +1266,6 @@ class CrewOpsTools:
                 {
                     "desk_id": d.desk_id,
                     "controller": d.controller,
-                    "aircraft": list(d.aircraft),
                     "open_issues": len(per_desk[d.desk_id]),
                     "disruption_ids": sorted(per_desk[d.desk_id]),
                 }
@@ -1262,6 +1273,32 @@ class CrewOpsTools:
             ],
             "unassigned": sorted(unassigned),
         }
+
+    def list_open_disruptions(self, desk: str | None = None) -> dict[str, Any]:
+        """The open disruptions, newest first, optionally one desk's: read from the live
+        store on every call, so the answer is what is open now."""
+        if self.open_disruptions is None:
+            raise ToolError(UNAVAILABLE, "the disruption store is not connected")
+        rows = []
+        for item in self.open_disruptions():
+            try:
+                report = Report.from_dict(from_dynamo(item["report"]))
+            except (DataError, KeyError, TypeError):
+                continue
+            desks = [d.desk_id for d in self._owners(item)]
+            if desk and desks and desk not in desks:
+                continue
+            rows.append(
+                {
+                    "disruption_id": str(item.get("disruption_id")),
+                    "what": _what(report),
+                    "status": str(item.get("status")),
+                    "desks": desks,
+                    "reported_utc": report.to_dict()["reported_utc"],
+                }
+            )
+        rows.sort(key=lambda r: r["reported_utc"], reverse=True)
+        return {"desk": desk, "count": len(rows), "disruptions": rows}
 
     def report_aircraft(self, report: Report) -> set[str]:
         """The aircraft a report touches, which decides the desks it belongs to."""
@@ -1309,6 +1346,31 @@ class CrewOpsTools:
         }
 
 
+def _what(report: Report) -> str:
+    """One line on what a report says happened."""
+    d, kind = report.details, report.report_type
+    if kind is ReportType.CREW_UNAVAILABLE:
+        span = (
+            d["from_date"]
+            if d["from_date"] == d["to_date"]
+            else f"{d['from_date']} to {d['to_date']}"
+        )
+        return f"{d['crew_id']} unavailable {span} ({d['reason']})"
+    if kind is ReportType.MULTIPLE_CREW_UNAVAILABLE:
+        return f"{', '.join(d['crew_ids'])} unavailable from {d['from_date']} ({d['reason']})"
+    if kind is ReportType.CERTIFICATION_LAPSE:
+        return f"{d['crew_id']} {d['cert_type'].replace('_', ' ')} lapses {d['valid_to']}"
+    if kind is ReportType.FLIGHT_DELAY:
+        return f"{d['flight_id']} delayed {d['delay_minutes']} min"
+    if kind is ReportType.AIRCRAFT_TECHNICAL:
+        return f"{d['aircraft']} technical fault"
+    if kind is ReportType.STATION_DISRUPTION:
+        return f"{d['station']} closed ({d['reason']})"
+    if kind is ReportType.GATE_CLOSURE:
+        return f"{d['gate']} closed ({d['reason']})"
+    return f"{d['flight_id']} moved to gate {d['new_gate']}"
+
+
 def _verdict(v: Any) -> dict[str, Any]:
     return {
         "rule_id": v.rule_id,
@@ -1334,13 +1396,15 @@ def _positioning(p: Any) -> dict[str, Any] | None:
 
 
 def _extras(o: Any) -> dict[str, Any]:
-    """Shown next to an option, never used to rank it."""
+    """Shown next to an option. Seniority and reach rank only through their allowances in
+    the cost; the risk score never ranks."""
     return {
         "base": o.base,
         "reachability_minutes": o.reachability_minutes,
         "seniority": o.seniority,
         "risk_score": o.risk_score,
         "resilience": o.resilience,
+        "experience_years": o.experience_years,
     }
 
 

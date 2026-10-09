@@ -29,11 +29,13 @@ from crewops.domain import (
     Flight,
     GateSlot,
     Pairing,
+    Rank,
     ReserveDuty,
     RiskSignal,
     RosterException,
     Rule,
 )
+from crewops.domain.airlines import Airline, EmergencyGate
 from crewops.domain.contacts import NETWORK, TEAMS, Contact
 
 REPORT_BEFORE_FIRST_DEPARTURE = timedelta(minutes=60)
@@ -52,6 +54,8 @@ SEED_FILES = (
     "costs.json",
     "boarding_gates.json",
     "contacts.json",
+    "airlines.json",
+    "emergency_gates.json",
 )
 
 
@@ -78,6 +82,10 @@ class SeedData:
     gates: tuple[GateSlot, ...]
     contacts: tuple[Contact, ...] = ()
     """Who is on duty for each operational team (see ``crewops.domain.contacts``)."""
+    airlines: tuple[Airline, ...] = ()
+    """The airlines, each with its aircraft (see ``crewops.domain.airlines``)."""
+    emergency_gates: tuple[EmergencyGate, ...] = ()
+    """Gates held back at each station for disruptions."""
 
     @property
     def snapshot_utc(self) -> datetime:
@@ -148,6 +156,10 @@ def load_seed(directory: Path | str | None = None) -> SeedData:
         costs=CostTable.from_dict(raw["costs.json"]),
         gates=_parse_list(raw["boarding_gates.json"], "boarding_gates", GateSlot.from_dict),
         contacts=_parse_list(raw["contacts.json"], "contacts", Contact.from_dict),
+        airlines=_parse_list(raw["airlines.json"], "airlines", Airline.from_dict),
+        emergency_gates=_parse_list(
+            raw["emergency_gates.json"], "emergency_gates", EmergencyGate.from_dict
+        ),
     )
 
 
@@ -297,6 +309,39 @@ def validate(seed: SeedData) -> list[Issue]:
             warn(g.gate, f"slot for {g.flight_id} does not end at departure")
         if g.aircraft_type != flight.aircraft_type:
             error(g.gate, f"{g.flight_id} aircraft type mismatch")
+
+    # -- Airlines -----------------------------------------------------------
+    owner: dict[str, str] = {}
+    for a in seed.airlines:
+        for tail in a.aircraft:
+            if tail in owner:
+                error(tail, f"owned by both {owner[tail]} and {a.code}")
+            owner[tail] = a.code
+    if seed.airlines:
+        codes = {a.code for a in seed.airlines}
+        for f in seed.flights:
+            if f.aircraft not in owner:
+                error(f.flight_id, f"{f.aircraft} belongs to no airline")
+            elif not f.flight_no.startswith(owner[f.aircraft]):
+                error(f.flight_id, f"flies {owner[f.aircraft]}'s {f.aircraft} under another code")
+        for c in seed.crew:
+            if c.airline not in codes:
+                error(c.crew_id, f"unknown airline {c.airline!r}")
+        for p in seed.pairings:
+            for s in p.crew:
+                member = crew.get(s.crew_id)
+                if member and p.aircraft in owner and member.airline != owner[p.aircraft]:
+                    error(
+                        p.pairing_id,
+                        f"{s.crew_id} works for {member.airline}, not {owner[p.aircraft]}",
+                    )
+    for c in seed.crew:
+        if c.command_qualified and c.rank is not Rank.FIRST_OFFICER:
+            error(c.crew_id, "only a first officer is upgraded to command")
+        if c.right_seat_qualified and c.rank is not Rank.CAPTAIN:
+            error(c.crew_id, "only a captain is cleared for the right seat")
+    for dup in _duplicates(g.gate for g in seed.emergency_gates):
+        error(dup, "duplicate emergency gate")
 
     # -- Contacts -----------------------------------------------------------
     for dup in _duplicates(f"{c.team} {c.scope}" for c in seed.contacts):

@@ -145,6 +145,90 @@ def store_rejection(
     )
 
 
+SUGGESTION = "SUGGEST"
+
+
+def add_suggestion(
+    table: Any,
+    disruption_id: str,
+    by: str,
+    desk: str,
+    seat: str,
+    crew_id: str,
+    note: str,
+    at: datetime,
+) -> dict[str, Any]:
+    """A controller's suggestion of cover for another desk's disruption. Advisory only:
+    the owning desk may adopt it, nothing else happens."""
+    item = {
+        schema.PK: disruption_pk(disruption_id),
+        schema.SK: f"{SUGGESTION}{S}{_iso(at)}{S}{by}",
+        "entity": "suggestion",
+        "disruption_id": disruption_id,
+        "by": by,
+        "desk": desk,
+        "seat": seat,
+        "crew_id": crew_id,
+        "note": note,
+        "at": _iso(at),
+    }
+    table.put_item(Item=item)
+    return item
+
+
+def suggestions_for(table: Any, disruption_id: str) -> list[dict[str, Any]]:
+    return table.query(
+        KeyConditionExpression=Key(schema.PK).eq(disruption_pk(disruption_id))
+        & Key(schema.SK).begins_with(f"{SUGGESTION}{S}")
+    ).get("Items", [])
+
+
+FILED = "FILED"
+
+
+def record_filed(table: Any, report: Report) -> None:
+    """Note a report against whoever filed it, when it is queued.
+
+    The queue and the worker may still refuse it (an unknown flight, a duplicate), and a
+    refusal is filed under the report id alone, so without this nobody could find out what
+    became of their own report. Also listed for the reporting desk (``FILED`` in gsi1), so
+    reporters see what crew report about themselves."""
+    by = report.reported_by
+    table.put_item(
+        Item={
+            schema.PK: f"USER{S}{by.user_id}",
+            schema.SK: f"{FILED}{S}{_iso(report.reported_utc)}{S}{report.report_id}",
+            schema.GSI1_PK: FILED,
+            schema.GSI1_SK: f"{_iso(report.reported_utc)}{S}{report.report_id}",
+            "entity": "filed_report",
+            "report_id": report.report_id,
+            "user_id": by.user_id,
+            "roles": sorted(r.value for r in by.roles),
+            "report": to_dynamo(report.to_dict()),
+        }
+    )
+
+
+def filed_by(table: Any, user_id: str, limit: int = 30) -> list[dict[str, Any]]:
+    """The reports a person filed, newest first."""
+    return table.query(
+        KeyConditionExpression=Key(schema.PK).eq(f"USER{S}{user_id}")
+        & Key(schema.SK).begins_with(f"{FILED}{S}"),
+        ScanIndexForward=False,
+        Limit=limit,
+    ).get("Items", [])
+
+
+def filed_recently(table: Any, limit: int = 100) -> list[dict[str, Any]]:
+    """Every report filed, newest first."""
+    return table.query(
+        IndexName=schema.GSI1,
+        KeyConditionExpression=Key(schema.GSI1_PK).eq(FILED),
+        ScanIndexForward=False,
+        Limit=limit,
+    ).get("Items", [])
+
+
 def rejections_for(table: Any, report_id: str) -> list[dict[str, Any]]:
     return table.query(
         KeyConditionExpression=Key(schema.PK).eq(f"REPORT{S}{report_id}")

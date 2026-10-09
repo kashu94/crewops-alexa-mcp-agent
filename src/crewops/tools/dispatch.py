@@ -42,8 +42,10 @@ ROLE_TOOLS: dict[Role, frozenset[str]] = {
     Role.APPROVER: TOOL_NAMES,
     Role.AUDITOR: TOOL_NAMES,
     Role.REPORTER: RULE_TOOLS | {"check_gate", "list_controllers", "suggest_flight_nos"},
-    Role.ADMIN: RULE_TOOLS | {"list_controllers", "controller_issue_counts"},
-    Role.SUPER_ADMIN: RULE_TOOLS | {"list_controllers", "controller_issue_counts"},
+    Role.ADMIN: RULE_TOOLS
+    | {"list_controllers", "controller_issue_counts", "list_open_disruptions"},
+    Role.SUPER_ADMIN: RULE_TOOLS
+    | {"list_controllers", "controller_issue_counts", "list_open_disruptions"},
     Role.CREW: RULE_TOOLS | {"duty_clock", "notification_brief", "check_legality"},
 }
 CREW_SELF_ONLY = frozenset({"duty_clock", "notification_brief", "check_legality"})

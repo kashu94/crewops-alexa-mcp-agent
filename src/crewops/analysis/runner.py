@@ -7,18 +7,21 @@ were stored before analysis existed, or need analysing again after a failure).
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from crewops.analysis.disruption import analyse
 from crewops.domain import DataError, GateSlot, Report, ReportType
+from crewops.domain.desks import assign_desk
 from crewops.domain.reports import crew_out_of
 from crewops.engine import build_world
 from crewops.engine.world import World
 from crewops.ingestion.seed import SeedData
 from crewops.store.items import from_dynamo
 from crewops.store.ops_store import OpsStore
+from crewops.store.plans import PLAN_COMMITTED, plans_with_status
 from crewops.store.reports import (
     STATUS_OPTIONS_READY,
     STATUS_REPORTED,
@@ -36,6 +39,47 @@ UNAVAILABLE_STATUSES = (*OPEN_STATUSES, "COMMITTED", "CLOSED")
 """Disruptions whose crew are out on their dates. A committed or closed one still counts:
 the crew member is still sick (or still lacks the certificate), whatever was done about
 their seats."""
+
+
+def absences_from(items: list[dict[str, Any]]) -> dict[tuple[str, date], datetime]:
+    """(crew id, date) -> when an absence reported from a time starts that day. A whole-day
+    absence for the same person and date wins: they are out all day."""
+    since: dict[tuple[str, date], datetime | None] = {}
+    for item in items:
+        try:
+            report = Report.from_dict(from_dynamo(item["report"]))
+        except (DataError, KeyError, TypeError):
+            continue
+        if report.report_type not in (
+            ReportType.CREW_UNAVAILABLE,
+            ReportType.MULTIPLE_CREW_UNAVAILABLE,
+        ):
+            continue
+        d = report.details
+        first = date.fromisoformat(d["from_date"])
+        at = (
+            datetime.fromisoformat(d["from_utc"].replace("Z", "+00:00"))
+            if d.get("from_utc")
+            else None
+        )
+        for crew_id in crew_out_of(report.report_type, d):
+            key = (crew_id, first)
+            if at is None or key in since and since[key] is None:
+                since[key] = None
+            else:
+                since[key] = min(at, since.get(key) or at)
+    return {k: v for k, v in since.items() if v is not None}
+
+
+def cancelled_flights(table: Any) -> frozenset[str]:
+    """Flights an approved plan cancelled: a cancelled trip's flights, which nobody flies."""
+    return frozenset(
+        f
+        for plan in plans_with_status(table, PLAN_COMMITTED)
+        for a in plan.get("assignments", [])
+        if a.get("strategy") == "cancel"
+        for f in a.get("flights", [])
+    )
 
 
 def unavailable_crew(
@@ -67,6 +111,24 @@ def unavailable_crew(
     return {crew: tuple(sorted(set(days))) for crew, days in out.items()}
 
 
+ALL_STATUSES = (*OPEN_STATUSES, "COMMITTED", "CLOSED")
+
+
+def next_desk(table: Any) -> str:
+    """The desk the next analysed disruption goes to: the controller with the fewest open
+    disruptions, then the fewest overall (so ties take turns), then desk order."""
+    open_counts: Counter[str] = Counter()
+    totals: Counter[str] = Counter()
+    for status in ALL_STATUSES:
+        for item in disruptions_with_status(table, status):
+            desk_id = (from_dynamo(item.get("analysis") or {})).get("desk")
+            if desk_id:
+                totals[desk_id] += 1
+                if status in OPEN_STATUSES:
+                    open_counts[desk_id] += 1
+    return assign_desk(open_counts, totals).desk_id
+
+
 def unavailable_items(table: Any) -> list[dict[str, Any]]:
     return [
         item for status in UNAVAILABLE_STATUSES for item in disruptions_with_status(table, status)
@@ -93,12 +155,19 @@ class Operation:
 
         A crew member reported sick in one disruption must not be offered as cover in
         another, so the crew named by open crew-unavailable and certification-lapse
-        reports are marked unavailable on the dates those reports cover.
+        reports are marked unavailable on the dates those reports cover. Flights an approved
+        plan cancelled are marked cancelled: nobody flies them, or positions on them.
         """
         seed = OpsStore(table).load_seed()
         world = build_world(seed)
+        items = unavailable_items(table)
         return cls(
-            world=replace(world, unavailable=unavailable_crew(world, unavailable_items(table))),
+            world=replace(
+                world,
+                unavailable=unavailable_crew(world, items),
+                unavailable_from=absences_from(items),
+                cancelled=cancelled_flights(table),
+            ),
             gates=seed.gates,
             seed=seed,
         )
@@ -120,7 +189,9 @@ def analyse_item(table: Any, item: dict[str, Any], operation: Operation) -> RunR
     report = Report.from_dict(from_dynamo(item["report"]))
     contacts = operation.seed.contacts if operation.seed else ()
     analysis = analyse(operation.world, report, operation.gates, contacts)
-    outcome = store_analysis(table, disruption_id, analysis.to_dict(), datetime.now(UTC))
+    doc = analysis.to_dict()
+    doc["desk"] = next_desk(table)
+    outcome = store_analysis(table, disruption_id, doc, datetime.now(UTC))
     if outcome is AnalysisOutcome.STORED:
         log.info("analysed %s: %s", disruption_id, analysis.summary)
     return RunResult(disruption_id, str(outcome), analysis.summary)

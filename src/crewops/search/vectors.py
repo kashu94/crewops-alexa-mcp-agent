@@ -30,8 +30,8 @@ from crewops.search.hybrid import blend, bm25
 RULES, INTENTS, SCENARIOS = "rules", "intents", "scenarios"
 
 ID_PATTERNS = (
-    (re.compile(r"\bDX\d{2,4}-\d{4}-\d{2}-\d{2}\b", re.I), "<flight>"),
-    (re.compile(r"\bDX\d{2,4}\b", re.I), "<flight>"),
+    (re.compile(r"\b[A-Z]{2}\d{2,4}-\d{4}-\d{2}-\d{2}\b"), "<flight>"),
+    (re.compile(r"\b(?:DX|KS|NG)\d{2,4}\b", re.I), "<flight>"),
     (re.compile(r"\bC-\d{4}\b", re.I), "<crew>"),
     (re.compile(r"\bP-\d{4}\b", re.I), "<pairing>"),
     (re.compile(r"\bVT-[A-Z]{3}\b", re.I), "<aircraft>"),

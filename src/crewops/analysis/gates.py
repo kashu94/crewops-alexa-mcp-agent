@@ -8,7 +8,9 @@ parks overnight) until it leaves (``GateSlot``). Two things take a gate away fro
 * the flight before it at that gate leaves late, and still holds the gate when the next
   one should start boarding: the next one moves instead.
 
-When no gate is free the flight boards from a remote stand, with passengers taken out by
+When no ordinary gate is free, the station's emergency gate takes it: each station keeps
+one or two gates back for exactly this (``emergency_gates.json``). Only when those are taken
+too does the flight board from a remote stand, with passengers taken out by
 bus, which takes ``REMOTE_BOARDING`` longer. That small delay is then checked against the
 crew's duty like any other. Pure and deterministic: gates are tried in order, and each
 move is counted before the next is placed.
@@ -16,7 +18,7 @@ move is counted before the next is placed.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -43,6 +45,10 @@ class StandMove:
     delay_minutes: int
     """Added to the departure: bus boarding from a remote stand, else 0."""
     why: str
+    alternatives: tuple[str, ...] = ()
+    """Other gates at the station free for the whole slot, for the controller to choose."""
+    emergency: bool = False
+    """It took one of the station's emergency gates."""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -55,6 +61,8 @@ class StandMove:
             "booked": self.booked,
             "delay_minutes": self.delay_minutes,
             "why": self.why,
+            "alternatives": list(self.alternatives),
+            "emergency": self.emergency,
         }
 
 
@@ -79,9 +87,20 @@ def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: date
 class GateBoard:
     """Who holds which gate when, with moves applied as they are made."""
 
-    def __init__(self, gates: Iterable[GateSlot], flights: Mapping[str, Flight]) -> None:
-        self.slots = sorted(gates, key=lambda g: (g.start_utc, g.flight_id))
+    def __init__(
+        self,
+        gates: Iterable[GateSlot],
+        flights: Mapping[str, Flight],
+        emergency: Mapping[str, Sequence[str]] | None = None,
+        cancelled: frozenset[str] = frozenset(),
+    ) -> None:
+        every = sorted(gates, key=lambda g: (g.start_utc, g.flight_id))
+        self.gates_of = every
+        """Every slot, for the gates each station has, whoever holds them."""
+        self.slots = [g for g in every if g.flight_id not in cancelled]
+        """The slots of flights still operating: a cancelled flight holds no gate."""
         self.flights = flights
+        self.emergency = {k: tuple(v) for k, v in (emergency or {}).items()}
         self.held: dict[str, list[tuple[datetime, datetime, str]]] = {}
         for g in self.slots:
             self.held.setdefault(g.gate, []).append((g.start_utc, g.end_utc, g.flight_id))
@@ -116,16 +135,18 @@ class GateBoard:
         end = until or slot.end_utc
         here = current or slot.gate
         self.release(slot.flight_id, here)
-        target = next(
-            (
-                gate
-                for gate in station_gates(self.slots, station_of(slot.gate))
-                if gate not in closed
-                and gate != here
-                and not self.holding(gate, slot.start_utc, end)
-            ),
-            None,
-        )
+        station = station_of(slot.gate)
+        ordinary = [
+            gate
+            for gate in station_gates(self.gates_of, station)
+            if gate not in closed and gate != here and not self.holding(gate, slot.start_utc, end)
+        ]
+        held_back = [
+            gate
+            for gate in self.emergency.get(station, ())
+            if gate not in closed and not self.holding(gate, slot.start_utc, end)
+        ]
+        target = (ordinary or held_back or [None])[0]
         flight = self.flights.get(slot.flight_id)
         if target is not None:
             self.held.setdefault(target, []).append((slot.start_utc, end, slot.flight_id))
@@ -139,6 +160,8 @@ class GateBoard:
             booked=flight.booked if flight else None,
             delay_minutes=0 if target else int(REMOTE_BOARDING.total_seconds() // 60),
             why=why,
+            alternatives=tuple(g for g in (*ordinary, *held_back) if g != target),
+            emergency=bool(target) and not ordinary,
         )
 
 

@@ -31,6 +31,7 @@ from crewops.domain import (
     RosterException,
     Rule,
 )
+from crewops.domain.airlines import Airline, EmergencyGate
 from crewops.domain.contacts import Contact
 from crewops.store import schema
 from crewops.store.schema import SEPARATOR as S
@@ -96,7 +97,19 @@ def _crew(c: Crew) -> dict[str, Any]:
         "seniority": c.seniority,
         "reachability_minutes": c.reachability_minutes,
         "status": c.status,
+        **({"airline": c.airline} if c.airline else {}),
+        **({"experience_years": c.experience_years} if c.experience_years is not None else {}),
+        **({"command_qualified": True} if c.command_qualified else {}),
+        **({"right_seat_qualified": True} if c.right_seat_qualified else {}),
     }
+
+
+def _airline(a: Airline) -> dict[str, Any]:
+    return {"code": a.code, "name": a.name, "aircraft": list(a.aircraft), "color": a.color}
+
+
+def _emergency(g: EmergencyGate) -> dict[str, Any]:
+    return {"gate": g.gate, "station": g.station}
 
 
 def _cert(c: Certification) -> dict[str, Any]:
@@ -209,6 +222,9 @@ def _costs(c: CostTable) -> dict[str, Any]:
         "delay_cost_per_duty_hour": c.delay_per_duty_hour,
         "cancellation_per_flight": c.cancellation_per_flight,
         "hotel_overnight": c.hotel_overnight,
+        "seniority_allowance_pilot": c.seniority_allowance_pilot,
+        "seniority_allowance_cabin": c.seniority_allowance_cabin,
+        "travel_per_10_minutes": c.travel_per_10_minutes,
     }
 
 
@@ -320,6 +336,15 @@ CODECS: dict[type, Codec] = {
     GateSlot: Codec("gate_slot", _gate_keys, _gate, GateSlot.from_dict),
     Rule: Codec("rule", lambda r: _keys("CONFIG", f"RULE{S}{r.rule_id}"), _rule, Rule.from_dict),
     CostTable: Codec("costs", lambda c: _keys("CONFIG", "COSTS"), _costs, CostTable.from_dict),
+    Airline: Codec(
+        "airline", lambda a: _keys("CONFIG", f"AIRLINE{S}{a.code}"), _airline, Airline.from_dict
+    ),
+    EmergencyGate: Codec(
+        "emergency_gate",
+        lambda g: _keys(f"GATE{S}{g.gate}", "EMERGENCY"),
+        _emergency,
+        EmergencyGate.from_dict,
+    ),
     Contact: Codec(
         "contact",
         lambda c: _keys("CONFIG", f"CONTACT{S}{c.team}{S}{c.scope}"),

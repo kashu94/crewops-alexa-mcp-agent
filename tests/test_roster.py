@@ -90,7 +90,7 @@ def test_new_warning_is_reported_but_accepted(seed):
     odd = {
         "crew_id": cert.crew_id,
         "cert_type": str(cert.cert_type),
-        "valid_from": "2099-01-01",  # after any valid_to in the data
+        "valid_from": "2099-01-29",  # after any valid_to in the data
         "valid_to": cert.valid_to.isoformat(),
     }
     result, _ = ingest(raw({"certifications": [odd]}), seed, "uploads/c.json")

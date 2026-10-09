@@ -70,8 +70,7 @@ def who(caller: Caller, world: World) -> str:
     desk = next((d for d in DESKS if d.desk_id == caller.desk), None)
     if desk:
         return (
-            f"You're {desk.controller}, signed in as {caller.user_id}: {roles} on {desk.desk_id}, "
-            f"watching {' and '.join(desk.aircraft)}."
+            f"You're {desk.controller}, signed in as {caller.user_id}: {roles} on {desk.desk_id}."
         )
     return f"You're signed in as {caller.user_id}, with the {roles} role."
 

@@ -1,11 +1,25 @@
 "use client";
 
-import { Lock, Plane, ShieldCheck, Sparkles, Zap } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { ArrowRight, Lock, LogOut, Plane, ShieldCheck, Sparkles, Zap } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
 
+import { RouteMap } from "@/components/login-art";
 import { Button, Field, Notice, Spinner } from "@/components/ui";
-import { signIn } from "@/lib/client";
+import { signIn, signOut } from "@/lib/client";
+import { homeFor, type Me } from "@/lib/roles";
+
+/** Who is signed in in this browser, without the client's sign-in redirect (this is the
+ * sign-in page). */
+async function signedIn(): Promise<Me | null> {
+  const r = await fetch("/api/tools/whoami", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  }).catch(() => null);
+  if (!r?.ok) return null;
+  const data = (await r.json().catch(() => null)) as { result?: Me } | null;
+  return data?.result ?? null;
+}
 
 const POINTS = [
   { icon: Zap, text: "Disruptions analysed the moment they are reported" },
@@ -14,9 +28,13 @@ const POINTS = [
 ];
 
 export default function Login() {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [current, setCurrent] = useState<Me | null>(null);
+
+  useEffect(() => {
+    signedIn().then(setCurrent);
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -25,7 +43,8 @@ export default function Login() {
     setError(null);
     try {
       await signIn(String(form.get("username") ?? ""), String(form.get("password") ?? ""));
-      router.replace("/");
+      const me = await signedIn();
+      window.location.replace(me ? homeFor(me.roles) : "/login");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
       setBusy(false);
@@ -37,6 +56,9 @@ export default function Login() {
       <section className="relative hidden overflow-hidden bg-gradient-to-br from-[#0c2340] via-[#0f3a66] to-sky-600 p-12 text-white lg:flex lg:flex-col lg:justify-between">
         <div aria-hidden className="absolute -right-24 -top-24 h-96 w-96 rounded-full bg-sky-400/20 blur-3xl" />
         <div aria-hidden className="absolute -bottom-32 left-10 h-96 w-96 rounded-full bg-indigo-400/20 blur-3xl" />
+        <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-[48%] opacity-90">
+          <RouteMap />
+        </div>
         <div className="relative flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/15 backdrop-blur">
             <Plane size={20} />
@@ -68,6 +90,28 @@ export default function Login() {
               <Plane size={20} />
             </span>
           </div>
+          {current && (
+            <div className="mb-6 rounded-2xl border border-sky-200 bg-accent-soft p-4">
+              <p className="text-sm text-sky-900">
+                This browser is signed in as <b>{current.user_id}</b> ({current.roles.join(", ").replace(/_/g, " ")}).
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button type="button" tone="accent" onClick={() => window.location.replace(homeFor(current.roles))}>
+                  Continue <ArrowRight size={14} />
+                </Button>
+                <Button
+                  type="button"
+                  tone="secondary"
+                  onClick={async () => {
+                    await signOut().catch(() => undefined);
+                    setCurrent(null);
+                  }}
+                >
+                  <LogOut size={14} /> Sign in as someone else
+                </Button>
+              </div>
+            </div>
+          )}
           <h2 className="text-2xl font-semibold tracking-tight">Sign in</h2>
           <p className="mt-1 text-sm text-muted">Use the account your administrator created.</p>
           <form onSubmit={submit} className="mt-6 flex flex-col gap-4">

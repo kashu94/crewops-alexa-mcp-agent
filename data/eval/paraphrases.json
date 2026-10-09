@@ -4,7 +4,7 @@
     {
       "id": "P01",
       "of": "Q01",
-      "prompt": "Which crew are standing by in Bangalore on the 15th, and during what hours can we ring them?"
+      "prompt": "Which crew are standing by in Bangalore on the 13th, and during what hours can we ring them?"
     },
     {
       "id": "P02",
@@ -14,17 +14,17 @@
     {
       "id": "P03",
       "of": "Q03",
-      "prompt": "What leaves Delhi on 15 September?"
+      "prompt": "What leaves Delhi on 13 October?"
     },
     {
       "id": "P04",
       "of": "Q04",
-      "prompt": "Whose paperwork lapses in the month after 15 Sep?"
+      "prompt": "Whose paperwork lapses in the month after 13 Oct?"
     },
     {
       "id": "P05",
       "of": "Q05",
-      "prompt": "What tail flies DX433 on 17 Sep and what's its capacity?"
+      "prompt": "What tail flies KS433 on 15 Oct and what's its capacity?"
     },
     {
       "id": "P06",
@@ -44,12 +44,12 @@
     {
       "id": "P09",
       "of": "Q09",
-      "prompt": "What do we operate from Bengaluru to Mumbai on the 17th?"
+      "prompt": "What do we operate from Bengaluru to Mumbai on the 15th?"
     },
     {
       "id": "P10",
       "of": "Q10",
-      "prompt": "Count everything we're operating on 16 September."
+      "prompt": "Count everything we're operating on 14 October."
     },
     {
       "id": "P11",
@@ -74,7 +74,7 @@
     {
       "id": "P15",
       "of": "Q15",
-      "prompt": "Who's the purser on VT-DXA's trip on 16 Sep?"
+      "prompt": "Who's the purser on VT-DXA's trip on 14 Oct?"
     },
     {
       "id": "P16",
@@ -94,12 +94,12 @@
     {
       "id": "P19",
       "of": "Q19",
-      "prompt": "Hyderabad shuts 06:00–10:00Z on 18 Sep. What gets hit?"
+      "prompt": "Hyderabad shuts 06:00–10:00Z on 16 Oct. What gets hit?"
     },
     {
       "id": "P20",
       "of": "Q20",
-      "prompt": "DX421 on 17 Sep goes two hours late. Are the crew still OK to finish the day?"
+      "prompt": "DX421 on 15 Oct goes two hours late. Are the crew still OK to finish the day?"
     },
     {
       "id": "P21",
@@ -109,12 +109,12 @@
     {
       "id": "P22",
       "of": "Q22",
-      "prompt": "Is C-2087 allowed to do their duty on 18 Sep?"
+      "prompt": "Is C-2087 allowed to do their duty on 16 Oct?"
     },
     {
       "id": "P23",
       "of": "Q23",
-      "prompt": "Someone finished at 14:45Z on 15 Sep. When's the soonest they can sign on again?"
+      "prompt": "Someone finished at 14:45Z on 13 Oct. When's the soonest they can sign on again?"
     },
     {
       "id": "P24",
@@ -124,17 +124,17 @@
     {
       "id": "P25",
       "of": "Q25",
-      "prompt": "Dropping DX454 on 17 Sep: how many people does that hit and what does it cost us?"
+      "prompt": "Dropping NG454 on 15 Oct: how many people does that hit and what does it cost us?"
     },
     {
       "id": "P26",
       "of": "Q26",
-      "prompt": "Who is above 45 hours on duty for the week to 16 Sep?"
+      "prompt": "Who is above 45 hours on duty for the week to 14 Oct?"
     },
     {
       "id": "P27",
       "of": "Q27",
-      "prompt": "The VT-DXD skipper goes sick on 17 Sep at 02:00Z. Which standby captains can we actually call at that hour?"
+      "prompt": "The VT-DXD skipper goes sick on 15 Oct at 02:00Z. Which standby captains can we actually call at that hour?"
     },
     {
       "id": "P28",
@@ -144,7 +144,7 @@
     {
       "id": "P29",
       "of": "Q29",
-      "prompt": "Goa is shut 04:00–08:00Z on 18 Sep. Which services does that touch?"
+      "prompt": "Goa is shut 04:00–08:00Z on 16 Oct. Which services does that touch?"
     },
     {
       "id": "P30",
@@ -159,22 +159,22 @@
     {
       "id": "P32",
       "of": "Q32",
-      "prompt": "The VT-DXC and VT-DXD captains are both off sick on 19 Sep. What's the best way to cover the two together?"
+      "prompt": "The VT-DXC and VT-DXD captains are both off sick on 17 Oct. What's the best way to cover the two together?"
     },
     {
       "id": "P33",
       "of": "Q33",
-      "prompt": "VT-DXB is running two hours late on 17 Sep. How should the desk handle the duty-time problem?"
+      "prompt": "VT-DXB is running two hours late on 15 Oct. How should the desk handle the duty-time problem?"
     },
     {
       "id": "P34",
       "of": "Q34",
-      "prompt": "C-2087's licence has run out. Sort out their 19 Sep trip."
+      "prompt": "C-2087's licence has run out. Sort out their 17 Oct trip."
     },
     {
       "id": "P35",
       "of": "Q35",
-      "prompt": "Hyderabad closes 06:00–10:00Z on 18 Sep. How do we put the operation back together?"
+      "prompt": "Hyderabad closes 06:00–10:00Z on 16 Oct. How do we put the operation back together?"
     },
     {
       "id": "P36",
@@ -184,7 +184,7 @@
     {
       "id": "P37",
       "of": "Q37",
-      "prompt": "Cheapest way to replace the VT-DXE first officer on 19 Sep who reports sick at 02:30Z?"
+      "prompt": "Cheapest way to replace the VT-DXE first officer on 17 Oct who reports sick at 02:30Z?"
     },
     {
       "id": "P38",

@@ -14,7 +14,7 @@ def test_contact_and_government_ids_are_removed():
 
 
 def test_operational_data_is_kept():
-    text = "A. Nair (C-1042) on P-2291, DX412-2026-09-15 at 06:00Z, ₹18,500, VT-DXC, 1500000"
+    text = "A. Nair (C-1042) on P-2291, KS412-2026-10-13 at 06:00Z, ₹18,500, VT-DXC, 1500000"
     assert redact_text(text) == text
 
 
@@ -29,9 +29,9 @@ def test_sensitive_fields_are_removed_at_any_depth():
 
 def test_dates_and_flight_ids_are_never_taken_for_cards():
     for text in (
-        "2026-09-14 2026-09-16",
-        "2026-09-15 2026-09-15",
-        "DX404-2026-09-16 2026-09-16T08:30:00Z",
+        "2026-10-12 2026-10-14",
+        "2026-10-13 2026-10-13",
+        "DX404-2026-10-14 2026-10-14T08:30:00Z",
     ):
         assert redact_text(text) == text
 

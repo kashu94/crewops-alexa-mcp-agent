@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 
 MAX_QUESTION = 1000
 FIRST_PERSON_RE = re.compile(r"\b(I|me|my|mine)\b", re.I)
+MY_DESK_RE = re.compile(r"\b(my desk|my disruptions|on my plate|assigned to me|for me)\b", re.I)
 SCOPE = (
     "I can help with crew control: rosters and reserves, duty hours, legality, cover for "
     "a sick call or delay, disruption impact, gates and callout messages. What would you "
@@ -204,6 +205,15 @@ class Pipeline:
         notes: list[str] = ([screening_note] if screening_note else []) + context_notes
         trace: list[TraceEntry] = []
         planned = seed_calls(route, question, self.vocab, self.tools)
+        if previous is not None and previous.crew_ids:
+            for call in planned:
+                if call.name == "suggest_crew_ids":
+                    call.args["prefer"] = list(previous.crew_ids[:3])
+        if caller.desk and MY_DESK_RE.search(question):
+            # "on my desk": the signed-in controller's desk, from their sign-in.
+            for call in planned:
+                if call.name == "list_open_disruptions":
+                    call.args["desk"] = caller.desk
         trace += self._run(planned, caller, allowed, notes)
         for _ in range(MAX_FOLLOWUP_ROUNDS):
             more = followup_calls(route, trace)

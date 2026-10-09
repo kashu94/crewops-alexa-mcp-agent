@@ -139,7 +139,7 @@ export default function Approvals() {
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
-            Four-eyes approval queue
+            Plans waiting for approval
             {items && items.length > 0 && (
               <span className="animate-beacon rounded-full bg-pending px-2.5 py-0.5 text-xs font-bold text-white">
                 {items.length}

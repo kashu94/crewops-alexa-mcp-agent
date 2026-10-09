@@ -10,23 +10,22 @@ import { expiresSoon } from "./tokens";
 const ACCESS = "crewops_access";
 const ID = "crewops_id";
 const REFRESH = "crewops_refresh";
-const REFRESH_DAYS = 30;
 
-function options(maxAge: number) {
-  return {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    path: "/",
-    maxAge,
-  };
-}
+// Browser-session cookies (no expiry): closing the browser signs out. A shared ops-room
+// screen must not stay signed in as the last person who used it. The tokens themselves
+// still expire (access and ID after an hour, renewed with the refresh token).
+const OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/",
+};
 
 export async function saveTokens(tokens: Tokens): Promise<void> {
   const jar = await cookies();
-  jar.set(ACCESS, tokens.access, options(60 * 60));
-  jar.set(ID, tokens.id, options(60 * 60));
-  if (tokens.refresh) jar.set(REFRESH, tokens.refresh, options(REFRESH_DAYS * 24 * 60 * 60));
+  jar.set(ACCESS, tokens.access, OPTIONS);
+  jar.set(ID, tokens.id, OPTIONS);
+  if (tokens.refresh) jar.set(REFRESH, tokens.refresh, OPTIONS);
 }
 
 export async function clearTokens(): Promise<void> {

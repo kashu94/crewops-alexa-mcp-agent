@@ -41,7 +41,13 @@ from crewops.engine.impact import (
     joint_plan,
     pairing_impact,
 )
-from crewops.engine.options import AlreadyStarted, Option, OptionsResult, find_options
+from crewops.engine.options import (
+    AlreadyStarted,
+    Option,
+    OptionsResult,
+    TripCancelled,
+    find_options,
+)
 from crewops.engine.world import World
 
 TOP_OPTIONS = 5
@@ -86,12 +92,15 @@ class SeatAnalysis:
     """The rostered crew member who can no longer fly it, when there is one."""
     impact: PairingImpact
     options: OptionsResult | None
-    """None when the pairing has already started and can no longer be re-crewed."""
+    """None when the pairing has already started, or was cancelled, and so can no longer
+    be re-crewed."""
     note: str = ""
     delay_hours: float = 0.0
     """The schedule the options were judged against: a delayed day needs cover legal for
     the day as it will now run, and approval re-checks against the same."""
     delay_date: date | None = None
+    cancelled: bool = False
+    """An approved plan cancelled the trip: nothing to re-crew."""
 
     def to_dict(self) -> dict[str, Any]:
         doc: dict[str, Any] = {
@@ -105,11 +114,12 @@ class SeatAnalysis:
                 "uncovered_flights": list(self.impact.uncovered_flights),
                 "at_risk_flights": list(self.impact.at_risk_flights),
                 "passengers": self.impact.passengers,
+                "flown_before": list(self.impact.flown_before),
             },
             "note": self.note,
         }
         if self.options is None:
-            doc["status"] = "already_started"
+            doc["status"] = "cancelled" if self.cancelled else "already_started"
             return doc
         r = self.options
         doc.update(
@@ -146,7 +156,9 @@ class Analysis:
     handling: dict[str, str] = field(default_factory=dict)
     """How it gets resolved: ``kind`` (recrew, decision or internal) and one sentence."""
     aircraft: tuple[str, ...] = ()
-    """Every aircraft it touches, which decides the desks it belongs to."""
+    """Every aircraft it touches."""
+    airlines: tuple[str, ...] = ()
+    """The airlines those aircraft fly for."""
 
     def to_dict(self) -> dict[str, Any]:
         doc: dict[str, Any] = {
@@ -166,6 +178,7 @@ class Analysis:
             "notices": list(self.notices[:MAX_NOTES]),
             "handling": dict(self.handling),
             "aircraft": list(self.aircraft),
+            "airlines": list(self.airlines),
             "joint_plan": None,
             "omitted": {
                 name: n - cap
@@ -242,12 +255,22 @@ def _seat_for(
     dates: set[date] | None,
     delay_hours: float = 0.0,
     delay_date: date | None = None,
+    from_utc: datetime | None = None,
 ) -> SeatAnalysis:
-    impact = pairing_impact(world, seat.pairing_id, dates)
+    impact = pairing_impact(world, seat.pairing_id, dates, from_utc)
     try:
         options = find_options(world, seat.pairing_id, seat.role, delay_hours, delay_date)
     except AlreadyStarted as exc:
-        return SeatAnalysis(seat, crew_out, impact, None, str(exc), delay_hours, delay_date)
+        return SeatAnalysis(
+            seat,
+            crew_out,
+            impact,
+            None,
+            str(exc),
+            delay_hours,
+            delay_date,
+            cancelled=isinstance(exc, TripCancelled),
+        )
     return SeatAnalysis(seat, crew_out, impact, options, "", delay_hours, delay_date)
 
 
@@ -261,7 +284,7 @@ def _seat_summary(seats: tuple[SeatAnalysis, ...]) -> str:
     for s in seats:
         head = f"{s.seat.pairing_id} {s.seat.role.value}"
         if s.options is None:
-            parts.append(f"{head}: already started")
+            parts.append(f"{head}: {'cancelled' if s.cancelled else 'already started'}")
         elif s.options.recommended:
             rec = s.options.recommended
             parts.append(f"{head}: {rec.action}, {_inr(rec.cost_inr)}")
@@ -355,13 +378,61 @@ def _crew_unavailable(world: World, report: Report) -> Analysis:
             f"{who} is unavailable {start} to {end} but has no rostered duty then: "
             "nothing to cover.",
         )
-    seats = tuple(_seat_for(world, s, d["crew_id"], hit) for s, hit in pairs)
+    part = (
+        datetime.fromisoformat(d["from_utc"].replace("Z", "+00:00")) if d.get("from_utc") else None
+    )
+    seats, done = _still_to_fly(
+        [_seat_for(world, s, d["crew_id"], hit, from_utc=part) for s, hit in pairs]
+    )
+    when = f" from {_iso(part)}" if part else ""
+    if not seats:
+        return Analysis(
+            report.report_id,
+            report.report_type,
+            f"{who} unavailable{when} ({d['reason']}), after flying every leg of their "
+            "trips: nothing to cover.",
+            notes=done,
+        )
+    notes = done + tuple(n for s in seats if (n := _joins_mid_day(world, s, part)))
     return Analysis(
         report.report_id,
         report.report_type,
-        f"{who} unavailable ({d['reason']}): " + _seat_summary(seats),
+        f"{who} unavailable{when} ({d['reason']}): " + _seat_summary(seats),
         seats=seats,
         joint=_with_joint(list(seats), world),
+        notes=notes,
+    )
+
+
+def _still_to_fly(
+    seats: list[SeatAnalysis],
+) -> tuple[tuple[SeatAnalysis, ...], tuple[str, ...]]:
+    """The seats that still have a flight to crew, and a note for each whose trip was
+    already flown in full before the crew member fell ill (an absence from a time)."""
+    keep, done = [], []
+    for s in seats:
+        i = s.impact
+        if i.flown_before and not i.uncovered_flights and not i.at_risk_flights:
+            done.append(
+                f"{s.crew_out} had already flown every leg of {s.seat.pairing_id} "
+                "before falling ill: nothing to cover there."
+            )
+        else:
+            keep.append(s)
+    return tuple(keep), tuple(done)
+
+
+def _joins_mid_day(world: World, seat: SeatAnalysis, part: datetime | None) -> str:
+    """When someone falls ill part-way through a day, the cover joins where they stop."""
+    if part is None or not seat.impact.flown_before or not seat.impact.uncovered_flights:
+        return ""
+    first = world.flights[seat.impact.uncovered_flights[0]]
+    flown = ", ".join(f.split("-")[0] for f in seat.impact.flown_before)
+    return (
+        f"{seat.crew_out} still flies {flown}; the cover joins at {first.dep_station} for "
+        f"{first.flight_no} at {_iso(first.dep_utc)[11:16]}Z, positioned there if based "
+        "elsewhere (that fare is not in the costs shown). Cover is checked against the whole "
+        "duty day, which is the stricter test."
     )
 
 
@@ -372,26 +443,36 @@ def _multiple_crew_unavailable(world: World, report: Report) -> Analysis:
     d = report.details
     start, end = date.fromisoformat(d["from_date"]), date.fromisoformat(d["to_date"])
     dates = {start + timedelta(days=i) for i in range((end - start).days + 1)}
+    part = (
+        datetime.fromisoformat(d["from_utc"].replace("Z", "+00:00")) if d.get("from_utc") else None
+    )
     seats: list[SeatAnalysis] = []
     idle = []
     for crew_id in d["crew_ids"]:
         pairs = _crew_out_seats(world, crew_id, dates)
         if not pairs:
             idle.append(crew_id)
-        seats += [_seat_for(world, s, crew_id, hit) for s, hit in pairs]
+        seats += [_seat_for(world, s, crew_id, hit, from_utc=part) for s, hit in pairs]
+    kept, done = _still_to_fly(seats)
+    seats = list(kept)
     who = f"{len(d['crew_ids'])} crew unavailable {start} to {end} ({d['reason']})"
     if not seats:
         return Analysis(
             report.report_id,
             report.report_type,
-            f"{who}, but none has rostered duty then: nothing to cover.",
+            f"{who}, but none has a flight left to crew then: nothing to cover.",
+            notes=done,
         )
     trips = sorted({s.seat.pairing_id for s in seats})
     shared = [p for p in trips if sum(s.seat.pairing_id == p for s in seats) > 1]
     lead = f"{who}: {len(seats)} seat(s) on {len(trips)} trip(s)"
     if shared:
         lead += f", {', '.join(shared)} losing more than one crew member"
-    notes = tuple(f"{_crew_label(world, c)} has no rostered duty then" for c in idle)
+    notes = (
+        tuple(f"{_crew_label(world, c)} has no rostered duty then" for c in idle)
+        + done
+        + tuple(n for s in seats if (n := _joins_mid_day(world, s, part)))
+    )
     return Analysis(
         report.report_id,
         report.report_type,
@@ -590,7 +671,7 @@ def _gate_closure(world: World, report: Report, gates: tuple[GateSlot, ...]) -> 
         datetime.fromisoformat(d[k].replace("Z", "+00:00")) for k in ("from_utc", "to_utc")
     )
     gate = d["gate"]
-    board = GateBoard(gates, world.flights)
+    board = GateBoard(gates, world.flights, world.emergency_gates, world.cancelled)
     moves = close_gate(board, gate, start, end, d["reason"])
     lead = f"{gate} closed {_iso(start)} to {_iso(end)} ({d['reason']})"
     if not moves:
@@ -605,7 +686,10 @@ def _gate_closure(world: World, report: Report, gates: tuple[GateSlot, ...]) -> 
     if regated:
         parts.append(
             f"{len(regated)} departure(s) re-gated ("
-            + ", ".join(f"{m.flight_no} to {m.to_gate}" for m in regated)
+            + ", ".join(
+                f"{m.flight_no} to {m.to_gate}" + (" (emergency gate)" if m.emergency else "")
+                for m in regated
+            )
             + ")"
         )
     if bussed:
@@ -640,7 +724,7 @@ def _gate_alternative(world: World, gates: tuple[GateSlot, ...], analysis: Analy
     if not analysis.notes:
         return analysis
     fid = analysis.affected_flights[0]
-    board = GateBoard(gates, world.flights)
+    board = GateBoard(gates, world.flights, world.emergency_gates, world.cancelled)
     mine = board.slot_of(fid)
     if mine is None:
         return analysis
@@ -666,7 +750,7 @@ def _late_gates(world: World, gates: tuple[GateSlot, ...], analysis: Analysis) -
     and move it when the gate is still taken."""
     if not analysis.late or not gates:
         return analysis
-    board = GateBoard(gates, world.flights)
+    board = GateBoard(gates, world.flights, world.emergency_gates, world.cancelled)
     late = sorted(
         analysis.late,
         key=lambda leg: (
@@ -816,7 +900,11 @@ def analyse(
         uncovered_flights=_uncovered(a),
         kept_gate=_kept_gate(gates, report, a),
     )
-    a = replace(a, notices=tuple(notices), aircraft=_aircraft_of(world, a))
+    aircraft = _aircraft_of(world, a)
+    airlines = tuple(
+        sorted({world.airline_of_aircraft[t] for t in aircraft if t in world.airline_of_aircraft})
+    )
+    a = replace(a, notices=tuple(notices), aircraft=aircraft, airlines=airlines)
     return replace(a, handling=_handling(world, report, a))
 
 

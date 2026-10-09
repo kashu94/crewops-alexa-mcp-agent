@@ -37,7 +37,7 @@ def call(tools, name, caller=CONTROLLER, **args):
 
 
 def test_every_tool_has_an_implementation_and_a_strict_schema(tools):
-    assert len(TOOL_SCHEMAS) == len(TOOL_NAMES) == 17
+    assert len(TOOL_SCHEMAS) == len(TOOL_NAMES) == 18
     for t in TOOL_SCHEMAS:
         assert callable(getattr(tools, t["name"]))
         schema = t["input_schema"]
@@ -59,7 +59,7 @@ def test_bedrock_tool_config_shape():
     specs = [t["toolSpec"] for t in config["tools"]]
     assert [s["name"] for s in specs] == ["lookup", "explain_rule"]
     assert specs[0]["inputSchema"]["json"]["required"] == ["entity"]
-    assert len(bedrock_tool_config()["tools"]) == 17
+    assert len(bedrock_tool_config()["tools"]) == 18
     json.dumps(bedrock_tool_config())  # what is sent to Bedrock must serialise
 
 
@@ -101,7 +101,7 @@ def test_nested_id_patterns_are_checked():
 
 def test_nulls_are_treated_as_absent(tools):
     r = call(tools, "duty_clock", crew_id="C-1042", date=None)
-    assert r.ok and r.result["as_of"] == "2026-09-14"
+    assert r.ok and r.result["as_of"] == "2026-10-12"
 
 
 def test_arguments_must_be_an_object(tools):

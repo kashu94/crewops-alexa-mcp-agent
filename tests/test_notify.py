@@ -299,9 +299,9 @@ def notice(team, scope, message, channel="email"):
 
 ANALYSED = {
     "notices": [
-        notice("flight_info", "NETWORK", "DX412 BLR-BOM now departs 08:00Z 15 Sep"),
+        notice("flight_info", "NETWORK", "KS412 BLR-BOM now departs 08:00Z 13 Oct"),
         notice("station_ops", "BLR", "Hold boarding at BLR-G6"),
-        notice("station_ops", "BOM", "DX413 leaves BOM an hour late"),
+        notice("station_ops", "BOM", "KS413 leaves BOM an hour late"),
         notice("crew", "C-5417", "Your recurrent training expires", channel="in_app"),
     ]
 }
@@ -322,7 +322,7 @@ def test_each_team_named_by_the_analysis_gets_one_email_when_it_is_analysed():
     sent = {a[0].role: a[0] for a in alerts.sent}
     assert list(sent) == ["controller", "flight_info", "station_ops", "approver"]
     station = sent["station_ops"].message
-    assert "BLR: Hold boarding at BLR-G6" in station and "BOM: DX413" in station
+    assert "BLR: Hold boarding at BLR-G6" in station and "BOM: KS413" in station
     # In-app notices are read in CrewOps, never emailed.
     assert all("recurrent training" not in a[0].message for a in alerts.sent)
     assert sent["flight_info"].subject.startswith("CrewOps dev: Flight info")

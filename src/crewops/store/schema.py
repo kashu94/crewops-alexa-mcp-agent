@@ -24,8 +24,10 @@ Team contact                    CONFIG / CONTACT#team#scope
 Disruption                      DISRUPTION#id / META       STATUS#status / AT#reported#id
 Plan                            DISRUPTION#id / PLAN#id    PLAN#status / AT#submitted
 Audit event                     DISRUPTION#id / AUDIT#ts#action
+Suggestion from another desk    DISRUPTION#id / SUGGEST#ts#user
 Rejected report                 REPORT#id / REJECTED
 User profile                    USER#username / PROFILE
+Report as filed by its sender   USER#username / FILED#at#id  FILED / at#id
 Roster version                  CREW#id / ROSTER_VERSION
 Alert address                   ALERTS / SUB#id
 Alert addresses added in a day  ALERTS / DAY#yyyy-mm-dd

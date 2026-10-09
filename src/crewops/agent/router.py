@@ -33,6 +33,9 @@ from crewops.agent.entities import (
 )
 from crewops.agent.intents import Confidence, Intent, Tier
 
+NOT_ABOUT_ONE = r"^(?!.*\b(?:impact|affect|effect|cover|replace|legal|cancel|risk)\w*).*?"
+"""Prefix for a rule that must not take a question about one disruption's effect or cover."""
+
 
 def _p(*alternatives: str) -> re.Pattern[str]:
     return re.compile("|".join(alternatives), re.I)
@@ -106,8 +109,22 @@ class Rule:
 RULES: tuple[Rule, ...] = (
     # Gates first: "delayed" would otherwise read as a disruption.
     Rule(Intent.CHECK_GATE, _p(r"\bgates?\b", r"\b[a-z]{3}-g\d+\b"), "gate"),
-    # "Controller" names a desk, never a crew member.
+# "Controller" names a desk, never a crew member.
     Rule(Intent.LOOKUP_CONTROLLERS, _p(r"\bcontrollers?\b"), "controllers"),
+    # "What disruptions are on my desk", "how many are open": the live store, not a lookup.
+    Rule(
+        Intent.LOOKUP_CONTROLLERS,
+        _p(
+            # Not "the impact of the disruption on P-2291" or "who covers": those have
+            # their own intents.
+            NOT_ABOUT_ONE + r"\b(open|active|current|pending|unresolved|ongoing|outstanding|"
+            r"how many|which|what|list|show)\b[^.?!]{0,30}\bdisruptions?\b",
+            NOT_ABOUT_ONE + r"\bdisruptions?\b[^.?!]{0,30}\b(open|on (my|the) desk|pending|"
+            r"right now|today|active|outstanding)\b",
+            NOT_ABOUT_ONE + r"\bmy desk\b",
+        ),
+        "open disruptions",
+    ),
     # "likely to go sick" asks about a risk score; it is not a sick call.
     Rule(
         Intent.LOOKUP_RISK,
@@ -233,7 +250,8 @@ RULES: tuple[Rule, ...] = (
            r"\bflights?\b.{0,25}\b(before|after|since|between|on or (before|after))\b",
            r"\bwhat (leaves|departs|arrives|operates|flies)\b", r"\bsectors?\b",
            r"\bwhat do we (operate|fly)\b", r"\bwhat tail\b", r"\bget to directly\b",
-           r"\b(did|does|is|will) DX\d{3}\b", r"\bshow (me )?(the )?flights\b", r"\bflights in\b",
+           r"\b(did|does|is|will) [A-Z]{2}\d{3}\b", r"\bshow (me )?(the )?flights\b",
+           r"\bflights in\b",
            r"\b(count|how many)\b.*\boperat"),
         "flight",
     ),

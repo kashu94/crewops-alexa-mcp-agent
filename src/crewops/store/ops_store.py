@@ -29,6 +29,7 @@ from crewops.domain import (
     RosterException,
     Rule,
 )
+from crewops.domain.airlines import Airline, EmergencyGate
 from crewops.domain.contacts import Contact
 from crewops.ingestion.seed import SeedData
 from crewops.store import schema
@@ -46,6 +47,8 @@ SORT_KEYS: dict[type, Any] = {
     GateSlot: lambda r: (r.gate, r.start_utc, r.flight_id),
     Rule: lambda r: r.rule_id,
     Contact: lambda c: (c.team, c.scope),
+    Airline: lambda a: a.code,
+    EmergencyGate: lambda g: g.gate,
 }
 """Records come back from a scan in hash order; sorting makes a read deterministic."""
 
@@ -70,6 +73,8 @@ def seed_records(seed: SeedData) -> Iterator[Any]:
     yield from seed.rules
     yield seed.costs
     yield from seed.contacts
+    yield from seed.airlines
+    yield from seed.emergency_gates
 
 
 class OpsStore:
@@ -99,6 +104,14 @@ class OpsStore:
 
     def put_seed(self, seed: SeedData) -> Counter[str]:
         return self.put_records(seed_records(seed))
+
+    def delete_all(self) -> int:
+        """Delete every item in the table: for reloading a disposable stage from scratch."""
+        keys = [{schema.PK: i[schema.PK], schema.SK: i[schema.SK]} for i in self.scan()]
+        with self.table.batch_writer() as batch:
+            for key in keys:
+                batch.delete_item(Key=key)
+        return len(keys)
 
     def scan(self) -> Iterator[dict[str, Any]]:
         kwargs: dict[str, Any] = {}
@@ -142,6 +155,8 @@ class OpsStore:
             costs=costs[0],
             gates=ordered(GateSlot),
             contacts=ordered(Contact),
+            airlines=ordered(Airline),
+            emergency_gates=ordered(EmergencyGate),
         )
 
 
@@ -159,5 +174,7 @@ _OPERATION_ENTITIES = frozenset(
         "rule",
         "costs",
         "contact",
+        "airline",
+        "emergency_gate",
     }
 )

@@ -6,15 +6,17 @@ baseline. Every figure a controller might want spoken is computed here, never by
 the premium of the next tier, how many times cheaper covering is than cancelling, how many
 options tie on cost.
 
-Ranking is by cost, then departure delay, then crew id for a stable order. Seniority and
-the provided risk score are shown next to each option but never change its rank.
+Ranking is by cost, then departure delay, then crew id for a stable order. Cost includes
+the seniority allowance and the travel allowance for the reach time, so those rank only
+through what they pay; the provided risk score is shown and never changes the rank.
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass, field
-from datetime import date
+from collections.abc import Iterable
+from dataclasses import dataclass, field, replace
+from datetime import date, timedelta
 from enum import StrEnum
 
 from crewops.domain import Rank
@@ -27,10 +29,17 @@ class AlreadyStarted(ValueError):
     """The pairing reported before the snapshot: it can no longer be re-crewed."""
 
 
+class TripCancelled(AlreadyStarted):
+    """An approved plan cancelled the pairing's flights: there is nothing to re-crew."""
+
+
 class Strategy(StrEnum):
     RESERVE_CALLOUT = "reserve_callout"
     DAY_OFF_CALLOUT = "day_off_callout"
     POSITIONING = "positioning"
+    COMMAND_UPGRADE = "command_upgrade"
+    RIGHT_SEAT = "right_seat"
+    SHORT_CREW = "short_crew"
     CANCEL = "cancel"
 
     @property
@@ -39,8 +48,23 @@ class Strategy(StrEnum):
             Strategy.RESERVE_CALLOUT: "Reserve callout",
             Strategy.DAY_OFF_CALLOUT: "Day-off callout",
             Strategy.POSITIONING: "Position from another base",
+            Strategy.COMMAND_UPGRADE: "Command-qualified first officer",
+            Strategy.RIGHT_SEAT: "Captain in the right seat",
+            Strategy.SHORT_CREW: "Operate one cabin crew short",
             Strategy.CANCEL: "Cancel",
         }[self]
+
+
+SUBSTITUTE_BELOW = 3
+"""Fewer legal crew of the seat's own rank than this, and the qualified other rank is
+offered too: command-qualified first officers for a captain's seat, captains current in the
+right seat for a first officer's. Listed after every option of the seat's own rank."""
+
+SEATS_PER_CABIN_CREW = 50
+"""The minimum cabin crew: one per 50 passenger seats (or part of 50). A trip that still
+meets it without the missing member may operate one short; below it, it may not."""
+
+REACH_ROUNDING_MINUTES = 5
 
 
 FUNNEL = (
@@ -73,12 +97,17 @@ class Option:
     risk_score: float | None = None
     resilience: float | None = None
     """0-100: how much of today's reserve cover for this rank and base survives the choice."""
+    experience_years: int | None = None
 
     @property
     def action(self) -> str:
         if self.crew_id is None:
             return self.name
         who = f"{self.crew_rank} {self.name} ({self.crew_id})"
+        if self.strategy is Strategy.COMMAND_UPGRADE:
+            return f"Assign {who} in command (command-qualified, {self.experience_years} years)"
+        if self.strategy is Strategy.RIGHT_SEAT:
+            return f"Assign {who} in the right seat"
         if self.strategy is Strategy.POSITIONING:
             return (
                 f"Assign {who}, positioning from {self.base} "
@@ -119,6 +148,11 @@ class OptionsResult:
     @property
     def crew_options(self) -> tuple[Option, ...]:
         return tuple(o for o in self.options if o.crew_id is not None)
+
+    @property
+    def short_crew(self) -> Option | None:
+        """Operating without the missing cabin crew member, when the minimum allows it."""
+        return next((o for o in self.options if o.strategy is Strategy.SHORT_CREW), None)
 
     @property
     def recommended(self) -> Option | None:
@@ -182,6 +216,74 @@ def _resilience(world: World, a: Assessment, role: Rank, base: str) -> float:
     return 100.0 if pool <= 0 else round(100.0 * (pool - 1) / pool, 1)
 
 
+def _assess(
+    world: World, crew_id: str, pairing_id: str, delay_hours: float, delay_date: date | None
+) -> Assessment:
+    """The assessment, with the departure slipping when the crew member cannot reach the
+    airport by report time (called now, they need their reach time to get there)."""
+    a = assess(world, crew_id, pairing_id, delay_hours, delay_date)
+    if not a.legal or a.positioning is not None or delay_hours:
+        return a
+    reach = world.reachability.get(crew_id) or 0
+    ready = world.snapshot_utc + timedelta(minutes=reach)
+    late = (ready - world.days_of(pairing_id)[0].report_utc).total_seconds() / 60
+    if late <= 0:
+        return a
+    minutes = -(-late // REACH_ROUNDING_MINUTES) * REACH_ROUNDING_MINUTES
+    slipped = assess(world, crew_id, pairing_id, minutes / 60)
+    return replace(slipped, reach_slip_hours=round(minutes / 60, 2))
+
+
+def _row(world: World, a: Assessment, strategy: Strategy) -> tuple:
+    """(cost, delay, assessment, crew, cost breakdown, strategy) for one legal choice."""
+    crew = world.crew[a.crew_id]
+    costs = world.costs
+    breakdown = {"callout": costs.callout(crew.rank, a.on_reserve)}
+    if allowance := costs.seniority_allowance(crew.rank, world.seniority.get(a.crew_id) or 0):
+        breakdown["seniority_allowance"] = allowance
+    if a.positioning is not None:
+        breakdown["positioning"] = costs.deadhead_positioning
+    elif travel := costs.travel(world.reachability.get(a.crew_id) or 0):
+        breakdown["travel"] = travel
+    if a.departure_slip_hours:
+        breakdown["delay"] = round(a.departure_slip_hours * costs.delay_per_duty_hour)
+    return (sum(breakdown.values()), a.departure_slip_hours, a, crew, breakdown, strategy)
+
+
+def cabin_minimum(world: World, pairing_id: str) -> int:
+    """The fewest cabin crew the trip may fly with: one per 50 seats (or part of 50) on its
+    largest aircraft."""
+    seats = max(world.flights[f].seats for f in world.pairing(pairing_id).flight_ids)
+    return -(-seats // SEATS_PER_CABIN_CREW)
+
+
+def cabin_present(world: World, pairing_id: str, crew_ids: Iterable[str]) -> int:
+    """How many of ``crew_ids`` (the trip's cabin crew) fly all of it: not reported
+    unavailable on any of its days, or only from a time after that day's last departure."""
+    return sum(1 for c in crew_ids if not _misses_part_of(world, c, pairing_id))
+
+
+def _misses_part_of(world: World, crew_id: str, pairing_id: str) -> bool:
+    out = {on for on, _ in world.unavailable.get(crew_id, ())}
+    for day in world.pairing(pairing_id).days:
+        if day.date not in out:
+            continue
+        since = world.unavailable_from.get((crew_id, day.date))
+        if since is None or any(world.flights[f].dep_utc >= since for f in day.flight_ids):
+            return True
+    return False
+
+
+def _may_operate_short(world: World, pairing_id: str) -> bool:
+    """Whether the trip still has the minimum cabin crew without the missing one: every
+    cabin crew member reported unavailable on its days is missing too (at least one, the
+    seat being asked about), so two out on one trip are never both "one short"."""
+    pairing = world.pairing(pairing_id)
+    cabin = [s.crew_id for s in pairing.crew if s.role in (Rank.CABIN_CREW, Rank.SENIOR_CABIN_CREW)]
+    missing = max(1, len(cabin) - cabin_present(world, pairing_id, cabin))
+    return len(cabin) - missing >= cabin_minimum(world, pairing_id)
+
+
 def find_options(
     world: World,
     pairing_id: str,
@@ -196,40 +298,62 @@ def find_options(
     """
     role = Rank(role)
     pairing = world.pairing(pairing_id)
+    if any(f in world.cancelled for f in pairing.flight_ids):
+        raise TripCancelled(f"{pairing_id} is cancelled: there is nothing to re-crew")
     first_report = world.days_of(pairing_id)[0].report_utc
     if first_report < world.snapshot_utc:
         raise AlreadyStarted(
             f"{pairing_id} reported at {first_report:%Y-%m-%d %H:%M}Z, before now "
             f"({world.snapshot_utc:%Y-%m-%d %H:%M}Z); it can no longer be re-crewed"
         )
-    incumbents = set(pairing.holder(role))
-    pool = sorted(
-        (c for c in world.crew.values() if c.rank is role and c.crew_id not in incumbents),
-        key=lambda c: c.crew_id,
-    )
+    on_board = {s.crew_id for s in pairing.crew}
+    airline = world.airline_of_pairing(pairing_id)
 
-    assessed = [assess(world, c.crew_id, pairing_id, delay_hours, delay_date) for c in pool]
+    def candidates(rank: Rank, qualified: frozenset[str] | None = None) -> list:
+        """Crew of ``rank`` employed by the trip's airline (and holding the extra
+        qualification, when one is needed), not already on the trip."""
+        return sorted(
+            (
+                c
+                for c in world.crew.values()
+                if c.rank is rank
+                and c.crew_id not in on_board
+                and (airline is None or world.airline_of_crew.get(c.crew_id) == airline)
+                and (qualified is None or c.crew_id in qualified)
+            ),
+            key=lambda c: c.crew_id,
+        )
+
+    pool = candidates(role)
+    assessed = [_assess(world, c.crew_id, pairing_id, delay_hours, delay_date) for c in pool]
     legal = [a for a in assessed if a.legal]
     illegal = [a for a in assessed if not a.legal]
 
-    costs = world.costs
-    rows = []
-    for a in legal:
-        crew = world.crew[a.crew_id]
-        breakdown = {"callout": costs.callout(role, a.on_reserve)}
-        if a.positioning is not None:
-            breakdown["positioning"] = costs.deadhead_positioning
-            if a.departure_slip_hours:
-                breakdown["delay"] = round(a.departure_slip_hours * costs.delay_per_duty_hour)
-        rows.append((sum(breakdown.values()), a.departure_slip_hours, a, crew, breakdown))
+    rows = [_row(world, a, Strategy(_strategy(a))) for a in legal]
     rows.sort(key=lambda r: (r[0], r[1], r[2].crew_id))
 
+    # Too few of the seat's own rank: the qualified other rank, after them, most
+    # experienced first. Regulation allows exactly these two substitutions.
+    substitute = {
+        Rank.CAPTAIN: (Rank.FIRST_OFFICER, world.command_qualified, Strategy.COMMAND_UPGRADE),
+        Rank.FIRST_OFFICER: (Rank.CAPTAIN, world.right_seat_qualified, Strategy.RIGHT_SEAT),
+    }.get(role)
+    if substitute and len(rows) < SUBSTITUTE_BELOW:
+        other, qualified, strategy = substitute
+        extra = [
+            _assess(world, c.crew_id, pairing_id, delay_hours, delay_date)
+            for c in candidates(other, qualified)
+        ]
+        more = [_row(world, a, strategy) for a in extra if a.legal]
+        more.sort(key=lambda r: (-(world.experience.get(r[2].crew_id) or 0), r[0], r[2].crew_id))
+        rows += more
+
     options = []
-    for i, (cost, slip, a, crew, breakdown) in enumerate(rows, start=1):
+    for i, (cost, slip, a, crew, breakdown, strategy) in enumerate(rows, start=1):
         options.append(
             Option(
                 rank=i,
-                strategy=_strategy(a),
+                strategy=strategy,
                 crew_id=a.crew_id,
                 name=crew.name,
                 crew_rank=crew.rank,
@@ -241,7 +365,24 @@ def find_options(
                 reachability_minutes=world.reachability.get(a.crew_id),
                 seniority=world.seniority.get(a.crew_id),
                 risk_score=world.risk.get(a.crew_id),
-                resilience=_resilience(world, a, role, crew.base),
+                resilience=_resilience(world, a, crew.rank, crew.base),
+                experience_years=world.experience.get(a.crew_id),
+            )
+        )
+
+    costs = world.costs
+    if role is Rank.CABIN_CREW and _may_operate_short(world, pairing_id):
+        options.append(
+            Option(
+                rank=len(options) + 1,
+                strategy=Strategy.SHORT_CREW,
+                crew_id=None,
+                name="Operate one cabin crew short",
+                crew_rank=None,
+                base=None,
+                cost_inr=0,
+                cost_breakdown={},
+                delay_hours=0.0,
             )
         )
 
@@ -265,7 +406,7 @@ def find_options(
         best.setdefault(o.strategy, o)
     strategies = [*best.values(), cancel]
 
-    crew_options = options[:-1]
+    crew_options = [o for o in options if o.crew_id is not None]
     policies: dict[str, Option] = {}
     if crew_options:
         policies["cheapest"] = crew_options[0]

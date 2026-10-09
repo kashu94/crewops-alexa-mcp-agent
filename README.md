@@ -24,6 +24,12 @@ anyone hears it.
   disruption analysis works out the blast radius and legal, cost-ranked options before the
   controller asks, and each change is pushed live to the console and, where the admin has
   set it up, emailed to the role that must act.
+- **Covers seats the way crew control does.** Cover only ever comes from the airline that
+  flies the trip, ranked by what it costs (callout, seniority and travel allowances,
+  positioning and any delay). When fewer than three of the seat's own rank are legal, the
+  regulated substitutes follow: a command-qualified first officer for a captain, a captain in
+  the right seat for a first officer, or one cabin crew short while one per 50 seats remains.
+  Cancelling is always the last choice, and no two-pilot aircraft is offered with one pilot.
 - **Picks up where you left off.** "Alexa, anything waiting for me?" brings back pending work
   hours later: a plan to review for a controller, a plan to sign off for an approver. Within
   a conversation, a reply such as "Captain" or "is she legal?" is read with the question
@@ -191,6 +197,14 @@ uv run python -m crewops.ingestion.load_seed --dry-run   # validate and count, n
 uv run python -m crewops.ingestion.load_seed             # validate, then write
 ```
 
+Loading only writes, so a table that holds an older week keeps it beside the new one. On the
+disposable `dev` and `test` stages, `--replace` empties the table first, including every
+disruption, plan and audit event; any other stage refuses it.
+
+```bash
+uv run python -m crewops.ingestion.load_seed --replace   # dev/test: start from a clean table
+```
+
 ### Uploading roster changes
 
 Admins change the operation by uploading a JSON file to the roster bucket (its name is in the
@@ -223,7 +237,7 @@ before moving messages back from the dead-letter queue, since that sends them ag
 ```bash
 uv run python -m crewops.ingestion.send_report crew_unavailable \
   --user u-17 --role reporter \
-  --details '{"crew_id": "C-1042", "from_date": "2026-09-15", "reason": "sick"}'
+  --details '{"crew_id": "C-1042", "from_date": "2026-10-13", "reason": "sick"}'
 ```
 
 Report types: `crew_unavailable`, `multiple_crew_unavailable`, `certification_lapse`,
@@ -246,7 +260,9 @@ uv run python -m crewops.search.index --index rules --query "how much rest does 
 
 Each new disruption is analysed automatically from the table's change stream and stored as
 OPTIONS_READY. Disruptions reported before that existed, or whose analysis was parked after
-a failure, can be analysed on demand; it is safe to run repeatedly:
+a failure, can be analysed on demand; it is safe to run repeatedly. Each analysed
+disruption goes to the controller desk with the fewest open disruptions; the reporter never
+picks one:
 
 ```bash
 uv run python -m crewops.analysis.run --pending
@@ -261,8 +277,9 @@ stage keeps its table, with point-in-time recovery and deletion protection.
 Sign-in uses a Cognito user pool with one group per role (the `CrewOps-<stage>-Auth` stack).
 Nobody signs themselves up, and no email or phone is stored. The team is defined in
 `data/team/demo_team.json`: three controllers (one per desk), three approvers, two
-reporters, four crew members, an auditor, an admin and a super admin. To create or update
-the accounts after deploying the stack:
+reporters, four crew members, an auditor, an admin and a super admin. Usernames are first
+name and surname (`ananya.iyer`); a crew member's starts with their crew number
+(`c1042.nair`). To create or update the accounts after deploying the stack:
 
 ```bash
 uv run python -m crewops.auth.provision            # what would change
@@ -281,11 +298,11 @@ A controller submits cover for a disruption on their desk, and a different perso
 approver role approves it, which re-checks legality and commits the roster in one step:
 
 ```bash
-uv run python -m crewops.plans.desk --as rohit queue
-uv run python -m crewops.plans.desk --as rohit submit r-demo-0001
-uv run python -m crewops.plans.desk --as meera approve r-demo-0001 <plan id>
-uv run python -m crewops.plans.desk --as meera show r-demo-0001     # plans and audit trail
-uv run python -m crewops.plans.desk --as rohit close r-demo-0002 --reason "DX589 cancelled"
+uv run python -m crewops.plans.desk --as rohit.malhotra queue
+uv run python -m crewops.plans.desk --as rohit.malhotra submit r-demo-0001
+uv run python -m crewops.plans.desk --as meera.bhatt approve r-demo-0001 <plan id>
+uv run python -m crewops.plans.desk --as meera.bhatt show r-demo-0001     # plans and audit trail
+uv run python -m crewops.plans.desk --as rohit.malhotra close r-demo-0002 --reason "KS589 cancelled"
 ```
 
 This is an operator's tool, acting as the named team member with your AWS credentials; people
@@ -311,11 +328,11 @@ macOS or WSL with the repository on the Linux filesystem.
 Then call it as any team member, the way an MCP host would (it asks for the password):
 
 ```bash
-uv run python -m crewops.mcp.client --as rohit tools
-uv run python -m crewops.mcp.client --as rohit ask "Who covers C-1042 on 15 Sep?"
-uv run python -m crewops.mcp.client --as rohit my_queue
-uv run python -m crewops.mcp.client --as crew1042 report_disruption \
-  '{"report_type": "crew_unavailable", "details": {"crew_id": "C-1042", "from_date": "2026-09-18", "reason": "sick"}}'
+uv run python -m crewops.mcp.client --as rohit.malhotra tools
+uv run python -m crewops.mcp.client --as rohit.malhotra ask "Who covers C-1042 on 13 Oct?"
+uv run python -m crewops.mcp.client --as rohit.malhotra my_queue
+uv run python -m crewops.mcp.client --as c1042.nair report_disruption \
+  '{"report_type": "crew_unavailable", "details": {"crew_id": "C-1042", "from_date": "2026-10-16", "reason": "sick"}}'
 ```
 
 Its tools: `ask` (the full verified answer pipeline), `my_queue`, `show_disruption`,
@@ -331,8 +348,8 @@ in only what a reply giving just a seat, a date or an id, or a "he", "she" or "t
 pairing", leaves out, and the answer says so in its notes:
 
 ```bash
-uv run python -m crewops.mcp.client --as rohit --conversation c1 ask "Who can cover P-2291 on 15 Sep?"
-uv run python -m crewops.mcp.client --as rohit --conversation c1 ask "Captain"
+uv run python -m crewops.mcp.client --as rohit.malhotra --conversation c1 ask "Who can cover P-2291 on 13 Oct?"
+uv run python -m crewops.mcp.client --as rohit.malhotra --conversation c1 ask "Captain"
 ```
 
 ### Live updates and alerts
@@ -350,9 +367,9 @@ a delay goes to flight information, operations monitoring, the station and custo
 An address holds one role or team, and at most five addresses can be added a day.
 
 ```bash
-uv run python -m crewops.mcp.client --as priya add_alert_address \
+uv run python -m crewops.mcp.client --as priya.desai add_alert_address \
   '{"email": "you@example.com", "role": "approver"}'
-uv run python -m crewops.mcp.client --as priya alert_addresses
+uv run python -m crewops.mcp.client --as priya.desai alert_addresses
 ```
 
 Alerts and events name the disruption, its status, and for a team the flights, gates and
@@ -372,15 +389,17 @@ cd web && npm install && npm run dev # http://localhost:3000
 | View | Who | What it does |
 |---|---|---|
 | Disruptions | controllers, approvers, auditors, admins | Every disruption, filtered by desk (mine, other desks, the whole network), state (open, resolved, all) and type |
-| Report | reporters | Record any of the eight disruption types, picking crew, flights, gates and stations from the operation, and follow your own reports |
-| Controller | controllers, auditors, admins | Live figures for the role, the ingestion feed of disruptions, and the solution engine: the recommendation, each seat's legal cover ranked by cost with cancellation last, every rule's margin checked on demand, crew another desk also wants, and the plan submitted from there. Each disruption's full record adds coverage figures, its desk, crew another desk is competing for (with a joint plan across both), recommendation cards by policy, a plain explanation of the chosen option, every legal option to choose from, every excluded candidate and why, the trip's flights and crew, plans and the audit trail. Every record says in one sentence how it gets resolved (re-crew, a decision, or handled internally), shows gate moves and late flights with passengers booked, and lists who has been told and why; one handled internally is marked resolved with a remark |
+| Report | reporters | Record any of the eight disruption types, picking crew, flights, gates and stations from the operation (a crew member taken ill part-way through a day from a time, a gate closure as an internal or outside cause), and follow every report you filed, and crew members' own, as waiting, refused with the reason, or its disruption's status |
+| Controller | controllers, auditors, admins | Live figures for the role, the ingestion feed of disruptions, and the solution engine: the recommendation, each seat's legal cover ranked by cost with cancellation last, every rule's margin checked on demand, crew another desk also wants, and the plan submitted from there. Each disruption's full record adds coverage figures, its desk, crew another desk is competing for (with a joint plan across both), recommendation cards by policy, a plain explanation of the chosen option, every legal option to choose from (the first ten, then the rest on request; anyone reported unavailable since is struck through), the regulated substitutes, operating short or cancelling, each chosen only after a warning, cover suggested by other desks, every excluded candidate and why, the trip's flights and crew, plans and the audit trail. A committed disruption shows the options as they stood and the choice made. Every record says in one sentence how it gets resolved (re-crew, a decision, or handled internally), shows gate moves and late flights with passengers booked, and lists who has been told and why; one handled internally is marked resolved with a remark |
 | Approver | approvers, auditors | The four-eyes queue: each waiting plan, approved with a second confirming click or sent back with a reason |
-| Crew | crew | Notices for me (a certificate about to lapse), this week's duty calendar, my flights, duty-limit gauges, and reporting myself unavailable |
+| Crew | crew | Notices for me (a certificate about to lapse), this week's duty calendar, my flights, duty-limit gauges, reporting myself unavailable (never twice for the same days), and what became of my reports |
 | Admin | admins | Rule thresholds (tighten only), the system activity log, and alert addresses |
 | Alexa+ | everyone | Talk or type, hear the answer (Amazon Polly) with pause, resume and stop, and follow up. The latest exchange stands out from the conversation beside it. A round Alexa+ button in the corner of every page opens it. |
 
-The "View" menu lists only the views the signed-in roles allow, and a banner slides in with
-every disruption status change.
+The app opens on sign-in, which offers to continue as whoever is signed in; the session ends
+when the browser closes. The "View" menu lists only the views the signed-in roles allow, a
+banner slides in with every disruption status change, and a Guide in the top bar and (i)
+icons explain each screen and term.
 
 The browser calls no AWS API except the live-events socket: the app's server forwards
 every action to the MCP server as the signed-in user, so every role rule is the server's. Voice input uses the browser's
@@ -394,7 +413,7 @@ called. With `--live`, the Nova models triage, advise and reword, the guardrail 
 question and the answer once `CREWOPS_GUARDRAIL_ID` is set, and the tokens used are printed.
 
 ```bash
-uv run python -m crewops.agent.ask "Who is on reserve at BLR on 15 Sep?"
+uv run python -m crewops.agent.ask "Who is on reserve at BLR on 13 Oct?"
 uv run python -m crewops.agent.ask --role crew --crew-id C-1042 "How many duty hours do I have?"
 uv run python -m crewops.agent.ask --live "C-1042 is sick, who covers?"   # live, with models
 uv run python -m crewops.agent.ask --live --no-model "C-1042 is sick, who covers?"

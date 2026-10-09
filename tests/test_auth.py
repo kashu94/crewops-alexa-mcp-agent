@@ -253,9 +253,9 @@ def test_sync_creates_then_changes_nothing(ops_table):
     assert asked == []  # nothing is asked for until a step runs
     apply(plan)
     assert len(cognito.users) == 15 and set(cognito.passwords.values()) == {"Correct-Horse-9"}
-    assert cognito.groups["ananya"] == {"controller"}
-    assert get_profile(ops_table, "crew1042")["crew_id"] == "C-1042"
-    assert get_profile(ops_table, "ananya")["desk"] == "desk-1"
+    assert cognito.groups["ananya.iyer"] == {"controller"}
+    assert get_profile(ops_table, "c1042.nair")["crew_id"] == "C-1042"
+    assert get_profile(ops_table, "ananya.iyer")["desk"] == "desk-1"
     again = plan_team(cognito, POOL, ops_table, team, password)
     assert again.steps == [] and again.actions == []
 
@@ -263,34 +263,34 @@ def test_sync_creates_then_changes_nothing(ops_table):
 def test_sync_fixes_drift(ops_table):
     cognito, team = FakeCognito(), load_team()
     apply(plan_team(cognito, POOL, ops_table, team, lambda: "Correct-Horse-9"))
-    cognito.groups["meera"] |= {"admin"}  # someone granted an extra role by hand
-    cognito.users["rohit"]["name"] = "R. M."
-    cognito.disabled.add("divya")
-    cognito.status["farah"] = "FORCE_CHANGE_PASSWORD"  # a create whose password never set
+    cognito.groups["meera.bhatt"] |= {"admin"}  # someone granted an extra role by hand
+    cognito.users["rohit.malhotra"]["name"] = "R. M."
+    cognito.disabled.add("divya.rao")
+    cognito.status["farah.qureshi"] = "FORCE_CHANGE_PASSWORD"  # a create whose password never set
     plan = plan_team(cognito, POOL, ops_table, team, lambda: "Correct-Horse-9")
-    assert "remove meera from admin" in plan.actions
-    assert "rename rohit to Rohit Malhotra" in plan.actions
-    assert "enable divya" in plan.actions
-    assert "set the password of farah (it has no usable one)" in plan.actions
+    assert "remove meera.bhatt from admin" in plan.actions
+    assert "rename rohit.malhotra to Rohit Malhotra" in plan.actions
+    assert "enable divya.rao" in plan.actions
+    assert "set the password of farah.qureshi (it has no usable one)" in plan.actions
     apply(plan)
-    assert cognito.groups["meera"] == {"approver"} and "divya" not in cognito.disabled
-    assert cognito.status["farah"] == "CONFIRMED"
+    assert cognito.groups["meera.bhatt"] == {"approver"} and "divya.rao" not in cognito.disabled
+    assert cognito.status["farah.qureshi"] == "CONFIRMED"
     assert plan_team(cognito, POOL, ops_table, team, lambda: "x").steps == []
 
 
 def test_leaving_the_file_removes_access_and_prune_deletes(ops_table):
     cognito, team = FakeCognito(), load_team()
     apply(plan_team(cognito, POOL, ops_table, team, lambda: "Correct-Horse-9"))
-    without_priya = [m for m in team if m.username != "priya"]
+    without_priya = [m for m in team if m.username != "priya.desai"]
     plan = plan_team(cognito, POOL, ops_table, without_priya, lambda: "x")
     assert plan.actions == [
-        "remove priya from admin (not in the team)",
-        "delete the profile of priya (not in the team)",
+        "remove priya.desai from admin (not in the team)",
+        "delete the profile of priya.desai (not in the team)",
     ]
     apply(plan)
-    assert cognito.groups["priya"] == set() and get_profile(ops_table, "priya") is None
+    assert cognito.groups["priya.desai"] == set() and get_profile(ops_table, "priya.desai") is None
     apply(plan_team(cognito, POOL, ops_table, without_priya, lambda: "x", prune=True))
-    assert "priya" not in cognito.users
+    assert "priya.desai" not in cognito.users
 
 
 def test_a_profile_with_no_account_is_removed(ops_table):

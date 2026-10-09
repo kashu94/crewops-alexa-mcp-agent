@@ -16,9 +16,9 @@ from __future__ import annotations
 import itertools
 import math
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
-from crewops.domain import Rank
+from crewops.domain import Flight, Rank
 from crewops.engine.duty import hours_between
 from crewops.engine.legality import assess
 from crewops.engine.options import AlreadyStarted, Option, OptionsResult, find_options
@@ -40,25 +40,45 @@ class PairingImpact:
     """Later flights of the same trip: it overnights away, so replacing the crew for the
     affected days alone would strand the aircraft or the crew."""
     passengers: int
-    """Seats on the uncovered flights."""
+    """Passengers booked on the uncovered flights (seats, for a flight with no bookings)."""
+    flown_before: tuple[str, ...] = ()
+    """Flights of the first affected day the crew member still flies, before they became
+    unavailable part-way through it."""
 
 
-def pairing_impact(world: World, pairing_id: str, dates: set[date] | None = None) -> PairingImpact:
-    """Blast radius of losing crew on ``dates`` of a pairing (all of its days if None)."""
+def pairing_impact(
+    world: World,
+    pairing_id: str,
+    dates: set[date] | None = None,
+    from_utc: datetime | None = None,
+) -> PairingImpact:
+    """Blast radius of losing crew on ``dates`` of a pairing (all of its days if None).
+    ``from_utc``: they become unavailable part-way through the first affected day, so its
+    legs leaving before then are still flown by them."""
     pairing = world.pairing(pairing_id)
     days = [d.date for d in pairing.days]
     affected = sorted(set(days) if dates is None else (set(days) & dates))
     if not affected:
         return PairingImpact(pairing_id, (), (), (), 0)
     first = affected[0]
-    uncovered, at_risk = [], []
+    uncovered, at_risk, flown = [], [], []
     for day in pairing.days:
         if day.date in affected:
-            uncovered.extend(day.flight_ids)
+            for f in day.flight_ids:
+                if from_utc and day.date == first and world.flights[f].dep_utc < from_utc:
+                    flown.append(f)
+                else:
+                    uncovered.append(f)
         elif day.date > first:
             at_risk.extend(day.flight_ids)
-    passengers = sum(world.flights[f].seats for f in uncovered)
-    return PairingImpact(pairing_id, tuple(affected), tuple(uncovered), tuple(at_risk), passengers)
+    passengers = sum(_booked(world.flights[f]) for f in uncovered)
+    return PairingImpact(
+        pairing_id, tuple(affected), tuple(uncovered), tuple(at_risk), passengers, tuple(flown)
+    )
+
+
+def _booked(flight: Flight) -> int:
+    return flight.booked if flight.booked is not None else flight.seats
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,6 @@
 """Ask one question from the terminal.
 
-    uv run python -m crewops.agent.ask "Who is on reserve at BLR on 15 Sep?"
+    uv run python -m crewops.agent.ask "Who is on reserve at BLR on 13 Oct?"
     uv run python -m crewops.agent.ask --role crew --crew-id C-1042 "How many duty hours do I have?"
     uv run python -m crewops.agent.ask --live "Who covers C-1042?"
     uv run python -m crewops.agent.ask --live --no-model "Who covers C-1042?"

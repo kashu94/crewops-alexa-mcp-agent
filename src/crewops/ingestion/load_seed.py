@@ -2,11 +2,15 @@
 
     uv run python -m crewops.ingestion.load_seed            # validate, then write
     uv run python -m crewops.ingestion.load_seed --dry-run  # validate and count only
+    uv run python -m crewops.ingestion.load_seed --replace  # dev/test: empty the table first
 
 Settings come from ``.env`` and the environment (``AWS_PROFILE``, ``AWS_REGION``,
 ``CREWOPS_STAGE``), the same as the CDK app, so it writes to the table that stage deployed.
 Validation errors stop the load before anything is written. Writing is idempotent: running
-it again replaces the same items rather than duplicating them.
+it again replaces the same items rather than duplicating them. It never deletes: records of
+an older week stay beside the new ones, so a changed week is loaded with ``--replace``,
+which first empties the table (every disruption, plan and audit event too) and is refused
+on any stage but a disposable one.
 """
 
 from __future__ import annotations
@@ -19,11 +23,19 @@ from pathlib import Path
 from crewops.config import Settings, load_env_file
 from crewops.ingestion.seed import Severity, load_seed, validate
 
+DISPOSABLE_STAGES = frozenset({"dev", "test"})
+"""Stages whose data may be thrown away: the same as the CDK app's."""
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--seed-dir", type=Path, default=None, help="defaults to data/seed")
     parser.add_argument("--dry-run", action="store_true", help="validate and count only")
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="dev/test only: delete every item in the table, then load the week",
+    )
     args = parser.parse_args(argv)
 
     load_env_file()
@@ -50,8 +62,20 @@ def main(argv: list[str] | None = None) -> int:
         print("Set AWS_PROFILE (for example in .env) to a named profile.", file=sys.stderr)
         return 1
 
+    if args.replace and settings.stage not in DISPOSABLE_STAGES:
+        print(
+            f"--replace deletes everything; stage {settings.stage!r} is not disposable "
+            f"({', '.join(sorted(DISPOSABLE_STAGES))}).",
+            file=sys.stderr,
+        )
+        return 1
+
+    table = table_for(settings)
+    if args.replace:
+        removed = OpsStore(table).delete_all()
+        print(f"Emptied {settings.table_name}: {removed} items deleted.")
     print(f"Writing to {settings.table_name} in {settings.aws_region} (profile {profile})...")
-    counts = OpsStore(table_for(settings)).put_seed(seed)
+    counts = OpsStore(table).put_seed(seed)
     for entity, n in sorted(counts.items()):
         print(f"  {entity:<17} {n}")
     print(f"Done: {sum(counts.values())} items.")

@@ -6,8 +6,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { signOut } from "@/lib/client";
-import { viewsFor } from "@/lib/roles";
+import { homeFor, viewsFor } from "@/lib/roles";
 
+import { GuideButton } from "./guide";
 import { LiveProvider, useLive } from "./live";
 import { useMe } from "./me";
 import { cx, Mono, Status } from "./ui";
@@ -54,7 +55,7 @@ function TopBar() {
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-white/85 backdrop-blur-md">
       <div className="mx-auto flex max-w-[1500px] items-center gap-4 px-4 py-2.5 sm:px-6">
-        <Link href="/" className="flex items-center gap-2.5">
+        <Link href={homeFor(me.roles)} className="flex items-center gap-2.5">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand text-white shadow-sm">
             <Plane size={16} strokeWidth={2.2} />
           </span>
@@ -116,6 +117,7 @@ function TopBar() {
               {state === "live" ? "Live" : state === "connecting" ? "Connecting" : "Reconnecting"}
             </span>
           )}
+          <GuideButton />
           <span className="hidden flex-col items-end leading-tight md:flex">
             <span className="font-medium">{me.user_id}</span>
             <span className="text-[11px] text-muted">

@@ -15,7 +15,7 @@ ARGS = [
     "--role",
     "reporter",
     "--details",
-    '{"crew_id": "C-1042", "from_date": "2026-09-15", "reason": "sick"}',
+    '{"crew_id": "C-1042", "from_date": "2026-10-13", "reason": "sick"}',
 ]
 
 

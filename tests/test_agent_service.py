@@ -33,7 +33,7 @@ def test_build_wires_models_guardrail_and_live_table(ops_table, monkeypatch):
     assert [s for s, _ in fake.screened] == ["INPUT", "OUTPUT"]
     assert fake.requests[0]["modelId"] == settings.explainer_model_id
     assert used["calls"] == 1
-    _, again = live.ask("Who is on reserve at BLR on 15 Sep?", CONTROLLER)
+    _, again = live.ask("Who is on reserve at BLR on 13 Oct?", CONTROLLER)
     assert again["calls"] == 0  # per question, not a running total
 
 

@@ -29,6 +29,10 @@ ENTITY_FIELDS: dict[str, tuple[str, ...]] = {
         "seniority",
         "reachability_minutes",
         "status",
+        "airline",
+        "experience_years",
+        "command_qualified",
+        "right_seat_qualified",
     ),
     "flights": (
         "flight_id",
@@ -43,6 +47,7 @@ ENTITY_FIELDS: dict[str, tuple[str, ...]] = {
         "aircraft_type",
         "seats",
         "booked",
+        "cancelled",
     ),
     "pairings": ("pairing_id", "aircraft", "dates", "days", "crew"),
     "pairing_crew": ("pairing_id", "aircraft", "dates", "crew_id", "role", "name"),
@@ -68,6 +73,9 @@ ENTITY_FIELDS: dict[str, tuple[str, ...]] = {
         "delay_cost_per_duty_hour",
         "cancellation_per_flight",
         "hotel_overnight",
+        "seniority_allowance_pilot",
+        "seniority_allowance_cabin",
+        "travel_per_10_minutes",
     ),
 }
 """The fields of every entity, in the order rows carry them. Listed in the tool's
@@ -132,9 +140,20 @@ def plain(value: Any) -> Any:
     return value
 
 
-def build_rows(seed: SeedData) -> dict[str, list[dict[str, Any]]]:
-    """Every entity's rows, built once per loaded operation."""
-    crew = [plain(record_dict(c)) for c in seed.crew]
+def build_rows(
+    seed: SeedData, cancelled: frozenset[str] = frozenset()
+) -> dict[str, list[dict[str, Any]]]:
+    """Every entity's rows, built once per loaded operation. ``cancelled``: flights an
+    approved plan cancelled, marked on their rows."""
+    crew = []
+    for c in seed.crew:
+        row = plain(record_dict(c)) | {
+            "airline": c.airline,
+            "experience_years": c.experience_years,
+            "command_qualified": c.command_qualified,
+            "right_seat_qualified": c.right_seat_qualified,
+        }
+        crew.append({k: row[k] for k in ENTITY_FIELDS["crew"]})
     identity = {c["crew_id"]: c for c in crew}
     pairings = []
     pairing_crew = []
@@ -180,7 +199,9 @@ def build_rows(seed: SeedData) -> dict[str, list[dict[str, Any]]]:
 
     return {
         "crew": crew,
-        "flights": [plain(record_dict(f)) for f in seed.flights],
+        "flights": [
+            plain(record_dict(f)) | {"cancelled": f.flight_id in cancelled} for f in seed.flights
+        ],
         "pairings": pairings,
         "pairing_crew": pairing_crew,
         "pairing_days": pairing_days,

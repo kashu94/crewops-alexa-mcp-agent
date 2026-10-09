@@ -2,8 +2,15 @@
 
 * **Only people decide.** Nothing here is a model tool: the advisor and the analysis only
   prepare options. Every call names a signed-in ``Caller``.
-* **Controllers submit, for their desk.** A disruption belongs to every desk whose aircraft
-  it touches; any of those desks' controllers may plan it.
+* **Controllers submit, for their desk.** A disruption belongs to the desk it was assigned
+  when analysed (older records: the desks of the aircraft it touches), and only that desk's
+  controller may plan it.
+* **Cancelling cancels the trip.** Choosing to cancel a seat cancels every flight of its
+  trip: every seat of that trip in the plan must be cancelled too, the cost is counted once,
+  and committing releases the trip's whole crew, so no aircraft is left with one pilot.
+* **Never below the cabin minimum.** Operating one cabin crew short is checked across the
+  whole plan, counting everyone on the trip reported unavailable, at submission and again
+  at approval.
 * **Every seat accounted for.** A seat is a pairing, a role and the crew member being
   replaced. A seat with no legal cover (or that has already started) is listed in the plan
   as uncovered, and the controller must say so explicitly to submit. A disruption with no
@@ -33,8 +40,9 @@ from typing import Any
 
 from crewops.analysis.runner import Operation
 from crewops.domain import Rank, Role
-from crewops.domain.desks import DESKS, Desk
+from crewops.domain.desks import DESKS, Desk, owning_desks
 from crewops.engine import AlreadyStarted, World, assess, find_options
+from crewops.engine.options import cabin_minimum, cabin_present
 from crewops.store import plans as store
 from crewops.store.items import from_dynamo
 from crewops.store.reports import STATUS_OPTIONS_READY, disruptions_with_status, get_disruption
@@ -69,6 +77,12 @@ def seat_key(seat: Mapping[str, Any]) -> str:
 
 def _desk(desk_id: str | None) -> Desk | None:
     return next((d for d in DESKS if d.desk_id == desk_id), None)
+
+
+SHORT = "SHORT"
+"""A choice for a cabin crew seat: operate one short, when the minimum allows it."""
+CANCEL = "CANCEL"
+"""A choice for any seat: cancel the trip's flights instead of covering it."""
 
 
 def _roster(world: World, pairing_id: str) -> list[dict[str, str]]:
@@ -121,6 +135,8 @@ class Plans:
         coverable, uncovered = [], []
         for seat in seats:
             reason = self._why_uncoverable(world, seat)
+            if reason and self._special(seat, choices or {}):
+                reason = None  # no crew is legal, but it may be cancelled or flown short
             (uncovered if reason else coverable).append((seat, reason))
         if not coverable:
             raise PlanError(
@@ -145,9 +161,17 @@ class Plans:
         assignments = [
             self._legal_choice(world, seat, picks[seat_key(seat)]) for seat, _ in coverable
         ]
-        chosen = [a["crew_id"] for a in assignments]
+        chosen = [a["crew_id"] for a in assignments if a["crew_id"]]
         if len(set(chosen)) != len(chosen):
             raise PlanError("INVALID", "one crew member is chosen for two seats")
+        assignments = self._one_cancellation_per_trip(assignments)
+        rosters_before = {
+            pid: _roster(world, pid) for pid in sorted({a["pairing_id"] for a in assignments})
+        }
+        if below := self._below_cabin_minimum(
+            world, {"assignments": assignments, "rosters_before": rosters_before}
+        ):
+            raise PlanError("NOT_LEGAL", "; ".join(below))
 
         plan = {
             "plan_id": f"pl-{uuid.uuid4().hex[:12]}",
@@ -160,9 +184,7 @@ class Plans:
             "assignments": assignments,
             "uncovered": [{"seat": seat_key(s), "reason": r} for s, r in uncovered],
             "total_cost_inr": sum(a["cost_inr"] for a in assignments),
-            "rosters_before": {
-                pid: _roster(world, pid) for pid in sorted({a["pairing_id"] for a in assignments})
-            },
+            "rosters_before": rosters_before,
         }
         warnings = self.contention(plan, world)
         plan["warnings"] = list(warnings)
@@ -225,7 +247,7 @@ class Plans:
         """Re-check against the roster as it is now; commit if nothing changed, else STALE."""
         plan = self._submitted(disruption_id, plan_id)
         self._check_approver(caller, plan)
-        moved = {a["crew_id"] for a in plan["assignments"]} | {
+        moved = {a["crew_id"] for a in plan["assignments"] if a["crew_id"]} | {
             a["replaces"] for a in plan["assignments"] if a.get("replaces")
         }
         # Read before the re-check: a change after it fails the commit's condition.
@@ -295,7 +317,8 @@ class Plans:
         dates that overlap."""
         wanted: dict[str, set[date]] = defaultdict(set)
         for a in plan["assignments"]:
-            wanted[a["crew_id"]] |= _dates(world, a["pairing_id"])
+            if a["crew_id"]:
+                wanted[a["crew_id"]] |= _dates(world, a["pairing_id"])
 
         def clash(crew_id: str, pairing_id: str) -> bool:
             return crew_id in wanted and bool(wanted[crew_id] & _dates(world, pairing_id))
@@ -305,7 +328,7 @@ class Plans:
             if other["disruption_id"] == plan["disruption_id"]:
                 continue
             for a in other["assignments"]:
-                if clash(a["crew_id"], a["pairing_id"]):
+                if a["crew_id"] and clash(a["crew_id"], a["pairing_id"]):
                     warnings.append(
                         f"{a['crew_id']} is also in plan {other['plan_id']} for "
                         f"{other['disruption_id']} ({other['desk']}), awaiting approval"
@@ -372,20 +395,14 @@ class Plans:
 
     @staticmethod
     def _touches(desk: Desk, world: World, analysis: Mapping[str, Any]) -> bool:
-        """Whether a disruption is on this desk: through its seats' trips, or, with no seat
-        to cover (a gate closure, a delay every crew member absorbs), through the aircraft
-        its flights fly. One that touches no aircraft at all is any controller's."""
-        seats = analysis.get("seats") or []
-        if seats:
-            return any(
-                s["pairing_id"] in world.pairings
-                and world.pairings[s["pairing_id"]].aircraft in desk.aircraft
-                for s in seats
-            )
-        if "aircraft" not in analysis:  # analysed before desks were recorded: nobody's
-            return False
-        aircraft = set(analysis["aircraft"] or [])
-        return not aircraft or bool(aircraft & set(desk.aircraft))
+        """Whether this desk plans the disruption: the desk it was assigned when analysed
+        (the controller with the fewest open ones)."""
+
+        def aircraft(pairing_id: str) -> str | None:
+            p = world.pairings.get(pairing_id)
+            return p.aircraft if p else None
+
+        return desk.desk_id in {d.desk_id for d in owning_desks(analysis, aircraft)}
 
     def _check_desk(
         self, desk: Desk, world: World, analysis: Mapping[str, Any], disruption_id: str
@@ -394,11 +411,69 @@ class Plans:
             raise PlanError("FORBIDDEN", f"{disruption_id} touches no aircraft on {desk.desk_id}")
 
     @staticmethod
+    def _special(seat: Mapping[str, Any], choices: Mapping[str, str]) -> bool:
+        """A seat with no legal crew whose choice is to cancel or operate short."""
+        if seat.get("status") != "no_legal_cover":
+            return False
+        pick = choices.get(seat_key(seat)) or choices.get(f"{seat['pairing_id']}/{seat['role']}")
+        return pick in (CANCEL, SHORT)
+
+    @staticmethod
+    def _one_cancellation_per_trip(assignments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Cancelling a seat cancels its whole trip: no other seat of that trip may be
+        covered, and the trip's cancellation is costed once."""
+        cancelled = {a["pairing_id"] for a in assignments if a["strategy"] == "cancel"}
+        mixed = sorted(
+            cancelled & {a["pairing_id"] for a in assignments if a["strategy"] != "cancel"}
+        )
+        if mixed:
+            raise PlanError(
+                "INVALID",
+                f"cancelling cancels every flight of {', '.join(mixed)}: choose cancel for "
+                "every seat of it in this plan, or cover each seat instead",
+            )
+        seen: set[str] = set()
+        out = []
+        for a in assignments:
+            if a["strategy"] == "cancel":
+                a = a | ({"cost_inr": 0} if a["pairing_id"] in seen else {})
+                seen.add(a["pairing_id"])
+            out.append(a)
+        return out
+
+    @classmethod
+    def _below_cabin_minimum(cls, world: World, plan: Mapping[str, Any]) -> list[str]:
+        """Trips this plan would leave below one cabin crew per 50 seats: the cabin crew
+        after the plan, less anyone on the trip reported unavailable on its days."""
+        short = {a["pairing_id"] for a in plan["assignments"] if a["strategy"] == "short_crew"}
+        if not short:
+            return []
+        rosters = cls._rosters_after(plan, [])
+        reasons = []
+        for pid in sorted(short):
+            if pid not in world.pairings:
+                continue  # the roster check reports a trip that is gone
+            cabin = [
+                s["crew_id"]
+                for s in rosters[pid][1]
+                if s["role"] in (Rank.CABIN_CREW.value, Rank.SENIOR_CABIN_CREW.value)
+            ]
+            present, minimum = cabin_present(world, pid, cabin), cabin_minimum(world, pid)
+            if present < minimum:
+                reasons.append(
+                    f"{pid} would fly with {present} cabin crew, below the minimum of "
+                    f"{minimum} (one per 50 seats)"
+                )
+        return reasons
+
+    @staticmethod
     def _why_uncoverable(world: World, seat: Mapping[str, Any]) -> str | None:
         if seat.get("status") != "options":
-            return {"no_legal_cover": "no legal cover", "already_started": "already started"}.get(
-                seat.get("status", ""), str(seat.get("status"))
-            )
+            return {
+                "no_legal_cover": "no legal cover",
+                "already_started": "already started",
+                "cancelled": "the trip is cancelled",
+            }.get(seat.get("status", ""), str(seat.get("status")))
         out, pid = seat.get("crew_out"), seat["pairing_id"]
         if not out:
             return "no rostered crew member to replace"
@@ -449,12 +524,42 @@ class Plans:
         return float(seat.get("delay_hours") or 0), date.fromisoformat(on) if on else None
 
     def _legal_choice(self, world: World, seat: dict[str, Any], crew_id: str) -> dict[str, Any]:
-        """The chosen crew member as a legal option for the seat now, with its cost."""
+        """The chosen crew member as a legal option for the seat now, with its cost; or the
+        choice to operate one cabin crew short, or to cancel the trip's flights."""
         hours, on = self._delay(seat)
         try:
             result = find_options(world, seat["pairing_id"], Rank(seat["role"]), hours, on)
         except AlreadyStarted as exc:
             raise PlanError("NOT_LEGAL", str(exc)) from None
+        base = {
+            "pairing_id": seat["pairing_id"],
+            "role": seat["role"],
+            "replaces": seat["crew_out"],
+            "delay_hours": hours,
+            "delay_date": on.isoformat() if on else None,
+        }
+        if crew_id == SHORT:
+            if result.short_crew is None:
+                raise PlanError(
+                    "NOT_LEGAL",
+                    f"{seat_key(seat)} cannot operate one short: it would fall below the "
+                    "minimum cabin crew",
+                )
+            return base | {
+                "crew_id": None,
+                "name": "Operate one cabin crew short",
+                "strategy": "short_crew",
+                "cost_inr": 0,
+            }
+        if crew_id == CANCEL:
+            flights = list(world.pairing(seat["pairing_id"]).flight_ids)
+            return base | {
+                "crew_id": None,
+                "name": f"Cancel {len(flights)} flight(s)",
+                "strategy": "cancel",
+                "cost_inr": result.cancellation.cost_inr,
+                "flights": flights,
+            }
         option = next((o for o in result.crew_options if o.crew_id == crew_id), None)
         if option is None:
             why = next((e.reasons for e in result.excluded if e.crew_id == crew_id), ())
@@ -481,7 +586,10 @@ class Plans:
         for pid, before in plan["rosters_before"].items():
             if pid not in world.pairings or _roster(world, pid) != before:
                 reasons.append(f"the crew of {pid} changed after the plan was submitted")
+        reasons += Plans._below_cabin_minimum(world, plan)
         for a in plan["assignments"]:
+            if not a["crew_id"]:
+                continue  # operating short (checked above) or cancelling: nobody to re-check
             on = date.fromisoformat(a["delay_date"]) if a.get("delay_date") else None
             try:
                 check = assess(world, a["crew_id"], a["pairing_id"], float(a["delay_hours"]), on)
@@ -499,11 +607,14 @@ class Plans:
     def _rosters_after(
         plan: Mapping[str, Any], reasons: list[str]
     ) -> dict[str, tuple[list[dict[str, str]], list[dict[str, str]]]]:
-        """Each pairing's crew with every replaced seat taken by its cover. Never adds a
-        seat: a replaced crew member no longer there is a reason the plan is stale."""
+        """Each pairing's crew with every replaced seat taken by its cover, a seat flown
+        short left empty, and a cancelled trip's whole crew released. Never adds a seat: a
+        replaced crew member no longer there is a reason the plan is stale."""
         rosters = {}
+        cancelled = {a["pairing_id"] for a in plan["assignments"] if a["strategy"] == "cancel"}
         for pid, before in plan["rosters_before"].items():
             after = [dict(seat) for seat in before]
+            emptied = 0
             for a in (a for a in plan["assignments"] if a["pairing_id"] == pid):
                 seat = next(
                     (s for s in after if s["role"] == a["role"] and s["crew_id"] == a["replaces"]),
@@ -512,9 +623,17 @@ class Plans:
                 if seat is None:
                     reasons.append(f"{a['replaces']} is no longer on {pid} as {a['role']}")
                     continue
-                seat["crew_id"] = a["crew_id"]
+                if a["crew_id"]:
+                    seat["crew_id"] = a["crew_id"]
+                else:
+                    # Operating short: the seat is left empty.
+                    after.remove(seat)
+                    emptied += 1
+            if pid in cancelled:
+                rosters[pid] = (before, [])  # the flights are cancelled: everyone released
+                continue
             ids = [s["crew_id"] for s in after]
-            if len(after) != len(before) or len(set(ids)) != len(ids):
+            if len(after) != len(before) - emptied or len(set(ids)) != len(ids):
                 reasons.append(f"covering {pid} would leave it with a duplicate or missing seat")
             rosters[pid] = (before, after)
         return rosters
@@ -544,8 +663,19 @@ def summary(plan: Mapping[str, Any]) -> dict[str, Any]:
         "assignments": [
             f"{a['pairing_id']} {a['role']}: {a['name']} ({a['crew_id']}) replacing "
             f"{a['replaces']}, ₹{a['cost_inr']:,}"
+            if a["crew_id"]
+            else f"{a['pairing_id']} {a['role']}: {a['name']} instead of {a['replaces']}, "
+            f"₹{a['cost_inr']:,}"
             for a in plan["assignments"]
         ],
         "uncovered": [f"{u['seat']}: {u['reason']}" for u in plan.get("uncovered", [])],
         "reason": plan.get("reason"),
+        # The same choices as data, so a decided plan can be shown against its options.
+        "picks": [
+            {k: a.get(k) for k in ("pairing_id", "role", "crew_id", "name", "replaces", "strategy")}
+            for a in plan["assignments"]
+        ],
+        "submitted_utc": plan.get("submitted_utc"),
+        "decided_by": plan.get("decided_by"),
+        "decided_utc": plan.get("decided_utc"),
     }

@@ -1,13 +1,15 @@
 """Work plans from the terminal, as a member of the team.
 
-    uv run python -m crewops.plans.desk --as rohit queue
-    uv run python -m crewops.plans.desk --as rohit show r-demo-0001
-    uv run python -m crewops.plans.desk --as rohit submit r-demo-0001
-    uv run python -m crewops.plans.desk --as rohit submit r-demo-0001 --choose P-2291/Captain=C-1526
-    uv run python -m crewops.plans.desk --as meera approve r-demo-0001 pl-...
-    uv run python -m crewops.plans.desk --as meera reject r-demo-0001 pl-... --reason "..."
-    uv run python -m crewops.plans.desk --as rohit withdraw r-demo-0001 pl-...
-    uv run python -m crewops.plans.desk --as rohit close r-demo-0002 --reason "flights cancelled"
+    uv run python -m crewops.plans.desk --as rohit.malhotra queue
+    uv run python -m crewops.plans.desk --as rohit.malhotra show r-demo-0001
+    uv run python -m crewops.plans.desk --as rohit.malhotra submit r-demo-0001
+    uv run python -m crewops.plans.desk --as rohit.malhotra submit r-demo-0001 \
+        --choose P-2291/Captain=C-1526
+    uv run python -m crewops.plans.desk --as meera.bhatt approve r-demo-0001 pl-...
+    uv run python -m crewops.plans.desk --as meera.bhatt reject r-demo-0001 pl-... --reason "..."
+    uv run python -m crewops.plans.desk --as rohit.malhotra withdraw r-demo-0001 pl-...
+    uv run python -m crewops.plans.desk --as rohit.malhotra close r-demo-0002 \
+        --reason "flights cancelled"
 
 An operator's tool: it acts as the named team member, using the roles and desk recorded in
 their profile, with the AWS profile from ``.env`` (whoever holds those credentials can

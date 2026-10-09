@@ -20,23 +20,23 @@ PAIRING_ID = {
 }
 FLIGHT_ID = {
     "type": "string",
-    "pattern": r"^DX[0-9]{3}-[0-9]{4}-[0-9]{2}-[0-9]{2}$",
-    "description": "Flight id: number and date, e.g. DX402-2026-09-15.",
+    "pattern": r"^[A-Z]{2}[0-9]{3}-[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+    "description": "Flight id: number and date, e.g. DX402-2026-10-13.",
 }
 FLIGHT_NO = {
     "type": "string",
-    "pattern": r"^DX[0-9]{3}$",
+    "pattern": r"^[A-Z]{2}[0-9]{3}$",
     "description": "Flight number, e.g. DX402. Most fly on several days: pass date with it.",
 }
 DATE = {
     "type": "string",
     "pattern": r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
-    "description": "ISO date, e.g. 2026-09-15.",
+    "description": "ISO date, e.g. 2026-10-13.",
 }
 UTC = {
     "type": "string",
     "pattern": r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?Z$",
-    "description": "UTC instant, e.g. 2026-09-15T06:00:00Z.",
+    "description": "UTC instant, e.g. 2026-10-13T06:00:00Z.",
 }
 AIRCRAFT = {"type": "string", "pattern": r"^VT-[A-Z]{3}$", "description": "Tail, e.g. VT-DXB."}
 STATION = {"type": "string", "pattern": r"^[A-Z]{3}$", "description": "Station code, e.g. BLR."}
@@ -83,7 +83,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "every condition in one call. A value is equality (case-insensitive), a list means "
             "any of, a dict is a range with gte/lte/gt/lt (ISO dates compare correctly). On a "
             "list field (ratings, dates) a value or range matches when any element does: "
-            "{'date': '2026-09-16'} finds pairings flying that day. A name matches in full or by "
+            "{'date': '2026-10-14'} finds pairings flying that day. A name matches in full or by "
             "surname. 'count' is always exact: use it for 'how many', never count rows yourself. "
             "Use group_by for 'how many per X', sort_by and limit for 'top N'. Fields:\n"
             + _fields()
@@ -94,7 +94,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "filters": {
                     "type": "object",
                     "description": "e.g. {'base': 'BLR', 'rank': 'Captain', "
-                    "'valid_to': {'lte': '2026-09-20'}}",
+                    "'valid_to': {'lte': '2026-10-18'}}",
                 },
                 "sort_by": {"type": "string"},
                 "sort_desc": {"type": "boolean", "description": "Highest first."},
@@ -128,7 +128,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "check_legality",
         """All seven legality rules for one crew member on one pairing, with the numbers behind
         each verdict. Name the pairing by pairing_id, by a flight on it (flight_id, or flight_no
-        with date), or by aircraft with date ('C-5417's VT-DXB duty on 19 Sep'). delay_h tests a
+        with date), or by aircraft with date ('C-5417's VT-DXB duty on 17 Oct'). delay_h tests a
         late departure on the named flight's day (or delay_date, else day one).""",
         _obj(
             {
@@ -298,11 +298,17 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     _tool(
         "suggest_crew_ids",
         """Real crew ids near one that does not exist or has the wrong shape ('C-10'). Only
-        candidates to offer the user: never act on one they have not confirmed.""",
+        candidates to offer the user: never act on one they have not confirmed. ``prefer``:
+        ids the conversation was just about, offered first when they exist.""",
         _obj(
             {
                 "near": {"type": "string", "minLength": 1, "maxLength": 20},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+                "prefer": {
+                    "type": "array",
+                    "items": {"type": "string", "pattern": "^C-\\d{4}$"},
+                    "maxItems": 3,
+                },
             },
             ("near",),
         ),
@@ -336,6 +342,13 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         """The controller desks and the aircraft each covers. Use for any question naming a
         controller (Ananya, Rohit, Divya): controllers are not crew.""",
         _obj({}),
+    ),
+    _tool(
+        "list_open_disruptions",
+        """The disruptions being worked right now, from the live store: each one's id, what
+        happened, its status and its desk. ``desk`` (desk-1, desk-2, desk-3) keeps only that
+        desk's.""",
+        _obj({"desk": {"type": "string", "enum": ["desk-1", "desk-2", "desk-3"]}}),
     ),
     _tool(
         "controller_issue_counts",

@@ -4,6 +4,7 @@ import { ArrowUpRight, Inbox, ListFilter } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { AirlineBadge } from "@/components/airline";
 import { useLiveListener } from "@/components/live";
 import { useMe } from "@/components/me";
 import { clock, cx, day, Empty, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
@@ -105,16 +106,23 @@ export default function Disruptions() {
       </header>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Segmented
-          label="Desk"
-          value={scope}
-          onChange={setScope}
-          options={[
-            { value: "mine", label: "My desk", count: count("mine"), disabled: !me.desk },
-            { value: "others", label: "Other desks", count: count("others"), disabled: !me.desk },
-            { value: "network", label: "Whole network", count: count("network") },
-          ]}
-        />
+        {me.desk ? (
+          <Segmented
+            label="Desk"
+            value={scope}
+            onChange={setScope}
+            options={[
+              { value: "mine", label: "My desk", count: count("mine") },
+              { value: "others", label: "Other desks", count: count("others") },
+              { value: "network", label: "Whole network", count: count("network") },
+            ]}
+          />
+        ) : (
+          <span className="rounded-xl border border-line bg-sunken px-3 py-2 text-sm text-muted" title="Only controllers hold a desk">
+            Whole network <span className="font-mono text-xs">{count("network")}</span>
+            <span className="ml-2 text-xs">· you work across every desk</span>
+          </span>
+        )}
         <Segmented
           label="State"
           value={state}
@@ -158,7 +166,12 @@ export default function Disruptions() {
                       {day(d.reported_utc)} <Mono>{clock(d.reported_utc)}</Mono>
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-slate-800">{describe(d)}</span>
+                      <span className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        {(d.airlines ?? []).map((a) => (
+                          <AirlineBadge key={a} code={a} compact />
+                        ))}
+                        <span className="truncate">{describe(d)}</span>
+                      </span>
                       <span className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted">
                         <span>{TYPE[d.report_type ?? ""] ?? d.report_type}</span>
                         <Mono>{d.disruption_id}</Mono>

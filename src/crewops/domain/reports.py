@@ -119,12 +119,19 @@ def _crew_unavailable(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
     if reason not in UNAVAILABILITY_REASONS:
         allowed = sorted(UNAVAILABILITY_REASONS)
         raise DataError(f"{ctx}.reason: one of {allowed}, got {_shown(reason)}")
-    return {
+    out = {
         "crew_id": _text(d, "crew_id", ctx),
         "from_date": start.isoformat(),
         "to_date": end.isoformat(),
         "reason": reason,
     }
+    if d.get("from_utc"):
+        # Part-way through the first day (taken ill mid-trip): legs before it are flown.
+        at = parse_utc(d.get("from_utc"), f"{ctx}.from_utc")
+        if at.date() != start:
+            raise DataError(f"{ctx}.from_utc: must be on from_date ({start.isoformat()})")
+        out["from_utc"] = _iso(at)
+    return out
 
 
 def _multiple_crew_unavailable(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
@@ -175,13 +182,22 @@ def _gate(d: Mapping[str, Any], key: str, ctx: str) -> str:
     return gate
 
 
+GATE_CLOSURE_CAUSES = ("internal", "external")
+"""internal: the gate's own equipment or staff (jet bridge, power, a security sweep), fixed
+by the station. external: weather or a natural event, which may close more gates."""
+
+
 def _gate_closure(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
     start, end = _window(d, ctx)
+    cause = d.get("cause", "internal")
+    if cause not in GATE_CLOSURE_CAUSES:
+        raise DataError(f"{ctx}.cause: one of {list(GATE_CLOSURE_CAUSES)}, got {_shown(cause)}")
     return {
         "gate": _gate(d, "gate", ctx),
         "from_utc": start,
         "to_utc": end,
         "reason": _text(d, "reason", ctx, max_len=200),
+        "cause": cause,
     }
 
 

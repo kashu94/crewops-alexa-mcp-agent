@@ -133,8 +133,8 @@ def build_server(
         """Report a disruption. report_type is one of crew_unavailable,
         multiple_crew_unavailable, certification_lapse, flight_delay, aircraft_technical,
         station_disruption, gate_closure, gate_change. details depend on the type, e.g.
-        crew_unavailable: {"crew_id": "C-1042", "from_date": "2026-09-15", "to_date":
-        "2026-09-16", "reason": "sick"}; multiple_crew_unavailable: the same with "crew_ids"
+        crew_unavailable: {"crew_id": "C-1042", "from_date": "2026-10-13", "to_date":
+        "2026-10-14", "reason": "sick"}; multiple_crew_unavailable: the same with "crew_ids"
         (2 to 12) instead of "crew_id"; gate_closure: {"gate": "BLR-G2", "from_utc",
         "to_utc", "reason"}. Crew may report only their own unavailability. It is analysed
         automatically."""
@@ -182,15 +182,25 @@ def build_server(
         the remark as the reason."""
         return await run(ctx, lambda c: api.close(c, disruption_id, reason))
 
+    @mcp.tool(annotations=WRITE)
+    async def suggest_cover(
+        disruption_id: str, seat: str, crew_id: str, ctx: Context, note: str = ""
+    ) -> dict:
+        """Controller: suggest cover for a seat on another desk's disruption (seat as
+        "P-2291/Captain/C-1042"). The owning desk sees it and may adopt it; it plans nothing."""
+        return await run(ctx, lambda c: api.suggest(c, disruption_id, seat, crew_id, note))
+
     @mcp.tool(annotations=READ)
     async def my_roster(ctx: Context) -> dict:
         """Crew: your own pairings, duty days and duty clock."""
         return await run(ctx, lambda c: api.my_roster(c))
 
     @mcp.tool(annotations=READ)
-    async def my_reports(ctx: Context, limit: int = 30) -> list:
-        """What you have reported, newest first, and how each stands."""
-        return await run(ctx, lambda c: api.my_reports(c, limit))
+    async def my_reports(ctx: Context, scope: str = "mine", limit: int = 30) -> list:
+        """Reports and how each stands, newest first: still being checked, refused (and
+        why), or the disruption it became. scope "mine" (what you filed) or "crew" (what
+        crew filed about themselves, for the reporting desk and crew control)."""
+        return await run(ctx, lambda c: api.my_reports(c, scope, limit))
 
     @mcp.tool(annotations=READ)
     async def report_reference(ctx: Context) -> dict:

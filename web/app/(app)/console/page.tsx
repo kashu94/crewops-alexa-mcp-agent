@@ -18,7 +18,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useLiveListener } from "@/components/live";
-import { Actions, DeskBanner, Recommendation } from "@/components/disruption";
+import { Actions, chosenFor, CommittedPlan, DeskBanner, Recommendation } from "@/components/disruption";
+import { AirlineBadge } from "@/components/airline";
 import { HandlingBanner } from "@/components/handling";
 import { useMe } from "@/components/me";
 import { SeatOptions } from "@/components/solutions";
@@ -49,13 +50,15 @@ function Kpi({
   icon: typeof Radio;
 }) {
   const tones = {
-    critical: "from-red-50 text-critical ring-red-100",
-    pending: "from-amber-50 text-pending ring-amber-100",
-    accent: "from-sky-50 text-accent ring-sky-100",
-    ok: "from-emerald-50 text-ok ring-emerald-100",
+    critical: "from-red-50 text-critical border-red-100",
+    pending: "from-amber-50 text-pending border-amber-100",
+    accent: "from-sky-50 text-accent border-sky-100",
+    ok: "from-emerald-50 text-ok border-emerald-100",
   };
+  // A border, not a ring: a ring is drawn outside the box, and the workspace clips it at
+  // the outer edges.
   return (
-    <div className={cx("lift animate-rise flex items-center gap-3 rounded-2xl bg-gradient-to-br to-white p-4 ring-1", tones[tone])}>
+    <div className={cx("animate-rise flex items-center gap-3 rounded-2xl border bg-gradient-to-br to-white p-4", tones[tone])}>
       <span className="grid h-10 w-10 place-items-center rounded-xl bg-white shadow-sm">
         <Icon size={18} />
       </span>
@@ -110,7 +113,12 @@ function Feed({
                   </Mono>
                   <Status value={shownStatus(d.status, d.handling)} />
                 </span>
-                <span className="mt-1 block truncate text-sm font-medium text-slate-800">{describe(d)}</span>
+                <span className="mt-1 flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                  {(d.airlines ?? []).map((a) => (
+                    <AirlineBadge key={a} code={a} compact />
+                  ))}
+                  <span className="truncate">{describe(d)}</span>
+                </span>
                 <span className="mt-0.5 flex items-center gap-2 text-[11px] text-muted">
                   <Mono>{d.disruption_id}</Mono>
                   {onDesk.has(d.disruption_id) && (
@@ -160,13 +168,19 @@ function Solutions({ id, onChanged }: { id: string; onChanged: () => void }) {
       </div>
       <DeskBanner detail={detail} />
       <HandlingBanner handling={detail.handling} />
+      <CommittedPlan detail={detail} />
       {detail.seats.length === 0 ? (
         <p className="text-sm leading-relaxed text-slate-700">{detail.summary || "No seats to cover for this disruption."}</p>
       ) : (
         detail.seats.map((s) => (
           <div key={`${s.pairing_id}-${s.role}-${s.crew_out}`} className="flex flex-col gap-3">
-            <Recommendation seat={s} />
-            <SeatOptions seat={s} contention={detail.contention} />
+            {detail.status !== "COMMITTED" && <Recommendation seat={s} />}
+            <SeatOptions
+              seat={s}
+              contention={detail.contention}
+              chosen={chosenFor(detail, s)}
+              unavailable={detail.unavailable_now ?? {}}
+            />
           </div>
         ))
       )}
@@ -206,6 +220,8 @@ export default function ControllerWorkspace() {
   useLiveListener(load);
 
   const onDesk = useMemo(() => new Set(queue.map((q) => q.disruption_id)), [queue]);
+  // One disruption can be both ready and sent back (its plan was rejected): count it once.
+  const waiting = onDesk.size;
   const open = feed?.filter((d) => ["REPORTED", "OPTIONS_READY", "SUBMITTED"].includes(d.status)) ?? [];
   const awaiting = feed?.filter((d) => d.status === "SUBMITTED").length ?? 0;
   const resolved = feed?.filter((d) => ["COMMITTED", "CLOSED"].includes(d.status)).length ?? 0;
@@ -223,9 +239,9 @@ export default function ControllerWorkspace() {
           <h1 className="text-xl font-semibold tracking-tight">Crew control</h1>
           <p className="text-sm text-muted">Disruptions as they arrive and legal cover ranked by cost. Ask Alexa+ from the button in the corner.</p>
         </div>
-        {isController && queue.length > 0 && (
+        {isController && waiting > 0 && (
           <span className="flex items-center gap-1.5 rounded-full bg-pending-soft px-3 py-1 text-xs font-semibold text-amber-800">
-            <ClipboardCheck size={13} /> {queue.length} waiting for you
+            <ClipboardCheck size={13} /> {waiting} waiting for you
           </span>
         )}
       </div>

@@ -1,7 +1,7 @@
 """The tool calls a question obviously needs, made before any model is consulted.
 
 The router has already pulled out the ids, so for the common question shapes the opening
-move is known: "who is on reserve at BLR on 15 Sep" is one ``lookup``. Making those calls
+move is known: "who is on reserve at BLR on 13 Oct" is one ``lookup``. Making those calls
 here saves a model round trip and means the model always sees real data before it says
 anything. Calls that follow from a first result (a pairing found by aircraft and date, then
 cover for it) are made here too, because carrying an id from one result to the next call is
@@ -59,7 +59,7 @@ def _clean(**args: Any) -> dict[str, Any]:
 
 
 def _window(ents: Entities) -> tuple[str | None, str | None]:
-    """ "closed 08:00-14:00Z on 17 Sep" -> two UTC instants. A window ending before it starts
+    """ "closed 08:00-14:00Z on 15 Oct" -> two UTC instants. A window ending before it starts
     runs past midnight."""
     if not (ents.date and len(ents.times) >= 2):
         return None, None
@@ -243,10 +243,16 @@ def seed_calls(
                 )
 
         case Intent.LOOKUP_CONTROLLERS:
-            if re.search(
-                r"\b(issues?|open|workload|how many|disruptions?|cases?)\b", question, re.I
-            ):
+            per_desk = re.search(
+                r"\b(each|every|per|all)\b[^.?!]{0,20}\b(controllers?|desks?)\b|\bworkload\b",
+                question,
+                re.I,
+            )
+            if per_desk:
                 add("controller_issue_counts")
+            elif re.search(r"\b(disruptions?|issues?|cases?|my desk)\b", question, re.I):
+                # "my desk" is filled in by the pipeline from the signed-in controller.
+                add("list_open_disruptions")
             else:
                 add("list_controllers")
 

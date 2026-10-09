@@ -53,14 +53,36 @@ class World:
     book: RuleBook
     snapshot_utc: datetime
     reachability: Mapping[str, int]
-    """Minutes to reach each crew member. Shown to the controller, never ranked on."""
+    """Minutes to reach each crew member: paid as a travel allowance, and a callout too
+    close to report time slips the departure."""
     seniority: Mapping[str, int]
-    """Years of service. Shown, never ranked on."""
+    """Years of service. Ranks only through its callout allowance (part of the cost)."""
     risk: Mapping[str, float]
     unavailable: Mapping[str, tuple[tuple[date, str], ...]] = field(default_factory=dict)
     """Crew reported unavailable in open disruptions: crew id -> (date, report id) pairs.
     Empty for the published roster; filled in when analysing live disruptions."""
-    """Provided disruption-risk score. Shown, never changes legality or rank."""
+    unavailable_from: Mapping[tuple[str, date], datetime] = field(default_factory=dict)
+    """(crew id, date) -> when the absence starts, for one reported from a time part-way
+    through its first day. Legs that left before it are still flown by them."""
+    cancelled: frozenset[str] = frozenset()
+    """Flights cancelled by an approved plan: no one flies them, as crew or passenger."""
+    airline_of_aircraft: Mapping[str, str] = field(default_factory=dict)
+    """Aircraft -> the airline that flies it."""
+    airline_of_crew: Mapping[str, str] = field(default_factory=dict)
+    """Crew id -> the airline that employs them. Cover only ever comes from the same one."""
+    airline_names: Mapping[str, str] = field(default_factory=dict)
+    """Airline code -> its name, as legality and answers say it."""
+    command_qualified: frozenset[str] = frozenset()
+    """First officers cleared to command: may fill a captain's seat."""
+    right_seat_qualified: frozenset[str] = frozenset()
+    """Captains current in the right seat: may fill a first officer's seat."""
+    experience: Mapping[str, int] = field(default_factory=dict)
+    """Years flying, which orders a command upgrade."""
+    emergency_gates: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    """Station -> gates held back for disruptions."""
+
+    def airline_of_pairing(self, pairing_id: str) -> str | None:
+        return self.airline_of_aircraft.get(self.pairing(pairing_id).aircraft)
 
     def state(self, crew_id: str) -> CrewState:
         try:
@@ -90,6 +112,8 @@ class World:
                 continue
             if f.dep_utc < self.snapshot_utc:
                 continue  # already departed: nobody can be put on it now
+            if f.flight_id in self.cancelled:
+                continue
             if f.arr_station != day.dep_station:
                 continue
             new_report = f.arr_utc + POSITIONING_REPORT_BUFFER
@@ -165,4 +189,14 @@ def build_world(seed: SeedData) -> World:
         reachability={c.crew_id: c.reachability_minutes for c in seed.crew},
         seniority={c.crew_id: c.seniority for c in seed.crew},
         risk={r.crew_id: r.score for r in seed.risk_signals},
+        airline_of_aircraft={tail: a.code for a in seed.airlines for tail in a.aircraft},
+        airline_of_crew={c.crew_id: c.airline for c in seed.crew if c.airline},
+        airline_names={a.code: a.name for a in seed.airlines},
+        command_qualified=frozenset(c.crew_id for c in seed.crew if c.command_qualified),
+        right_seat_qualified=frozenset(c.crew_id for c in seed.crew if c.right_seat_qualified),
+        experience={c.crew_id: c.experience_years for c in seed.crew if c.experience_years},
+        emergency_gates={
+            station: tuple(sorted(g.gate for g in seed.emergency_gates if g.station == station))
+            for station in {g.station for g in seed.emergency_gates}
+        },
     )

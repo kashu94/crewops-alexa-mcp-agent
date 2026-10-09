@@ -18,7 +18,7 @@ from crewops.store.items import from_dynamo, from_item, to_dynamo, to_item
 from crewops.store.ops_store import SORT_KEYS, OpsStore, seed_records, table_for
 
 SETTINGS = Settings.from_env({"CREWOPS_STAGE": "test", "AWS_REGION": "ap-southeast-2"})
-EXPECTED_ITEMS = 1429  # the operation, its rules and costs, and 21 team contacts
+EXPECTED_ITEMS = 1441  # the operation, rules, costs, 21 contacts, 3 airlines, 9 emergency gates
 
 
 @pytest.fixture(autouse=True)
@@ -75,7 +75,7 @@ def seed():
 
 def test_value_conversion():
     assert to_dynamo(20.93) == Decimal("20.93")
-    assert to_dynamo(datetime(2026, 9, 14, 2, 30, tzinfo=UTC)) == "2026-09-14T02:30:00Z"
+    assert to_dynamo(datetime(2026, 10, 12, 2, 30, tzinfo=UTC)) == "2026-10-12T02:30:00Z"
     assert to_dynamo(Rank.CAPTAIN) == "Captain"
     assert to_dynamo((1, 2.5)) == [1, Decimal("2.5")]
     assert from_dynamo({"a": [Decimal("3"), Decimal("0.75")]}) == {"a": [3, 0.75]}
@@ -94,9 +94,9 @@ def test_keys_follow_the_documented_layout(seed):
     crew = to_item(next(c for c in seed.crew if c.crew_id == "C-1042"))
     assert (crew["pk"], crew["sk"], crew["gsi1pk"]) == ("CREW#C-1042", "PROFILE", "BASE#BLR")
     assert crew["gsi1sk"] == "RANK#Captain#C-1042"
-    flight = to_item(next(f for f in seed.flights if f.flight_id == "DX401-2026-09-14"))
-    assert flight["gsi1pk"] == "DATE#2026-09-14"
-    assert flight["gsi1sk"] == "DEP#2026-09-14T02:30:00Z#DX401-2026-09-14"
+    flight = to_item(next(f for f in seed.flights if f.flight_id == "DX401-2026-10-12"))
+    assert flight["gsi1pk"] == "DATE#2026-10-12"
+    assert flight["gsi1sk"] == "DEP#2026-10-12T02:30:00Z#DX401-2026-10-12"
     assert to_item(seed.costs)["pk"] == "CONFIG"
 
 
@@ -106,6 +106,7 @@ def test_seed_round_trips_through_the_table(seed):
     assert sum(counts.values()) == EXPECTED_ITEMS
     assert counts["crew"] == 150 and counts["certification"] == 600
     assert counts["contact"] == 21
+    assert counts["airline"] == 3 and counts["emergency_gate"] == 9
     assert store.load_seed() == normalised(seed)
 
 
@@ -165,3 +166,30 @@ def test_loader_writes_with_profile(monkeypatch, capsys, seed):
     monkeypatch.setattr("crewops.store.ops_store.table_for", lambda settings: table)
     assert loader.main([]) == 0
     assert f"Done: {EXPECTED_ITEMS} items." in capsys.readouterr().out
+
+
+def test_loader_replace_empties_a_disposable_table_first(monkeypatch, capsys, seed):
+    table = create_table()
+    table.put_item(Item={"pk": "FLIGHT#DX412-2026-09-15", "sk": "FLIGHT", "entity": "flight"})
+    monkeypatch.setattr(loader, "load_env_file", lambda: {})
+    monkeypatch.setenv("CREWOPS_STAGE", "dev")
+    monkeypatch.setenv("AWS_REGION", "ap-southeast-2")
+    monkeypatch.setenv("AWS_PROFILE", "crewops")
+    monkeypatch.setattr("crewops.store.ops_store.table_for", lambda settings: table)
+    assert loader.main(["--replace"]) == 0
+    assert "1 items deleted" in capsys.readouterr().out
+    assert sum(1 for _ in OpsStore(table).scan()) == EXPECTED_ITEMS  # the old week is gone
+
+
+def test_loader_never_replaces_a_kept_stage(monkeypatch, capsys):
+    monkeypatch.setattr(loader, "load_env_file", lambda: {})
+    monkeypatch.setenv("CREWOPS_STAGE", "prod")
+    monkeypatch.setenv("AWS_REGION", "ap-southeast-2")
+    monkeypatch.setenv("AWS_PROFILE", "crewops")
+
+    def boom(settings):
+        raise AssertionError("must not touch the table")
+
+    monkeypatch.setattr("crewops.store.ops_store.table_for", boom)
+    assert loader.main(["--replace"]) == 1
+    assert "not disposable" in capsys.readouterr().err

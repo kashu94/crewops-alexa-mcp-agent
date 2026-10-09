@@ -14,7 +14,7 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from crewops.domain.desks import desks_for
+from crewops.domain.desks import DESKS, desks_for, owning_desks
 from crewops.store import plans as plan_store
 from crewops.store.items import from_dynamo
 from crewops.store.reports import disruptions_with_status
@@ -46,15 +46,18 @@ def desks_of(tools: Any, pairing_ids: Iterable[str]) -> list[dict[str, str]]:
 
 
 def desks_of_disruption(
-    tools: Any, analysis: Mapping[str, Any], pairing_ids: Iterable[str]
+    tools: Any, analysis: Mapping[str, Any], pairing_ids: Iterable[str] = ()
 ) -> list[dict[str, str]]:
-    """The desks a disruption belongs to: through its seats' trips, or, with no seat to
-    cover, through the aircraft its flights fly (as the plan service decides)."""
-    pairing_ids = list(pairing_ids)
-    if pairing_ids:
-        return desks_of(tools, pairing_ids)
-    aircraft = set(analysis.get("aircraft") or [])
-    return [{"desk_id": d.desk_id, "controller": d.controller} for d in desks_for(aircraft)]
+    """The desk that plans a disruption: the one it was assigned when analysed (the plan
+    service decides the same way)."""
+
+    def aircraft(pairing_id: str) -> str | None:
+        p = tools.world.pairings.get(pairing_id)
+        return p.aircraft if p else None
+
+    return [
+        {"desk_id": d.desk_id, "controller": d.controller} for d in owning_desks(analysis, aircraft)
+    ]
 
 
 def flight_rows(
@@ -96,8 +99,18 @@ def reference(tools: Any) -> dict[str, Any]:
     gate = {g.flight_id: g.gate for g in tools.gates}
     return {
         "crew": [
-            {"crew_id": c.crew_id, "name": c.name, "rank": c.rank.value, "base": c.base}
+            {
+                "crew_id": c.crew_id,
+                "name": c.name,
+                "rank": c.rank.value,
+                "base": c.base,
+                "airline": c.airline,
+            }
             for c in sorted(seed.crew, key=lambda c: c.crew_id)
+        ],
+        "airlines": [
+            {"code": a.code, "name": a.name, "color": a.color, "aircraft": list(a.aircraft)}
+            for a in seed.airlines
         ],
         "flights": [
             {
@@ -198,6 +211,7 @@ LIVE_OPTION_KEYS = (
     "base",
     "reachability_minutes",
     "risk_score",
+    "experience_years",
     "resilience",
 )
 
@@ -207,7 +221,7 @@ def live_options(tools: Any, seat: Mapping[str, Any]) -> dict[str, Any] | None:
     roster): every legal option, the picks by policy, the best of each strategy, the
     candidate funnel and every excluded candidate with its reason. Approval re-checks the
     chosen option against the same."""
-    if seat.get("status") == "already_started":
+    if seat.get("status") in ("already_started", "cancelled"):
         return None
     try:
         r = tools.find_options(
@@ -232,6 +246,7 @@ def live_options(tools: Any, seat: Mapping[str, Any]) -> dict[str, Any] | None:
         "policies": {name: full(o) for name, o in (r.get("policies") or {}).items()},
         "strategies": [full(o) for o in r.get("strategies", [])],
         "cancellation": pick(r.get("cancellation")),
+        "short_crew": pick(r.get("short_crew")),
         "legal_options": r.get("legal_options"),
         "funnel": r.get("funnel", []),
         "excluded": [
@@ -281,8 +296,9 @@ def contention(
             other = item["disruption_id"]
             if other == disruption_id:
                 continue
-            seats = from_dynamo(item.get("analysis") or {}).get("seats", [])
-            desks = desks_of(tools, [s["pairing_id"] for s in seats])
+            other_analysis = from_dynamo(item.get("analysis") or {})
+            seats = other_analysis.get("seats", [])
+            desks = desks_of_disruption(tools, other_analysis)
             for s in seats:
                 their_dates = (s.get("impact") or {}).get("affected_dates") or []
                 for o in s.get("options", []):
@@ -315,8 +331,9 @@ def contention(
                         "pairing_id": a["pairing_id"],
                         "plan_id": plan["plan_id"],
                         "desks": [
-                            {"desk_id": d["desk_id"], "controller": d["controller"]}
-                            for d in desks_of(tools, [a["pairing_id"]])
+                            {"desk_id": d.desk_id, "controller": d.controller}
+                            for d in DESKS
+                            if d.desk_id == plan.get("desk")
                         ],
                         "crew_out": a.get("replaces"),
                         "role": a.get("role"),

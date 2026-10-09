@@ -1,6 +1,6 @@
 """Stored analysis, the stream handler and the run command, against moto's DynamoDB."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from boto3.dynamodb.types import TypeSerializer
@@ -23,7 +23,10 @@ from crewops.store.reports import (
     store_report,
 )
 
-RECEIVED = datetime(2026, 9, 15, 5, 1, tzinfo=UTC)
+RECEIVED = datetime.now(UTC) - timedelta(hours=1)
+"""When the report was stored: real time, because the analysis stamps its audit event with
+the real clock, and the trail must read in the order things happened. The report itself is
+about the operating week."""
 _serialize = TypeSerializer().serialize
 
 
@@ -84,7 +87,7 @@ def test_analysing_twice_is_a_no_op(table):
 
 def test_store_analysis_refuses_once_status_has_moved(table):
     stored(table)
-    now = datetime(2026, 9, 15, 6, tzinfo=UTC)
+    now = datetime(2026, 10, 13, 6, tzinfo=UTC)
     assert store_analysis(table, "r-00000001", {"x": 1.5}, now) is AnalysisOutcome.STORED
     assert store_analysis(table, "r-00000001", {"x": 2}, now) is AnalysisOutcome.ALREADY_ANALYSED
     assert get_disruption(table, "r-00000001")["analysis"] == {"x": 1.5}
@@ -136,7 +139,7 @@ def test_run_command_analyses_pending(table, monkeypatch, capsys):
     stored(
         table,
         report_id="r-00000002",
-        details={"crew_id": "C-3310", "from_date": "2026-09-15", "reason": "sick"},
+        details={"crew_id": "C-3310", "from_date": "2026-10-13", "reason": "sick"},
     )
     monkeypatch.setattr(run_command, "load_env_file", lambda: {})
     monkeypatch.setenv("AWS_PROFILE", "crewops")
@@ -166,7 +169,7 @@ def test_crew_reported_unavailable_elsewhere_is_not_offered(table):
     stored(
         table,
         report_id="r-00000002",
-        details={"crew_id": "C-3310", "from_date": "2026-09-15", "reason": "sick"},
+        details={"crew_id": "C-3310", "from_date": "2026-10-13", "reason": "sick"},
     )
     result = analyse_by_id(table, "r-00000001", Operation.load(table))
     assert result.outcome == "stored"
@@ -181,11 +184,11 @@ def test_unavailability_names_the_other_report(table):
     stored(
         table,
         report_id="r-00000002",
-        details={"crew_id": "C-3310", "from_date": "2026-09-15", "reason": "sick"},
+        details={"crew_id": "C-3310", "from_date": "2026-10-13", "reason": "sick"},
     )
     world = Operation.load(table).world
     excluded = {e.crew_id: e for e in find_options(world, "P-2291", "Captain").excluded}
-    assert excluded["C-3310"].reasons == ("reported unavailable on 2026-09-15 (report r-00000002)",)
+    assert excluded["C-3310"].reasons == ("reported unavailable on 2026-10-13 (report r-00000002)",)
 
 
 def test_open_certification_lapse_takes_crew_out_after_expiry(table):
@@ -193,10 +196,10 @@ def test_open_certification_lapse_takes_crew_out_after_expiry(table):
         table,
         report_id="r-certlapse",
         type_="certification_lapse",
-        details={"crew_id": "C-3310", "cert_type": "licence", "valid_to": "2026-09-16"},
+        details={"crew_id": "C-3310", "cert_type": "licence", "valid_to": "2026-10-14"},
     )
     unavailable = Operation.load(table).world.unavailable["C-3310"]
-    assert min(d for d, _ in unavailable).isoformat() == "2026-09-17"
+    assert min(d for d, _ in unavailable).isoformat() == "2026-10-15"
 
 
 def test_permanent_failure_is_recorded_not_retried(table, monkeypatch):
@@ -220,7 +223,7 @@ def test_run_command_carries_on_after_a_failure(table, monkeypatch, capsys):
     stored(
         table,
         report_id="r-00000002",
-        details={"crew_id": "C-3310", "from_date": "2026-09-15", "reason": "sick"},
+        details={"crew_id": "C-3310", "from_date": "2026-10-13", "reason": "sick"},
     )
     monkeypatch.setattr(run_command, "load_env_file", lambda: {})
     monkeypatch.setenv("AWS_PROFILE", "crewops")
@@ -243,5 +246,5 @@ def test_run_command_carries_on_after_a_failure(table, monkeypatch, capsys):
 
 
 def test_store_analysis_on_a_missing_disruption(table):
-    now = datetime(2026, 9, 15, 6, tzinfo=UTC)
+    now = datetime(2026, 10, 13, 6, tzinfo=UTC)
     assert store_analysis(table, "r-gone0001", {}, now) is AnalysisOutcome.MISSING

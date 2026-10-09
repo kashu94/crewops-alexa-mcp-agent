@@ -50,7 +50,7 @@ from crewops.tools import Caller
 AGREEMENT = 0.8
 """Fact agreement a rewording needs to pass."""
 FACT_RE = re.compile(
-    r"\b(?:C-\d{4}|P-\d{4}|DX\d{3,4}|VT-[A-Z]{3}|RULE-[A-Z]+-\d+|\d{2}:\d{2}Z|\d[\d,]*(?:\.\d+)?)\b"
+    r"\b(?:C-\d{4}|P-\d{4}|[A-Z]{2}\d{3,4}|VT-[A-Z]{3}|RULE-[A-Z]+-\d+|\d{2}:\d{2}Z|\d[\d,]*(?:\.\d+)?)\b"
 )
 REFUSALS = ("isn't available to your role", "doesn't give access")
 REDACTED = ("[phone removed]", "[email removed]", "[id removed]", "[card removed]", "[removed]")
@@ -63,6 +63,7 @@ READ_ONLY_TOOLS = frozenset(
         "check_legality",
         "controller_issue_counts",
         "duty_clock",
+        "list_open_disruptions",
         "explain_rule",
         "find_options",
         "joint_plan",

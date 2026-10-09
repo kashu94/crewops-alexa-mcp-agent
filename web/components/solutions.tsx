@@ -1,19 +1,34 @@
 "use client";
 
-import { AlertTriangle, Ban, CheckCircle2, ChevronDown, Clock, Plane, ShieldCheck, Swords, Users, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  Ban,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  Plane,
+  ShieldCheck,
+  Swords,
+  Users,
+  XCircle,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { tool } from "@/lib/client";
-import { byRule, type Legality, type Option, type Rival, type Seat } from "@/lib/types";
+import { byRule, type Legality, type Option, type Rival, type Seat, type Unavailable } from "@/lib/types";
 
-import { cx, Mono, rupees, Spinner } from "./ui";
+import { Info } from "./info";
+import { clock, cx, day, Mono, rupees, Spinner } from "./ui";
 
 const STRATEGY: Record<string, string> = {
   reserve_callout: "Reserve callout",
   day_off_callout: "Day-off callout",
   positioning: "Positioning",
   cancel: "Cancellation",
+  command_upgrade: "command-qualified first officer",
+  right_seat: "captain in the right seat",
+  short_crew: "operate one short",
 };
 
 const RULE_NAME: Record<string, string> = {
@@ -83,7 +98,11 @@ export function LegalityCheck({
             )}
             title={v.rule_id}
           >
-            {v.status === "PASS" ? <CheckCircle2 size={12} className="mt-0.5 shrink-0" /> : <XCircle size={12} className="mt-0.5 shrink-0" />}
+            {v.status === "PASS" ? (
+              <CheckCircle2 size={12} className="mt-0.5 shrink-0" />
+            ) : (
+              <XCircle size={12} className="mt-0.5 shrink-0" />
+            )}
             <span>
               <span className="font-semibold">{RULE_NAME[v.rule_id] ?? v.rule_id}</span>{" "}
               {v.headroom !== null ? `${v.headroom}h margin · ` : ""}
@@ -123,11 +142,17 @@ function OptionCard({
   best,
   pairingId,
   rivals,
+  chosen = false,
+  gone,
 }: {
   option: Option;
   best: number;
   pairingId: string;
   rivals: Rival[];
+  /** The option the committed plan used. */
+  chosen?: boolean;
+  /** Reported unavailable since the options were worked out. */
+  gone?: Unavailable;
 }) {
   const [open, setOpen] = useState(false);
   const extra = option.cost_inr - best;
@@ -135,11 +160,21 @@ function OptionCard({
     <li
       className={cx(
         "lift animate-rise rounded-xl border bg-surface",
-        option.rank === 1 ? "border-sky-300 ring-1 ring-sky-100" : "border-line",
+        gone
+          ? "border-red-200 bg-critical-soft/40"
+          : chosen
+            ? "border-emerald-300 bg-emerald-50/60 ring-2 ring-emerald-100"
+            : option.rank === 1
+              ? "border-sky-300 ring-1 ring-sky-100"
+              : "border-line",
       )}
       style={{ animationDelay: `${option.rank * 50}ms` }}
     >
-      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full items-start gap-3 p-3 text-left">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-start gap-3 p-3 text-left"
+      >
         <span
           className={cx(
             "grid h-7 w-7 shrink-0 place-items-center rounded-lg text-xs font-bold",
@@ -150,9 +185,21 @@ function OptionCard({
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-baseline gap-x-2">
-            <span className="font-semibold text-slate-900">{option.name}</span>
+            <span className={cx("font-semibold text-slate-900", gone && "text-red-800 line-through")}>
+              {option.name}
+            </span>
+            {gone && (
+              <span className="rounded-full bg-critical px-2 py-0.5 text-[10px] font-semibold text-white">
+                reported {gone.reason ?? "unavailable"} {day(gone.reported_utc)} {clock(gone.reported_utc)}
+              </span>
+            )}
             {option.crew_id && <Mono className="text-sky-700">{option.crew_id}</Mono>}
             {option.crew_rank && <span className="text-xs text-muted">{option.crew_rank}</span>}
+            {chosen && (
+              <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                chosen
+              </span>
+            )}
           </span>
           <span className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
             <span>{STRATEGY[option.strategy] ?? option.strategy.replace(/_/g, " ")}</span>
@@ -182,7 +229,12 @@ function OptionCard({
             </p>
           )}
           {option.crew_id && (
-            <LegalityCheck crewId={option.crew_id} pairingId={pairingId} strategy={option.strategy} delay={option.delay_hours} />
+            <LegalityCheck
+              crewId={option.crew_id}
+              pairingId={pairingId}
+              strategy={option.strategy}
+              delay={option.delay_hours}
+            />
           )}
         </div>
       )}
@@ -198,7 +250,9 @@ function CancelCard({ seat }: { seat: Seat }) {
         <Ban size={14} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block font-semibold text-red-900">Cancel instead</span>
+        <span className="flex items-center gap-1 font-semibold text-red-900">
+          Cancel instead <Info term="cancellation" />
+        </span>
         <span className="mt-1 block text-xs text-red-800/80">
           {flights.length > 0
             ? `${flights.map((f) => f.split("-")[0]).join(", ")} would not fly`
@@ -216,8 +270,21 @@ function CancelCard({ seat }: { seat: Seat }) {
   );
 }
 
-export function SeatOptions({ seat, contention = {} }: { seat: Seat; contention?: Record<string, Rival[]> }) {
-  const options: Option[] = seat.live?.options ?? seat.options;
+export function SeatOptions({
+  seat,
+  contention = {},
+  chosen = null,
+  unavailable = {},
+}: {
+  seat: Seat;
+  contention?: Record<string, Rival[]>;
+  unavailable?: Record<string, Unavailable>;
+  /** Decided: the crew id the committed plan used. The options are then shown as they were
+   * analysed, not searched again against today's roster. */
+  chosen?: string | null;
+}) {
+  const decided = chosen !== null;
+  const options: Option[] = decided ? seat.options : (seat.live?.options ?? seat.options);
   const best = options[0]?.cost_inr ?? 0;
   const impact = seat.impact ?? {};
   return (
@@ -259,14 +326,26 @@ export function SeatOptions({ seat, contention = {} }: { seat: Seat; contention?
               option={o}
               best={best}
               pairingId={seat.pairing_id}
-              rivals={(o.crew_id && contention[o.crew_id]) || []}
+              rivals={decided ? [] : (o.crew_id && contention[o.crew_id]) || []}
+              chosen={decided && o.crew_id === chosen}
+              gone={!decided && o.crew_id ? unavailable[o.crew_id] : undefined}
             />
           ))}
+          {decided && !options.some((o) => o.crew_id === chosen) && (
+            <li className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm text-emerald-900">
+              Chosen: <Mono>{chosen}</Mono>, from beyond the top options shown here.
+            </li>
+          )}
           {seat.cancellation_cost_inr !== null && <CancelCard seat={seat} />}
         </ol>
       ) : (
         <p className="rounded-lg bg-critical-soft px-3 py-2 text-xs text-red-900">
-          {seat.status === "already_started" ? "This trip has already started." : "No legal cover."} {seat.note}
+          {seat.status === "already_started"
+            ? "This trip has already started."
+            : seat.status === "cancelled"
+              ? "This trip is cancelled: nothing to re-crew."
+              : "No legal cover."}{" "}
+          {seat.note}
         </p>
       )}
     </div>

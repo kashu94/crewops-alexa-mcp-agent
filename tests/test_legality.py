@@ -19,7 +19,7 @@ def details(a):
 
 def test_duty_clock_canary(world):
     c = world.state("C-1042")
-    assert c.duty_in_window(date(2026, 9, 8), date(2026, 9, 14)) == 20.93
+    assert c.duty_in_window(date(2026, 10, 6), date(2026, 10, 12)) == 20.93
 
 
 def test_every_rostered_crew_is_legal_except_known_cert_lapse(world):
@@ -34,7 +34,7 @@ def test_every_rostered_crew_is_legal_except_known_cert_lapse(world):
 
 def test_cert_lapse_detail(world):
     a = assess(world, "C-5417", "P-2213")
-    assert details(a) == ["recurrent_training expired 2026-09-17, invalid on 2026-09-19"]
+    assert details(a) == ["recurrent_training expired 2026-10-15, invalid on 2026-10-17"]
 
 
 def test_reserve_captain_is_clean_cover(world):
@@ -46,7 +46,7 @@ def test_reserve_captain_is_clean_cover(world):
 def test_duty_breach_quotes_the_overrun(world):
     a = assess(world, "C-2087", "P-2291")
     assert not a.legal
-    assert details(a)[0] == "would exceed 60h/7d by 1h20m on 2026-09-15 (total 61.33h)"
+    assert details(a)[0] == "would exceed 60h/7d by 1h20m on 2026-10-13 (total 61.33h)"
 
 
 def test_reserve_window_must_cover_report(world):
@@ -56,32 +56,34 @@ def test_reserve_window_must_cover_report(world):
 
 
 def test_positioning_from_other_base(world):
-    a = assess(world, "C-1622", "P-2213")
+    # C-3555, a Deccan Express reserve based in Delhi, positioned for a Bengaluru trip.
+    a = assess(world, "C-3555", "P-2213")
     assert a.legal and a.on_reserve
-    assert a.positioning.flight_id == "DX402-2026-09-19"
+    assert a.positioning.flight_id == "DX402-2026-10-17"
     assert a.departure_slip_hours == 7.0
 
 
 def test_positioning_slip_cannot_eat_the_overnight_rest(world):
-    # Positioning delays day one by 3h; day two keeps its 04:00 report, leaving 9.5h rest.
-    a = assess(world, "C-2210", "P-2291")
+    # C-2341 (Konkan Skyways, Delhi): positioning delays day one; day two keeps its 04:00
+    # report, leaving 9.5h rest.
+    a = assess(world, "C-2341", "P-2291")
     assert a.days[1].report_utc == world.days_of("P-2291")[1].report_utc
-    assert details(a) == ["only 9.5h rest between 2026-09-15 and 2026-09-16 of the pairing"]
+    assert details(a) == ["only 9.5h rest between 2026-10-13 and 2026-10-14 of the pairing"]
 
 
 def test_duty_flown_on_snapshot_day_counts_once(world):
-    # C-5837 flew 11.25h on 09-14; the duty-clock history records 0 for that day.
+    # C-5837 flew 11.25h on 10-12; the duty-clock history records 0 for that day.
     c = world.state("C-5837")
-    assert c.duty_in_window(date(2026, 9, 8), date(2026, 9, 14)) == 30.88
-    # Covering P-2203 (11.25h on 09-16): the 7 days ending 09-16 then hold 42.13h ...
-    on_the_day = c.duty_in_window(date(2026, 9, 10), date(2026, 9, 16), "P-2203") + 11.25
+    assert c.duty_in_window(date(2026, 10, 6), date(2026, 10, 12)) == 30.88
+    # Covering P-2203 (11.25h on 10-14): the 7 days ending 10-14 then hold 42.13h ...
+    on_the_day = c.duty_in_window(date(2026, 10, 8), date(2026, 10, 14), "P-2203") + 11.25
     assert round(on_the_day, 2) == 42.13
-    # ... and the worst window is the one ending on their next trip, P-2207 on 09-20.
+    # ... and the worst window is the one ending on their next trip, P-2207 on 10-18.
     duty = next(
         v for v in assess(world, "C-5837", "P-2203").verdicts if v.rule_id == "RULE-DUTY-02"
     )
     assert duty.used == 45.0
-    assert duty.detail == "45.0h of 60h/7d in the 7 days ending 2026-09-20"
+    assert duty.detail == "45.0h of 60h/7d in the 7 days ending 2026-10-18"
 
 
 def test_crew_rostered_on_a_pairing_are_in_position(world):
@@ -91,12 +93,22 @@ def test_crew_rostered_on_a_pairing_are_in_position(world):
 
 
 def test_downstream_rest_conflict(world):
-    a = assess(world, "C-5837", "P-2291")
-    assert details(a) == ["only 10.75h rest before P-2204 on 2026-09-17"]
+    a = assess(world, "C-5820", "P-2291")
+    assert details(a) == ["only 11.75h rest before P-2218 on 2026-10-15"]
 
 
 def test_wrong_aircraft_type(world):
-    assert details(assess(world, "C-3315", "P-2291")) == ["not rated on A320"]
+    # Each airline flies one type, so an ATR captain is also another airline's.
+    assert details(assess(world, "C-3315", "P-2291")) == [
+        "not rated on A320",
+        "works for Nilgiri Connect, not Konkan Skyways, which flies VT-DXC",
+    ]
+
+
+def test_crew_of_another_airline_are_never_legal(world):
+    a = assess(world, "C-2210", "P-2291")  # Deccan Express captain, Konkan trip
+    assert not a.legal
+    assert "works for Deccan Express, not Konkan Skyways, which flies VT-DXC" in details(a)
 
 
 def test_delay_can_breach_fdp(world):

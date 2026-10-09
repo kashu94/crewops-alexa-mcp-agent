@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { speak, tool } from "@/lib/client";
 import { makeRecognition, type Recognition } from "@/lib/speech";
 
+import { AnswerText } from "./answer-text";
 import { cx } from "./ui";
 
 type Answer = {
@@ -30,6 +31,15 @@ const SOURCE: Record<string, string> = {
 };
 
 type Playback = "idle" | "playing" | "paused";
+
+const VOICE_ERRORS: Record<string, string> = {
+  "not-allowed": "The microphone is blocked for this site. Allow it in the browser's address bar, or type instead.",
+  "service-not-allowed": "This browser doesn't allow speech recognition here. Use Chrome or Edge, or type instead.",
+  network: "The browser's speech service couldn't be reached. Check the connection, or type instead.",
+  "no-speech": "I didn't hear anything. Tap the microphone and speak, or type instead.",
+  "audio-capture": "No microphone was found. Type the question instead.",
+  aborted: "Listening stopped.",
+};
 
 function newConversation() {
   return `web-${crypto.randomUUID()}`;
@@ -138,11 +148,26 @@ export function AlexaModule({
     }
   }
 
+  const silence = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+
   function listen() {
     const r = recognition.current;
-    if (!r || listening) return;
+    if (!r) return;
+    if (listening) {
+      // A second tap ends listening; whatever was heard so far is asked.
+      r.stop();
+      return;
+    }
     stop();
+    setVoiceError(null);
     let finalText = "";
+    let interimText = "";
+    const quiet = () => {
+      if (silence.current) clearTimeout(silence.current);
+      // Nothing heard for 10 seconds: stop rather than listen forever.
+      silence.current = setTimeout(() => r.stop(), 10_000);
+    };
     r.onresult = (event) => {
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -150,16 +175,29 @@ export function AlexaModule({
         if (result.isFinal) finalText += result[0].transcript;
         else interim += result[0].transcript;
       }
+      interimText = interim;
       setHeard(finalText || interim);
+      quiet();
     };
-    r.onerror = () => setListening(false);
+    r.onerror = (event) => {
+      setVoiceError(VOICE_ERRORS[event.error] ?? `Voice input stopped (${event.error}). Type the question instead.`);
+    };
     r.onend = () => {
+      if (silence.current) clearTimeout(silence.current);
       setListening(false);
       setHeard("");
-      if (finalText) ask(finalText);
+      const said = (finalText || interimText).trim();
+      if (said) ask(said);
     };
-    setListening(true);
-    r.start();
+    try {
+      r.start();
+      setListening(true);
+      quiet();
+    } catch {
+      // Already running in this tab (a double tap): end it, the next tap starts again.
+      r.stop();
+      setListening(false);
+    }
   }
 
   function submit(event: FormEvent) {
@@ -280,11 +318,14 @@ export function AlexaModule({
               <Waveform active={busy} tone={listening ? "listen" : playback === "playing" ? "speak" : "think"} />
               <div key={last?.id ?? "idle"} className="animate-rise min-h-[3.5rem]">
                 {listening ? (
-                  <p className="text-lg text-sky-700">{heard || "Go ahead…"}</p>
+                  <p className="text-lg text-sky-700">{heard || "Go ahead… (tap the microphone again to stop)"}</p>
+                ) : voiceError ? (
+                  <p className="text-sm text-amber-800">{voiceError}</p>
                 ) : last?.answer ? (
-                  <p className="max-h-36 overflow-y-auto whitespace-pre-line pr-2 text-[15px] leading-relaxed text-slate-800 [scrollbar-width:thin]">
-                    {last.answer.answer}
-                  </p>
+                  <AnswerText
+                    text={last.answer.answer}
+                    className="max-h-40 overflow-y-auto pr-2 text-[15px] leading-relaxed text-slate-800 [scrollbar-width:thin]"
+                  />
                 ) : last?.error ? (
                   <p className="text-sm text-critical">{last.error}</p>
                 ) : (
@@ -331,7 +372,7 @@ export function AlexaModule({
       </div>
 
       {/* The conversation, newest first; the latest exchange stands out */}
-      <section className={cx("flex min-h-0 min-w-0 flex-col gap-2", wide && "lg:max-h-[calc(100vh-12rem)]")}>
+      <section className={cx("flex min-h-0 min-w-0 flex-col gap-2", wide && "lg:h-full")}>
         {wide && (
           <h2 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-slate-600">
             Conversation {turns.length > 0 && <span className="font-mono text-muted">{turns.length}</span>}
@@ -367,7 +408,7 @@ export function AlexaModule({
               <p className="font-medium text-slate-800">{t.question}</p>
               {t.answer && (
                 <>
-                  <p className="mt-1.5 whitespace-pre-line text-slate-700">{t.answer.answer}</p>
+                  <AnswerText text={t.answer.answer} className="mt-1.5 text-slate-700" />
                   <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                     <span
                       className={cx(

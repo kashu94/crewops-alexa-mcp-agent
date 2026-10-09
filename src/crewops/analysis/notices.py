@@ -342,6 +342,25 @@ def notices_for(
                     Team.GATE_CONTROL, station, "reallocate the gates", f"Gate moves: {summary}."
                 )
             )
+            if kind is ReportType.GATE_CLOSURE and det.get("cause") == "external":
+                out.append(
+                    d.notice(
+                        Team.STATION_OPS,
+                        station,
+                        "ready the emergency gates: more gates may close",
+                        f"{gate} is closed by an outside cause ({det['reason']}). Keep the "
+                        f"station's emergency gates ready for further moves.",
+                    )
+                )
+                out.append(
+                    d.notice(
+                        Team.OPS_MONITORING,
+                        NETWORK,
+                        f"{station} may lose more gates",
+                        f"{gate} closed ({det['reason']}); inbound captains may be held or "
+                        "parked on remote stands.",
+                    )
+                )
             out.append(
                 d.notice(
                     Team.STATION_OPS,

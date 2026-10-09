@@ -107,3 +107,36 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/* Anything clickable shows the hand cursor (Tailwind v4 leaves buttons with the arrow). */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+summary,
+label:has(> input[type="radio"]),
+select {
+  cursor: pointer;
+}
+
+/* The sign-in page's route map. */
+@keyframes dash {
+  to { stroke-dashoffset: -20; }
+}
+@keyframes station {
+  0%, 100% { transform: scale(1); opacity: 0.25; }
+  50% { transform: scale(1.9); opacity: 0; }
+}
+.route-dash {
+  animation: dash 1.6s linear infinite;
+}
+.station-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: station 2.8s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-dash,
+  .station-pulse,
+  .wave-bar {
+    animation: none;
+  }
+}

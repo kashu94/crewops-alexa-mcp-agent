@@ -60,11 +60,25 @@ _D = r"(\d)[\s,.-]*"
 _END = r"\b(?![\s,./-]*\d)"  # the id's last digit: no more digits follow (not a date)
 SPOKEN_CREW_RE = re.compile(rf"\b(?:c|see|sea|cee|si)\b[\s.-]*{_D}{_D}{_D}(\d){_END}", re.I)
 SPOKEN_PAIRING_RE = re.compile(rf"\b(?:p|pee|pea)\b[\s.-]*{_D}{_D}{_D}(\d){_END}", re.I)
+AIRLINE_CODES = ("DX", "KS", "NG")
+"""The airlines' codes, as in ``data/seed/airlines.json`` (a test keeps them in step)."""
+_SPOKEN_CODE = {
+    "DX": r"d\.?\s*x|dee\s*ex|d\s*ex",
+    "KS": r"k\.?\s*s|kay\s*ess|k\s*ess",
+    "NG": r"n\.?\s*g|en\s*gee|n\s*gee",
+}
 SPOKEN_FLIGHT_RE = re.compile(
-    rf"\b(?:d\.?\s*x|dee\s*ex|d\s*ex)\.?[\s-]*{_D}{_D}(\d)\b(?![\s-]*\d)", re.I
+    rf"\b({'|'.join(f'(?P<{c}>{p})' for c, p in _SPOKEN_CODE.items())})\.?[\s-]*"
+    rf"{_D}{_D}(\d)\b(?![\s-]*\d)",
+    re.I,
 )
 SPOKEN_TAIL_RE = re.compile(r"\bvt[\s.-]*(d[\s.-]*x[\s.-]*[a-f])\b", re.I)
-LOWER_ID_RE = re.compile(r"\b([cp])-(\d+)\b|\b(dx)(\d{3})\b")
+LOWER_ID_RE = re.compile(rf"\b([cp])-(\d+)\b|\b({'|'.join(AIRLINE_CODES)})(\d{{3}})\b", re.I)
+
+
+def _spoken_flight(m: re.Match[str]) -> str:
+    code = next(c for c in _SPOKEN_CODE if m.group(c))
+    return code + "".join(d for d in m.groups()[-3:])
 
 
 def spoken_ids(text: str) -> str:
@@ -78,10 +92,15 @@ def spoken_ids(text: str) -> str:
     text = re.sub(r"\bc(\d{4})\b", r"C-\1", text, flags=re.I)
     text = SPOKEN_PAIRING_RE.sub(lambda m: "P-" + "".join(m.groups()), text)
     text = re.sub(r"\bp(\d{4})\b", r"P-\1", text, flags=re.I)
-    text = SPOKEN_FLIGHT_RE.sub(lambda m: "DX" + "".join(m.groups()), text)
+    text = SPOKEN_FLIGHT_RE.sub(_spoken_flight, text)
     text = SPOKEN_TAIL_RE.sub(lambda m: "VT-" + re.sub(r"[\s.-]", "", m.group(1)).upper(), text)
     return LOWER_ID_RE.sub(
-        lambda m: f"{m.group(1).upper()}-{m.group(2)}" if m.group(1) else f"DX{m.group(4)}", text
+        lambda m: (
+            f"{m.group(1).upper()}-{m.group(2)}"
+            if m.group(1)
+            else f"{m.group(3).upper()}{m.group(4)}"
+        ),
+        text,
     )
 
 
@@ -95,16 +114,17 @@ MALFORMED_CREW_RE = re.compile(r"\bC-(?!\d{4}\b)\d+\b")
 looked up."""
 PAIRING_RE = re.compile(r"\bP-\d{4}\b")
 MALFORMED_PAIRING_RE = re.compile(r"\bP-(?!\d{4}\b)\d+\b")
-FLIGHT_ID_RE = re.compile(r"\bDX\d{3}-\d{4}-\d{2}-\d{2}\b")
-FLIGHT_NO_RE = re.compile(r"\bDX\d{3}\b")
-MALFORMED_FLIGHT_NO_RE = re.compile(r"\bDX(?!\d{3}\b)\d+\b")
+FLIGHT_ID_RE = re.compile(r"\b[A-Z]{2}\d{3}-\d{4}-\d{2}-\d{2}\b")
+FLIGHT_NO_RE = re.compile(r"\b[A-Z]{2}\d{3}\b")
+"""An airline's two-letter code and three digits (DX401, KS431, NG451)."""
+MALFORMED_FLIGHT_NO_RE = re.compile(rf"\b(?:{'|'.join(AIRLINE_CODES)})(?!\d{{3}}\b)\d+\b")
 RULE_RE = re.compile(r"\bRULE-[A-Z]{3,4}-\d{2}\b")
 AIRCRAFT_RE = re.compile(r"\bVT-[A-Z]{3}\b")
 AC_TYPE_RE = re.compile(r"\b(A320|ATR[- ]?72)\b", re.I)
 STATION_RE = re.compile(r"\b[A-Z]{3}\b")
 GATE_RE = re.compile(r"\b([A-Z]{3}-G\d{1,2})\b", re.I)
 ISO_DATE_RE = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)")
-"""Also inside a timestamp: "2026-09-16T08:30:00Z" names 16 Sep."""
+"""Also inside a timestamp: "2026-10-14T08:30:00Z" names 14 Oct."""
 TIME_RE = re.compile(r"\b(\d{1,2}):(\d{2})\s*Z?\b", re.I)
 TODAY_RE = re.compile(r"\b(today|right now|currently|as of now)\b", re.I)
 TOMORROW_RE = re.compile(r"\btomorrow\b", re.I)
@@ -126,15 +146,15 @@ _MONTH_FIRST_ALT = "|".join(m for m in sorted(_MONTHS, key=len, reverse=True) if
 MONTH_DAY_RE = re.compile(
     rf"\b({_MONTH_FIRST_ALT})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?\b(?:,?\s+(\d{{4}}))?", re.I
 )
-"""Month first ("Sep 17"). Never "may": "who may 3 captains..." is not 3 May."""
+"""Month first ("Oct 15"). Never "may": "who may 3 captains..." is not 3 May."""
 BETWEEN_DAYS_RE = re.compile(
     rf"\bbetween\s+(\d{{1,2}})(?:st|nd|rd|th)?\s+and\s+(\d{{1,2}})(?:st|nd|rd|th)?\s+"
     rf"({_MONTH_ALT})\b",
     re.I,
 )
-""""between 15 and 17 Sep": both ends."""
+""""between 13 and 15 Oct": both ends."""
 DAY_RANGE_RE = re.compile(rf"\b(\d{{1,2}})\s*[–-]\s*(\d{{1,2}})\s+({_MONTH_ALT})\b", re.I)
-""""15–16 Sep": both days."""
+""""13–14 Oct": both days."""
 DATE_TEXT = (
     rf"(?:\d{{4}}-\d{{2}}-\d{{2}}|\d{{1,2}}(?:st|nd|rd|th)?\s+(?:{_MONTH_ALT})\b"
     rf"|(?:{_MONTH_ALT})\.?\s+\d{{1,2}}\b)"
@@ -516,14 +536,14 @@ def extract_dates(text: str, vocab: Vocabulary) -> list[str]:
 
 
 def extract_date_range(text: str, dates: list[str]) -> dict[str, str] | None:
-    """ "flights before 19 Sep" is a range, not the same question as "flights on 19 Sep"."""
+    """ "flights before 17 Oct" is a range, not the same question as "flights on 17 Oct"."""
     if not dates:
         return None
     if re.search(r"\bbetween\b", text, re.I) and len(dates) >= 2:
         lo, hi = sorted(dates[:2])
         return {"gte": lo, "lte": hi}
     for phrase, op in DATE_OPS:
-        # Only a comparison word directly before a date: "delayed before DX401 on 16 Sep"
+        # Only a comparison word directly before a date: "delayed before DX401 on 14 Oct"
         # is about one day, not a range.
         if re.search(rf"\b{re.escape(phrase)}\s+(?:the\s+)?{DATE_TEXT}", text, re.I):
             return {op: dates[0]}

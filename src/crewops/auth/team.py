@@ -19,7 +19,8 @@ from crewops.domain import DataError, Role
 from crewops.domain.desks import DESKS
 from crewops.ingestion.seed import SeedData, default_seed_dir
 
-USERNAME_RE = re.compile(r"^[a-z][a-z0-9]{2,31}$")
+USERNAME_RE = re.compile(r"^(?=.{3,32}$)[a-z][a-z0-9]*(?:\.[a-z0-9]+)?$")
+"""firstname.lastname for staff (rohit.malhotra), crew id and surname for crew (c1042.nair)."""
 CREW_NAME_RE = re.compile(r"^[A-Z]\.\s*[A-Z]|\b[A-Z]\.?$")
 """"A. Nair", "A.Nair", "Nair A.": how crew are written, never how staff are."""
 EXCLUSIVE = (
@@ -45,7 +46,10 @@ class TeamMember:
             raise DataError(f"{ctx}: unknown fields {sorted(unknown)}")
         username, name, roles = d.get("username"), d.get("name"), d.get("roles")
         if not isinstance(username, str) or not USERNAME_RE.match(username):
-            raise DataError(f"{ctx}.username: 3-32 lowercase letters and digits, got {username!r}")
+            raise DataError(
+                f"{ctx}.username: 3-32 lowercase letters and digits, at most one dot, "
+                f"got {username!r}"
+            )
         if not isinstance(name, str) or not name.strip():
             raise DataError(f"{ctx}.name: required")
         if not isinstance(roles, list) or not roles:

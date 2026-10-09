@@ -2,7 +2,7 @@
 
     uv run python -m crewops.ingestion.send_report crew_unavailable \\
         --user u-17 --role reporter \\
-        --details '{"crew_id": "C-1042", "from_date": "2026-09-15", "reason": "sick"}'
+        --details '{"crew_id": "C-1042", "from_date": "2026-10-13", "reason": "sick"}'
 
 In the finished system the MCP server sends reports on behalf of a signed-in user, taking
 the sender's identity from their verified login. This command lets a developer state the

@@ -17,6 +17,7 @@ import {
   Wrench,
 } from "lucide-react";
 
+import { Info } from "./info";
 import { clock, cx, day, Mono, Panel } from "./ui";
 import type { Detail, FlightRow, Handling, NextAtGate, StandMove, TeamNotice } from "@/lib/types";
 
@@ -32,7 +33,11 @@ const TEAM_ICON: Record<string, typeof Mail> = {
 };
 
 const KIND: Record<Handling["kind"], { label: string; tone: string; icon: typeof Mail }> = {
-  internal: { label: "Handled internally", tone: "border-emerald-200 bg-emerald-50/70 text-emerald-900", icon: CheckCircle2 },
+  internal: {
+    label: "Handled internally",
+    tone: "border-emerald-200 bg-emerald-50/70 text-emerald-900",
+    icon: CheckCircle2,
+  },
   recrew: { label: "Re-crew needed", tone: "border-sky-200 bg-sky-50/70 text-sky-900", icon: Users },
   decision: { label: "Decision needed", tone: "border-amber-200 bg-amber-50/70 text-amber-900", icon: ShieldAlert },
 };
@@ -46,7 +51,9 @@ export function HandlingBanner({ handling }: { handling?: Handling | null }) {
     <div className={cx("animate-rise flex items-start gap-3 rounded-2xl border px-4 py-3", k.tone)}>
       <Icon size={18} className="mt-0.5 shrink-0" />
       <div className="min-w-0">
-        <p className="text-xs font-semibold uppercase tracking-[0.1em]">{k.label}</p>
+        <p className="flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.1em]">
+          {k.label} <Info term="handling" />
+        </p>
         <p className="mt-0.5 text-sm leading-relaxed">{handling.text}</p>
       </div>
     </div>
@@ -63,7 +70,11 @@ export function StandTable({ stands }: { stands: StandMove[] }) {
   const booked = stands.reduce((n, m) => n + (m.booked ?? 0), 0);
   return (
     <Panel
-      title="Stand reallocation"
+      title={
+        <span className="flex items-center gap-1.5">
+          Stand reallocation <Info term="remote_stand" />
+        </span>
+      }
       icon={<DoorOpen size={14} className="text-accent" />}
       action={<span className="text-xs text-muted">{booked.toLocaleString("en-IN")} booked passengers to move</span>}
     >
@@ -96,7 +107,14 @@ export function StandTable({ stands }: { stands: StandMove[] }) {
                           <Bus size={12} /> remote stand, +{m.delay_minutes} min
                         </span>
                       ) : (
-                        <Mono className="rounded-md bg-ok-soft px-1.5 py-0.5 font-semibold text-emerald-800">{m.to_gate}</Mono>
+                        <Mono className="rounded-md bg-ok-soft px-1.5 py-0.5 font-semibold text-emerald-800">
+                          {m.to_gate}
+                        </Mono>
+                      )}
+                      {m.emergency && (
+                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                          emergency gate
+                        </span>
                       )}
                     </span>
                   </td>
@@ -118,7 +136,14 @@ export function StandTable({ stands }: { stands: StandMove[] }) {
                     )}
                   </td>
                   <td className="py-2 text-right font-mono tabular-nums">{m.booked ?? "—"}</td>
-                  <td className="py-2 pl-6 text-xs text-muted">{m.why}</td>
+                  <td className="py-2 pl-6 text-xs text-muted">
+                    {m.why}
+                    {(m.alternatives ?? []).length > 0 && (
+                      <span className="mt-0.5 block text-[11px]">
+                        Also free: <Mono>{(m.alternatives ?? []).join(", ")}</Mono>
+                      </span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -195,7 +220,9 @@ export function FlightTable({ flights, next }: { flights: FlightRow[]; next: Nex
       )}
       {next.length > 0 && (
         <div className="mt-4 border-t border-line pt-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-600">Next at the same gate</h3>
+          <h3 className="mb-2 flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-600">
+            Next at the same gate <Info term="next_at_gate" />
+          </h3>
           <ul className="flex flex-col gap-1.5 text-sm">
             {next.map((n) => (
               <li key={n.flight_id} className="flex flex-wrap items-center gap-2">
@@ -244,7 +271,9 @@ export function NoticeList({ notices }: { notices: TeamNotice[] }) {
                   <Icon size={14} />
                 </span>
                 <span className="text-sm font-semibold">{n.team_title}</span>
-                <Mono className="rounded bg-sunken px-1.5 text-[11px] text-muted">{n.scope === "NETWORK" ? "network" : n.scope}</Mono>
+                <Mono className="rounded bg-sunken px-1.5 text-[11px] text-muted">
+                  {n.scope === "NETWORK" ? "network" : n.scope}
+                </Mono>
                 {n.contact && (
                   <span className="text-xs text-muted">
                     {n.contact}
@@ -256,7 +285,9 @@ export function NoticeList({ notices }: { notices: TeamNotice[] }) {
                     "ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold",
                     n.channel === "in_app" ? "bg-indigo-50 text-indigo-700" : "bg-slate-100 text-slate-600",
                   )}
-                  title={n.channel === "in_app" ? "Shown on their CrewOps page" : "Emailed to the team's alert addresses"}
+                  title={
+                    n.channel === "in_app" ? "Shown on their CrewOps page" : "Emailed to the team's alert addresses"
+                  }
                 >
                   {n.channel === "in_app" ? <Smartphone size={11} /> : <Mail size={11} />}
                   {n.channel === "in_app" ? "in CrewOps" : "email"}
@@ -269,8 +300,8 @@ export function NoticeList({ notices }: { notices: TeamNotice[] }) {
         })}
       </ul>
       <p className="mt-3 text-[11px] text-muted">
-        Emails go to the addresses an administrator has subscribed to each team&apos;s alerts. They name flights,
-        gates and times, never a crew member.
+        Emails go to the addresses an administrator has subscribed to each team&apos;s alerts. They name flights, gates
+        and times, never a crew member.
       </p>
     </Panel>
   );

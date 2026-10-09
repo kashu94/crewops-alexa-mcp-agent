@@ -29,7 +29,7 @@ LEGALITY = entry(
             {"rule_id": "RULE-DUTY-02", "status": "FAIL", "detail": "61.33h"},
             {"rule_id": "RULE-FDP-01", "status": "PASS", "detail": "9.5h of 12.5h"},
         ],
-        "report_utc": "2026-09-15T06:00:00Z",
+        "report_utc": "2026-10-13T06:00:00Z",
     },
 )
 
@@ -69,7 +69,7 @@ def test_times_match_their_timestamps():
 
 def test_small_prose_numbers_and_calendar_words_are_not_claims():
     assert verify(
-        "All 7 rules checked for 15 Sep over the next 30 days; C-2087 breaches RULE-DUTY-02.",
+        "All 7 rules checked for 13 Oct over the next 30 days; C-2087 breaches RULE-DUTY-02.",
         [LEGALITY],
     ).ok
 
@@ -79,7 +79,7 @@ def test_no_trace_is_never_verified():
 
 
 def test_uncrewed_needs_an_impact_result():
-    assert not verify("DX412 is uncrewed.", [LEGALITY]).ok
+    assert not verify("KS412 is uncrewed.", [LEGALITY]).ok
 
 
 def test_headcount_must_match_the_lookup_count():
@@ -94,12 +94,12 @@ def test_naming_only_some_affected_flights_fails():
         "ripple",
         {
             "affected_pairings": [
-                {"directly_affected_flights": ["DX412-2026-09-15", "DX413-2026-09-15"]}
+                {"directly_affected_flights": ["KS412-2026-10-13", "KS413-2026-10-13"]}
             ]
         },
     )
-    assert verify("DX412 and DX413 are affected.", [ripple]).ok
-    assert not verify("DX412 is affected.", [ripple]).ok
+    assert verify("KS412 and KS413 are affected.", [ripple]).ok
+    assert not verify("KS412 is affected.", [ripple]).ok
 
 
 def test_made_up_flight_shape_fails():
@@ -110,9 +110,9 @@ def test_made_up_flight_shape_fails():
 
 
 def test_full_timestamps_are_checked():
-    assert verify("Report at 2026-09-15T06:00:00Z.", [LEGALITY]).ok
-    assert not verify("Report at 2099-12-31T23:59Z.", [LEGALITY]).ok
-    assert not verify("Report at 2026-09-15T07:00Z.", [LEGALITY]).ok
+    assert verify("Report at 2026-10-13T06:00:00Z.", [LEGALITY]).ok
+    assert not verify("Report at 2100-01-28T23:59Z.", [LEGALITY]).ok
+    assert not verify("Report at 2026-10-13T07:00Z.", [LEGALITY]).ok
 
 
 def test_arithmetic_is_only_within_one_result():
@@ -217,7 +217,7 @@ def test_third_round_findings():
         },
     )
     assert verify("C-1042 cannot fly P-2291, so D. Reddy (C-3310) can cover it.", [out]).ok
-    assert verify("C-2087 breaches RULE-DUTY-02 on Tuesday the 15th.", [LEGALITY]).ok
+    assert verify("C-2087 breaches RULE-DUTY-02 on Tuesday the 13th.", [LEGALITY]).ok
 
 
 FOUND = entry("find_options", {"pairing_id": "P-2291", "legal_options": 4, "options": []})

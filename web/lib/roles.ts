@@ -18,7 +18,7 @@ const ALL: Record<string, View> = {
   console: { href: "/console", label: "Controller", hint: "Disruptions, assistant, options" },
   disruptions: { href: "/disruptions", label: "Disruptions", hint: "Every disruption, by desk and state" },
   report: { href: "/report", label: "Report", hint: "Record a disruption" },
-  approvals: { href: "/approvals", label: "Approver", hint: "Four-eyes approval queue" },
+  approvals: { href: "/approvals", label: "Approver", hint: "Plans waiting for your approval" },
   crew: { href: "/crew", label: "Crew", hint: "My duty, my flights, report unavailable" },
   admin: { href: "/admin", label: "Admin", hint: "Rule thresholds, activity, alerts" },
   assistant: { href: "/assistant", label: "Assistant", hint: "Talk to CrewOps" },

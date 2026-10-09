@@ -22,6 +22,7 @@ export const TOOLS = {
   reject_plan: { list: false, write: true },
   withdraw_plan: { list: false, write: true },
   close_disruption: { list: false, write: true },
+  suggest_cover: { list: false, write: true },
   alert_addresses: { list: true, write: false },
   add_alert_address: { list: false, write: true },
   remove_alert_address: { list: false, write: true },

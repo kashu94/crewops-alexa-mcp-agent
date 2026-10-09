@@ -4,7 +4,7 @@ Only two things carry over, both deterministic, and both noted on the answer:
 
 * **A reply to a question back.** When the last answer asked for a missing detail ("Which
   seat needs cover on P-2291?") and the reply is only that detail, a few words giving a
-  seat, a date or one id ("Captain", "15 Sep") and asking nothing of its own, it is read
+  seat, a date or one id ("Captain", "13 Oct") and asking nothing of its own, it is read
   together with the question it answers. Anything else is a new question.
 * **He or she.** A question that refers to one person without naming one, right after a
   turn about exactly one crew member, is about that crew member, unless it speaks of the

@@ -18,21 +18,32 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from crewops.agent.context import Turn
 from crewops.agent.memory import ConversationMemory, valid_conversation
+from crewops.analysis.runner import UNAVAILABLE_STATUSES
 from crewops.domain import DataError, Report, Role, authorize
-from crewops.domain.reports import OPERATIONAL_REPORTERS
+from crewops.domain.reports import OPERATIONAL_REPORTERS, crew_out_of
 from crewops.mcp import views
 from crewops.notify.subscriptions import AlertError, AlertSubscriptions
 from crewops.plans.service import PlanError, Plans
+from crewops.plans.service import seat_key as _seat_key
 from crewops.plans.service import summary as plan_summary
 from crewops.store import plans as plan_store
 from crewops.store import rules as rule_store
 from crewops.store.items import from_dynamo
-from crewops.store.reports import disruptions_with_status, get_disruption
+from crewops.store.reports import (
+    add_suggestion,
+    disruptions_with_status,
+    filed_by,
+    filed_recently,
+    get_disruption,
+    record_filed,
+    rejections_for,
+    suggestions_for,
+)
 from crewops.tools import TOOL_SCHEMAS, Caller, allowed_tools, dispatch
 from crewops.tools.errors import INTERNAL
 
@@ -62,6 +73,16 @@ def _remark(table: Any, disruption_id: str, status: str) -> str | None:
     return closed[-1].get("reason") if closed else None
 
 
+def _airline(tools: Any, code: str) -> dict[str, str]:
+    a = next((a for a in tools.seed.airlines if a.code == code), None)
+    return {"code": code, "name": a.name if a else code, "color": a.color if a else "#64748b"}
+
+
+def _crew_name(tools: Any, crew_id: str | None) -> str | None:
+    crew = tools.world.crew.get(crew_id) if crew_id else None
+    return crew.name if crew else None
+
+
 def _outcome(status: str, handling: Mapping[str, Any]) -> str:
     """How a disruption stands, for whoever reported it."""
     if status == "OPTIONS_READY" and handling.get("kind") == "internal":
@@ -78,6 +99,7 @@ def _analysis_view(tools: Any, analysis: Mapping[str, Any]) -> dict[str, Any]:
     flights = [*analysis.get("affected_flights", []), *late]
     return {
         "handling": analysis.get("handling") or None,
+        "airlines": [_airline(tools, code) for code in analysis.get("airlines") or []],
         "notices": analysis.get("notices") or [],
         "stands": analysis.get("stands") or [],
         "next_at_gate": analysis.get("next_at_gate") or [],
@@ -266,7 +288,10 @@ class CrewOpsApi:
             raise ApiError("INVALID", str(exc)) from None
         if reason := authorize(report):
             raise ApiError("FORBIDDEN", reason)
+        if overlap := self._already_out(report.details, report.report_type.value, report.report_id):
+            raise ApiError("DUPLICATE", overlap)
         self.send(report.to_dict())
+        record_filed(self.table, report)
         return {
             "report_id": report.report_id,
             "status": "queued",
@@ -300,6 +325,7 @@ class CrewOpsApi:
                     "details": report.get("details", {}),
                     "summary": analysis.get("summary", ""),
                     "handling": (analysis.get("handling") or {}).get("kind"),
+                    "airlines": analysis.get("airlines") or [],
                     "desks": [
                         d["desk_id"]
                         for d in views.desks_of_disruption(
@@ -384,6 +410,16 @@ class CrewOpsApi:
                     for s in seats
                 ],
             ),
+            # Crew among the options who have since been reported unavailable on these dates:
+            # shown struck out, with when, rather than silently dropped.
+            "unavailable_now": self._unavailable_now(disruption_id, seats),
+            # Other desks' suggestions of cover: advice for the owning desk, which alone
+            # may act on it; other readers see it as part of the record.
+            "suggestions": [
+                {k: s.get(k) for k in ("by", "desk", "seat", "crew_id", "note", "at")}
+                | {"name": _crew_name(tools, s.get("crew_id"))}
+                for s in suggestions_for(self.table, disruption_id)
+            ],
             "plans": [
                 {"status": p["status"], **plan_summary(p)}
                 for p in plan_store.plans_for(self.table, disruption_id)
@@ -392,6 +428,47 @@ class CrewOpsApi:
                 {k: e.get(k) for k in ("at", "action", "actor", "plan_id", "reason") if e.get(k)}
                 for e in plan_store.audit_trail(self.table, disruption_id)
             ],
+        }
+
+    def suggest(
+        self, caller: Caller, disruption_id: str, seat: str, crew_id: str, note: str = ""
+    ) -> dict[str, Any]:
+        """A controller on another desk suggests cover for a seat. It is shown to the owning
+        desk; it plans nothing and changes nothing."""
+        if Role.CONTROLLER not in caller.roles or not caller.desk:
+            raise ApiError("FORBIDDEN", "only a controller with a desk can suggest cover")
+        item = get_disruption(self.table, disruption_id)
+        if item is None:
+            raise ApiError("NOT_FOUND", f"no disruption {disruption_id}")
+        if item["status"] != "OPTIONS_READY":
+            raise ApiError("WRONG_STATE", f"{disruption_id} is {item['status']}")
+        analysis = from_dynamo(item.get("analysis") or {})
+        tools = self.live().pipeline.tools
+        owners = views.desks_of_disruption(tools, analysis)
+        if any(d["desk_id"] == caller.desk for d in owners):
+            raise ApiError(
+                "INVALID", "this is your own desk's disruption: choose the option instead"
+            )
+        if seat not in {_seat_key(s) for s in analysis.get("seats", [])}:
+            raise ApiError("INVALID", f"no such seat: {seat}")
+        if crew_id not in tools.world.crew:
+            raise ApiError("INVALID", f"no crew member {crew_id}")
+        note = (note or "").strip()[:300]
+        add_suggestion(
+            self.table,
+            disruption_id,
+            caller.user_id,
+            caller.desk,
+            seat,
+            crew_id,
+            note,
+            self.clock(),
+        )
+        return {
+            "status": "suggested",
+            "disruption_id": disruption_id,
+            "seat": seat,
+            "crew_id": crew_id,
         }
 
     # ------------------------------------------------------------------
@@ -419,10 +496,73 @@ class CrewOpsApi:
         return {
             "crew_id": caller.crew_id,
             "name": mine[0]["name"] if mine else None,
+            "airline": tools.world.airline_of_crew.get(caller.crew_id),
             "notices": self._crew_notices(caller.crew_id),
+            "reported_unavailable": self._reported_out(caller.crew_id),
             "clock": tools.duty_clock(caller.crew_id),
             "pairings": sorted(pairings, key=lambda p: p["days"][0]["date"] if p["days"] else ""),
         }
+
+    def _unavailable_now(
+        self, disruption_id: str, seats: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        wanted: dict[str, set[str]] = {}
+        for seat in seats:
+            dates = set(seat["impact"].get("affected_dates") or [])
+            options = [*seat.get("options", []), *((seat.get("live") or {}).get("options") or [])]
+            for o in options:
+                if o.get("crew_id"):
+                    wanted.setdefault(o["crew_id"], set()).update(dates)
+        if not wanted:
+            return {}
+        out: dict[str, dict[str, Any]] = {}
+        for status in UNAVAILABLE_STATUSES:
+            for item in disruptions_with_status(self.table, status):
+                if item["disruption_id"] == disruption_id:
+                    continue
+                report = from_dynamo(item.get("report") or {})
+                kind, d = report.get("type", ""), report.get("details") or {}
+                if kind not in ("crew_unavailable", "multiple_crew_unavailable"):
+                    continue
+                days = {
+                    (date.fromisoformat(d["from_date"]) + timedelta(days=i)).isoformat()
+                    for i in range(
+                        (date.fromisoformat(d["to_date"]) - date.fromisoformat(d["from_date"])).days
+                        + 1
+                    )
+                }
+                for crew_id in crew_out_of(kind, d):
+                    if crew_id in wanted and wanted[crew_id] & days:
+                        out[crew_id] = {
+                            "disruption_id": item["disruption_id"],
+                            "reported_utc": report.get("reported_utc"),
+                            "reason": d.get("reason"),
+                            "from_date": d["from_date"],
+                            "to_date": d["to_date"],
+                        }
+        return out
+
+    def _reported_out(self, crew_id: str) -> list[dict[str, Any]]:
+        """The periods this crew member is already reported unavailable, so the same days
+        are not reported twice."""
+        out = []
+        for status in UNAVAILABLE_STATUSES:
+            for item in disruptions_with_status(self.table, status):
+                report = from_dynamo(item.get("report") or {})
+                kind, d = report.get("type", ""), report.get("details") or {}
+                if kind in ("crew_unavailable", "multiple_crew_unavailable") and crew_id in (
+                    crew_out_of(kind, d)
+                ):
+                    out.append(
+                        {
+                            "disruption_id": item["disruption_id"],
+                            "from_date": d["from_date"],
+                            "to_date": d["to_date"],
+                            "reason": d.get("reason"),
+                            "status": item["status"],
+                        }
+                    )
+        return sorted(out, key=lambda r: r["from_date"])
 
     def _crew_notices(self, crew_id: str) -> list[dict[str, Any]]:
         """In-app notices addressed to this crew member (a certificate about to lapse),
@@ -448,31 +588,100 @@ class CrewOpsApi:
     # Reporting desk
     # ------------------------------------------------------------------
 
-    def my_reports(self, caller: Caller, limit: int = 30) -> list[dict[str, Any]]:
-        """What the signed-in person has reported, newest first, and how each stands."""
-        out = []
-        for status in FEED_STATUSES:
+    def my_reports(self, caller: Caller, scope: str = "mine", limit: int = 30) -> list[dict]:
+        """Reports and how each stands, newest first: still being checked, refused (and
+        why), or the disruption it became. ``scope`` "mine" is what the caller filed;
+        "crew" is what crew filed about themselves, for the reporting desk."""
+        limit = max(1, min(int(limit), 100))
+        if scope == "crew":
+            if not caller.roles & (OPERATIONAL_REPORTERS | READERS):
+                raise ApiError("FORBIDDEN", "only the reporting desk and crew control see these")
+            filed = [
+                f for f in filed_recently(self.table, 300) if "crew" in (f.get("roles") or [])
+            ][:limit]
+        elif scope == "mine":
+            filed = filed_by(self.table, caller.user_id, limit)
+        else:
+            raise ApiError("INVALID", "scope is mine or crew")
+        return [self._filed_state(f) for f in filed]
+
+    def _filed_state(self, filed: Mapping[str, Any]) -> dict[str, Any]:
+        report = from_dynamo(filed.get("report") or {})
+        out = {
+            "disruption_id": filed["report_id"],
+            "report_type": report.get("type"),
+            "reported_utc": report.get("reported_utc"),
+            "reported_by": filed.get("user_id"),
+            "details": report.get("details", {}),
+            "narrative": report.get("narrative") or "",
+            "handled": None,
+            "remark": None,
+        }
+        item = get_disruption(self.table, filed["report_id"])
+        if item is not None:
+            handling = from_dynamo(item.get("analysis") or {}).get("handling") or {}
+            return out | {
+                "status": item["status"],
+                "outcome": _outcome(item["status"], handling),
+                "handled": handling.get("text") if handling.get("kind") == "internal" else None,
+                "remark": _remark(self.table, filed["report_id"], item["status"]),
+            }
+        refused = rejections_for(self.table, filed["report_id"])
+        if refused:
+            reason = refused[-1].get("reason", "")
+            return out | {"status": "REJECTED", "outcome": f"Not accepted: {reason}"}
+        return out | {"status": "QUEUED", "outcome": "Received; being checked against the roster."}
+
+    def _already_out(
+        self, details: Mapping[str, Any], report_type: str, report_id: str
+    ) -> str | None:
+        """The days a crew member in this report is already reported unavailable, said as
+        the reason to refuse it, or None. Counts open disruptions and reports still in the
+        queue (filed, neither stored nor refused yet); a resend of the same report is left
+        to the worker, which stores it once."""
+        if report_type not in ("crew_unavailable", "multiple_crew_unavailable"):
+            return None
+        wanted = set(crew_out_of(report_type, details))
+        start, end = (
+            date.fromisoformat(details["from_date"]),
+            date.fromisoformat(details["to_date"]),
+        )
+
+        def overlap(other_id: str, other: Mapping[str, Any]) -> str | None:
+            if other_id == report_id:
+                return None
+            d = other.get("details") or {}
+            kind = other.get("type", "")
+            if kind not in ("crew_unavailable", "multiple_crew_unavailable"):
+                return None
+            clash = wanted & set(crew_out_of(kind, d))
+            if not clash:
+                return None
+            o_start, o_end = date.fromisoformat(d["from_date"]), date.fromisoformat(d["to_date"])
+            if start <= o_end and o_start <= end:
+                return (
+                    f"{', '.join(sorted(clash))} is already reported unavailable "
+                    f"{d['from_date']} to {d['to_date']} ({other_id})"
+                )
+            return None
+
+        for status in UNAVAILABLE_STATUSES:
             for item in disruptions_with_status(self.table, status):
                 report = from_dynamo(item.get("report") or {})
-                if (report.get("reported_by") or {}).get("user_id") != caller.user_id:
-                    continue
-                handling = from_dynamo(item.get("analysis") or {}).get("handling") or {}
-                out.append(
-                    {
-                        "disruption_id": item["disruption_id"],
-                        "status": item["status"],
-                        "outcome": _outcome(item["status"], handling),
-                        "report_type": report.get("type"),
-                        "reported_utc": report.get("reported_utc"),
-                        "details": report.get("details", {}),
-                        "handled": handling.get("text")
-                        if handling.get("kind") == "internal"
-                        else None,
-                        "remark": _remark(self.table, item["disruption_id"], item["status"]),
-                    }
-                )
-        out.sort(key=lambda d: d.get("reported_utc") or "", reverse=True)
-        return out[: max(1, min(int(limit), 100))]
+                if why := overlap(str(item["disruption_id"]), report):
+                    return why
+        # Reports still queued: only a clashing one is looked up, to see whether the worker
+        # has stored it (counted above, or closed since) or refused it (no longer counts).
+        for row in filed_recently(self.table):
+            rid = str(row["report_id"])
+            why = overlap(rid, from_dynamo(row.get("report") or {}))
+            if (
+                why
+                and get_disruption(self.table, rid) is None
+                and not rejections_for(self.table, rid)
+            ):
+                return why
+        return None
 
     def reference(self, caller: Caller) -> dict[str, Any]:
         """The crew, flights, aircraft, gates and stations a report can name."""

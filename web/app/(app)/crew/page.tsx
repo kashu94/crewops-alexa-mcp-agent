@@ -1,15 +1,17 @@
 "use client";
 
 import { BellRing, CalendarDays, Clock3, HeartPulse, MoonStar, Plane, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { AIRLINES } from "@/components/airline";
 import { useMe } from "@/components/me";
-import { Button, clock, cx, day, Empty, Field, Mono, Notice, Panel, Spinner } from "@/components/ui";
+import { Button, clock, cx, day, Empty, Field, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
 
 type Day = { date: string; flights: string[]; report_utc: string; release_utc: string };
 type Roster = {
   crew_id: string;
+  airline?: string | null;
   name: string | null;
   clock: {
     as_of: string;
@@ -21,7 +23,10 @@ type Roster = {
   };
   pairings: { pairing_id: string; aircraft: string; role: string; days: Day[] }[];
   notices?: { disruption_id: string; status: string; at: string | null; message: string }[];
+  reported_unavailable?: { disruption_id: string; from_date: string; to_date: string; reason: string | null; status: string }[];
 };
+
+type Filed = { disruption_id: string; status: string; outcome: string; reported_utc: string | null; details: Record<string, unknown> };
 
 const REASONS = [
   ["sick", "Sick"],
@@ -61,9 +66,18 @@ function weekOf(asOf: string): string[] {
   });
 }
 
-function ReportSheet({ crewId, onClose }: { crewId: string; onClose: (text?: string) => void }) {
+function ReportSheet({
+  crewId,
+  taken,
+  onClose,
+}: {
+  crewId: string;
+  taken: NonNullable<Roster["reported_unavailable"]>;
+  onClose: (text?: string) => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [from, setFrom] = useState("");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -75,13 +89,25 @@ function ReportSheet({ crewId, onClose }: { crewId: string; onClose: (text?: str
     setBusy(true);
     setError(null);
     const from = String(form.get("from") ?? "");
+    const to = String(form.get("to") ?? "") || from;
+    if (to < from) {
+      setError("'Until' must be on or after 'From'.");
+      setBusy(false);
+      return;
+    }
+    const clash = taken.find((t) => from <= t.to_date && t.from_date <= to);
+    if (clash) {
+      setError(`You're already reported unavailable ${clash.from_date} to ${clash.to_date}.`);
+      setBusy(false);
+      return;
+    }
     try {
       const out = await tool<{ report_id: string; note: string }>("report_disruption", {
         report_type: "crew_unavailable",
         details: {
           crew_id: crewId,
           from_date: from,
-          to_date: String(form.get("to") ?? "") || from,
+          to_date: to,
           reason: form.get("reason"),
         },
         narrative: String(form.get("narrative") ?? ""),
@@ -118,9 +144,15 @@ function ReportSheet({ crewId, onClose }: { crewId: string; onClose: (text?: str
           }}
         >
           <div className="grid grid-cols-2 gap-3">
-            <Field label="From" name="from" type="date" required autoFocus />
-            <Field label="Until" name="to" type="date" hint="Optional" />
+            <Field label="From" name="from" type="date" required autoFocus value={from} onChange={(e) => setFrom(e.target.value)} />
+            <Field label="Until" name="to" type="date" hint="Optional: the same day if empty" min={from || undefined} />
           </div>
+          {taken.length > 0 && (
+            <p className="rounded-lg bg-sunken px-3 py-2 text-xs text-muted">
+              Already reported:{" "}
+              {taken.map((t) => (t.from_date === t.to_date ? t.from_date : `${t.from_date} to ${t.to_date}`)).join("; ")}
+            </p>
+          )}
           <fieldset className="flex flex-col gap-1.5 text-sm">
             <legend className="mb-1 font-medium text-slate-700">Reason</legend>
             <div className="grid grid-cols-4 gap-2">
@@ -134,7 +166,7 @@ function ReportSheet({ crewId, onClose }: { crewId: string; onClose: (text?: str
               ))}
             </div>
           </fieldset>
-          <Field label="Anything crew control should know" name="narrative" maxLength={500} hint="Optional" />
+          <Field label="Anything to tell the reporter?" name="narrative" maxLength={500} hint="Optional" />
           {error && <Notice tone="error">{error}</Notice>}
           <Button type="submit" tone="danger" disabled={busy}>
             {busy && <Spinner />} Tell crew control
@@ -152,10 +184,22 @@ export default function Crew() {
   const [error, setError] = useState<string | null>(null);
   const [sheet, setSheet] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [filed, setFiled] = useState<Filed[]>([]);
 
-  useEffect(() => {
-    if (me.crew_id) tool<Roster>("my_roster").then(setRoster, (err: Error) => setError(err.message));
+  const reload = useCallback(() => {
+    if (!me.crew_id) return;
+    tool<Roster>("my_roster").then(setRoster, (err: Error) => setError(err.message));
+    tool<Filed[]>("my_reports").then(setFiled, () => undefined);
   }, [me.crew_id]);
+  useEffect(reload, [reload]);
+
+  // A report is checked within a minute: look again while one is still being checked.
+  const checking = filed.some((f) => f.status === "QUEUED" || f.status === "REPORTED");
+  useEffect(() => {
+    if (!checking) return;
+    const t = setInterval(reload, 10_000);
+    return () => clearInterval(t);
+  }, [checking, reload]);
 
   const duties = useMemo(() => {
     const map = new Map<string, { pairing: string; aircraft: string; day: Day }>();
@@ -176,6 +220,7 @@ export default function Crew() {
         <h1 className="mt-1 text-2xl font-semibold">{roster.name ?? me.user_id}</h1>
         <p className="mt-0.5 text-sm text-sky-100">
           <Mono>{roster.crew_id}</Mono> · {roster.pairings[0]?.role ?? "Crew"}
+          {roster.airline && <> · {AIRLINES[roster.airline]?.name ?? roster.airline}</>}
         </p>
         <button
           onClick={() => setSheet(true)}
@@ -207,6 +252,25 @@ export default function Crew() {
             </div>
           ))}
         </section>
+      )}
+
+      {filed.length > 0 && (
+        <Panel title="My reports" icon={<HeartPulse size={14} className="text-accent" />}>
+          <ul className="flex flex-col gap-2">
+            {filed.slice(0, 5).map((f) => (
+              <li key={f.disruption_id} className="rounded-xl border border-line px-3 py-2 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">
+                    {String(f.details.from_date ?? "")}
+                    {f.details.to_date && f.details.to_date !== f.details.from_date ? ` to ${String(f.details.to_date)}` : ""}
+                  </span>
+                  <Status value={f.status} />
+                </div>
+                <p className={cx("mt-1 text-xs", f.status === "REJECTED" ? "text-critical" : "text-muted")}>{f.outcome}</p>
+              </li>
+            ))}
+          </ul>
+        </Panel>
       )}
 
       <Panel title="This week" icon={<CalendarDays size={14} className="text-accent" />}>
@@ -276,9 +340,13 @@ export default function Crew() {
       {sheet && (
         <ReportSheet
           crewId={roster.crew_id}
+          taken={roster.reported_unavailable ?? []}
           onClose={(text) => {
             setSheet(false);
-            if (text) setMessage(text);
+            if (text) {
+              setMessage(text);
+              setTimeout(reload, 1500);
+            }
           }}
         />
       )}

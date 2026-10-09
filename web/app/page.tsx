@@ -1,21 +1,7 @@
-"use client";
-
-import { useEffect } from "react";
-
-import { Spinner } from "@/components/ui";
-import { tool } from "@/lib/client";
-import { homeFor, type Me } from "@/lib/roles";
+// Opening the app always starts at sign-in; whoever is already signed in in this browser
+// is offered "Continue" there.
+import { redirect } from "next/navigation";
 
 export default function Home() {
-  useEffect(() => {
-    tool<Me>("whoami").then(
-      (me) => window.location.replace(homeFor(me.roles)),
-      () => undefined, // signed out: the client sends the browser to /login
-    );
-  }, []);
-  return (
-    <main className="flex flex-1 items-center justify-center text-muted">
-      <Spinner />
-    </main>
-  );
+  redirect("/login");
 }

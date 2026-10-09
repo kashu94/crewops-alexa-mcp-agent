@@ -90,7 +90,7 @@ def test_group_by_counts(tools, seed):
 def test_sort_and_limit_keep_ties_visible(tools):
     out = ok(tools, "lookup", entity="crew", sort_by="reachability_minutes", limit=3)
     assert out["count"] == 150 and len(out["rows"]) == 3
-    assert [r["reachability_minutes"] for r in out["rows"]] == [45, 45, 45]
+    assert [r["reachability_minutes"] for r in out["rows"]] == [15, 15, 20]
     top = ok(tools, "lookup", entity="risk_signals", sort_by="risk", sort_desc=True, limit=1)
     assert top["rows"][0]["crew_id"] == "C-1042" and top["rows"][0]["disruption_risk_score"] == 0.78
 
@@ -100,10 +100,10 @@ def test_ranges_lists_and_containment(tools):
         tools,
         "lookup",
         entity="certifications",
-        filters={"valid_to": {"gte": "2026-09-14", "lte": "2026-09-20"}},
+        filters={"valid_to": {"gte": "2026-10-12", "lte": "2026-10-18"}},
     )
     assert {r["crew_id"] for r in expiring["rows"]} >= {"C-2087", "C-5417"}
-    assert all("2026-09-14" <= r["valid_to"] <= "2026-09-20" for r in expiring["rows"])
+    assert all("2026-10-12" <= r["valid_to"] <= "2026-10-18" for r in expiring["rows"])
     atr = ok(tools, "lookup", entity="crew", filters={"ratings": "ATR72", "rank": "Captain"})
     assert all("ATR72" in r["ratings"] for r in atr["rows"]) and atr["count"] > 0
     both = ok(tools, "lookup", entity="crew", filters={"base": ["BLR", "DEL"]})
@@ -115,7 +115,7 @@ def test_date_on_pairings_means_flies_that_day(tools):
         tools,
         "lookup",
         entity="pairing_crew",
-        filters={"aircraft": "VT-DXB", "date": "2026-09-16", "role": "Senior Cabin Crew"},
+        filters={"aircraft": "VT-DXB", "date": "2026-10-14", "role": "Senior Cabin Crew"},
     )
     assert out["count"] == 1 and out["rows"][0]["pairing_id"] == "P-2210"
 
@@ -153,10 +153,10 @@ def test_long_results_are_capped_but_counted(tools, seed):
 
 def test_flight_number_needs_a_date(tools):
     code, message = err(tools, "check_gate", flight_no="DX401")
-    assert code == "AMBIGUOUS_QUERY" and "2026-09-15" in message
-    code, message = err(tools, "check_gate", flight_no="DX401", date="2026-09-25")
+    assert code == "AMBIGUOUS_QUERY" and "2026-10-13" in message
+    code, message = err(tools, "check_gate", flight_no="DX401", date="2026-10-23")
     assert code == "UNRESOLVED_ENTITY" and "flies on" in message
-    code, message = err(tools, "check_gate", flight_no="DX999", date="2026-09-15")
+    code, message = err(tools, "check_gate", flight_no="DX999", date="2026-10-13")
     assert code == "UNRESOLVED_ENTITY" and "no flight DX999" in message
 
 
@@ -169,28 +169,28 @@ def test_impossible_date_is_refused(tools):
 
 
 def test_duty_clock_matches_the_engine(tools):
-    out = ok(tools, "duty_clock", crew_id="C-1042", date="2026-09-14")
+    out = ok(tools, "duty_clock", crew_id="C-1042", date="2026-10-12")
     crew = tools.world.crew["C-1042"]
-    assert out["duty_hours_7d"] == crew.duty_in_window(date(2026, 9, 8), date(2026, 9, 14))
+    assert out["duty_hours_7d"] == crew.duty_in_window(date(2026, 10, 6), date(2026, 10, 12))
     assert out["duty_headroom_7d"] == round(60 - out["duty_hours_7d"], 2)
-    assert out["flight_window"] == "2026-08-18 to 2026-09-14"
+    assert out["flight_window"] == "2026-09-15 to 2026-10-12"
     code, message = err(tools, "duty_clock", crew_id="C-1042", date="2025-01-01")
     assert code == "UNRESOLVED_ENTITY" and "outside" in message
 
 
 def test_duty_clock_counts_rostered_days(tools):
-    out = ok(tools, "duty_clock", crew_id="C-1042", date="2026-09-15")
+    out = ok(tools, "duty_clock", crew_id="C-1042", date="2026-10-13")
     assert out["rostered_this_date"] is True and out["duty_hours_this_date"] == 9.5
 
 
 def test_notification_brief_reads_the_roster(tools):
     brief = ok(tools, "notification_brief", crew_id="C-3310", pairing_id="P-2291")
-    assert brief["report_utc"] == "2026-09-15T06:00:00Z"
-    assert brief["reachability_minutes"] == 45
-    assert brief["acknowledge_by_utc"] == "2026-09-15T05:15:00Z"
+    assert brief["report_utc"] == "2026-10-13T06:00:00Z"
+    assert brief["reachability_minutes"] == 30
+    assert brief["acknowledge_by_utc"] == "2026-10-13T05:30:00Z"  # report less the reach time
     first, last = brief["days"][0], brief["days"][-1]
     assert first["report_station"] == "BLR" and first["overnight_station"] == "DEL"
-    assert first["flights"][0].startswith("DX412 BLR-BOM 07:00Z")
+    assert first["flights"][0].startswith("KS412 BLR-BOM 07:00Z")
     assert last["overnight_station"] is None
     assert brief["rostered_on_pairing"] is False and brief["role"] == "Captain"
 
@@ -206,7 +206,7 @@ def test_legality_matches_assess(tools):
 
 
 def test_legality_by_aircraft_and_date_uses_the_crews_own_duty(tools):
-    out = ok(tools, "check_legality", crew_id="C-5417", aircraft="VT-DXB", date="2026-09-19")
+    out = ok(tools, "check_legality", crew_id="C-5417", aircraft="VT-DXB", date="2026-10-17")
     assert out["pairing_id"] == "P-2213" and out["legal"] is False
     assert out["blocking"][0]["rule_id"] == "RULE-CERT-06"
 
@@ -216,17 +216,17 @@ def test_delay_on_a_named_flight_lands_on_its_day(tools):
         tools,
         "check_legality",
         crew_id="C-1042",
-        flight_id="DX589-2026-09-16",
+        flight_id="KS589-2026-10-14",
         delay_h=1,
     )
-    assert out["pairing_id"] == "P-2291" and out["delay_date"] == "2026-09-16"
+    assert out["pairing_id"] == "P-2291" and out["delay_date"] == "2026-10-14"
     code, message = err(
         tools,
         "check_legality",
         crew_id="C-1042",
         pairing_id="P-2291",
         delay_h=1,
-        delay_date="2026-09-19",
+        delay_date="2026-10-17",
     )
     assert code == "INVALID_ARGUMENT" and "no duty day" in message
 
@@ -241,7 +241,13 @@ def test_cover_for_a_named_crew_member(tools):
         out["pairing_id"] == "P-2291" and out["role"] == "Captain" and out["crew_out"] == "C-1042"
     )
     assert out["recommended"]["crew_id"] == engine.recommended.crew_id == "C-3310"
-    assert out["recommended"]["cost_inr"] == 18500
+    # Reserve callout 18,500 + seniority 9 x 450 + travel 30 min = 3 x 180.
+    assert out["recommended"]["cost_inr"] == 18500 + 4050 + 540
+    assert out["recommended"]["cost_breakdown"] == {
+        "callout": 18500,
+        "seniority_allowance": 4050,
+        "travel": 540,
+    }
     assert out["legal_options"] == len(engine.crew_options)
     assert out["cancellation"]["crew_id"] is None
     assert out["funnel"][0]["stage"] == "considered"
@@ -293,15 +299,16 @@ def test_same_pairing_asks_when_a_name_is_shared(tools):
 
 
 def test_ripple_for_a_crew_member_on_one_day(tools):
-    out = ok(tools, "ripple", event={"crew_id": "C-1042", "date": "2026-09-15"})
+    out = ok(tools, "ripple", event={"crew_id": "C-1042", "date": "2026-10-13"})
     (pairing,) = out["affected_pairings"]
     assert pairing["directly_affected_flights"] == [
-        "DX412-2026-09-15",
-        "DX413-2026-09-15",
-        "DX588-2026-09-15",
+        "KS412-2026-10-13",
+        "KS413-2026-10-13",
+        "KS588-2026-10-13",
     ]
-    assert len(pairing["at_risk_flights"]) == 3 and out["passengers"] == 486
-    assert out["desks"] == ["Rohit Malhotra"]
+    booked = sum(tools.world.flights[f].booked for f in pairing["directly_affected_flights"])
+    assert len(pairing["at_risk_flights"]) == 3 and out["passengers"] == booked == 397
+    assert "desks" not in out  # no desk owns an aircraft: disruptions are assigned by load
 
 
 def test_ripple_for_crew_without_a_date_covers_every_remaining_pairing(tools):
@@ -315,13 +322,13 @@ def test_ripple_for_a_station_window_hits_only_flights_inside_it(tools):
         "ripple",
         event={
             "station": "BLR",
-            "from_utc": "2026-09-16T06:00:00Z",
-            "to_utc": "2026-09-16T10:00:00Z",
+            "from_utc": "2026-10-14T06:00:00Z",
+            "to_utc": "2026-10-14T10:00:00Z",
         },
     )
     p2291 = next(p for p in out["affected_pairings"] if p["pairing_id"] == "P-2291")
-    assert p2291["directly_affected_flights"] == ["DX589-2026-09-16", "DX590-2026-09-16"]
-    assert p2291["at_risk_flights"] == ["DX591-2026-09-16"]
+    assert p2291["directly_affected_flights"] == ["KS589-2026-10-14", "KS590-2026-10-14"]
+    assert p2291["at_risk_flights"] == ["KS591-2026-10-14"]
     for p in out["affected_pairings"]:
         assert not set(p["directly_affected_flights"]) & set(p["at_risk_flights"])
 
@@ -329,7 +336,7 @@ def test_ripple_for_a_station_window_hits_only_flights_inside_it(tools):
 def test_ripple_errors(tools):
     assert err(tools, "ripple", event={})[0] == "UNRESOLVED_ENTITY"
     assert err(tools, "ripple", event={"station": "BLR"})[0] == "AMBIGUOUS_QUERY"
-    assert err(tools, "ripple", event={"aircraft": "VT-XYZ", "date": "2026-09-16"})[0] == (
+    assert err(tools, "ripple", event={"aircraft": "VT-XYZ", "date": "2026-10-14"})[0] == (
         "UNRESOLVED_ENTITY"
     )
     code, _ = err(
@@ -337,8 +344,8 @@ def test_ripple_errors(tools):
         "ripple",
         event={
             "station": "BLR",
-            "from_utc": "2026-09-16T10:00:00Z",
-            "to_utc": "2026-09-16T06:00:00Z",
+            "from_utc": "2026-10-14T10:00:00Z",
+            "to_utc": "2026-10-14T06:00:00Z",
         },
     )
     assert code == "INVALID_ARGUMENT"
@@ -346,10 +353,10 @@ def test_ripple_errors(tools):
 
 def test_simulate_matches_delay_effect(tools):
     out = ok(
-        tools, "simulate", event={"flight_no": "DX402", "date": "2026-09-15", "delay_hours": 3}
+        tools, "simulate", event={"flight_no": "DX402", "date": "2026-10-13", "delay_hours": 3}
     )
-    effect = delay_effect(tools.world, "P-2202", date(2026, 9, 15), 3, "DX402-2026-09-15")
-    assert out["pairing_id"] == "P-2202" and out["from_flight"] == "DX402-2026-09-15"
+    effect = delay_effect(tools.world, "P-2202", date(2026, 10, 13), 3, "DX402-2026-10-13")
+    assert out["pairing_id"] == "P-2202" and out["from_flight"] == "DX402-2026-10-13"
     assert out["duty_breaches_limit"] is effect.duty_breaches_limit is True
     assert out["legs_to_drop"] == list(effect.legs_to_drop)
     assert out["fdp_hours_after"] == round(out["fdp_hours_before"] + 3, 2)
@@ -384,17 +391,17 @@ def test_joint_plan_reports_started_seats(tools):
 
 def test_gate_claim_is_checked(tools):
     out = ok(
-        tools, "check_gate", flight_no="DX401", date="2026-09-15", boarding_gate_number="BLR-G2"
+        tools, "check_gate", flight_no="DX401", date="2026-10-13", boarding_gate_number="BLR-G2"
     )
     assert out["actual_boarding_gate_number"] == "BLR-G4" and out["gate_match"] is False
 
 
 def test_delay_into_the_next_boarding_is_a_conflict(tools):
-    out = ok(tools, "check_gate", flight_id="DX453-2026-09-14", delay_minutes=60)
-    assert out["gate_conflict"]["flight_id"] == "DX403-2026-09-14"
+    out = ok(tools, "check_gate", flight_id="NG453-2026-10-12", delay_minutes=60)
+    assert out["gate_conflict"]["flight_id"] == "DX403-2026-10-12"
     assert out["gate_conflict"]["overlap_minutes"] == 15.0
     assert (
-        ok(tools, "check_gate", flight_id="DX453-2026-09-14", delay_minutes=30)["gate_conflict"]
+        ok(tools, "check_gate", flight_id="NG453-2026-10-12", delay_minutes=30)["gate_conflict"]
         is None
     )
 
@@ -406,9 +413,9 @@ def test_gate_occupancy_and_inventory(tools):
     assert out["occupied"] is True and out["occupying_flight_id"] == slot.flight_id
     inventory = ok(tools, "check_gate")
     assert inventory["total_boarding_gates"] == 13 and inventory["gates_by_station"]["BLR"] == 6
-    assert ok(tools, "check_gate", station="BLR", date="2026-09-15")["occupied_boarding_gates"] == 6
+    assert ok(tools, "check_gate", station="BLR", date="2026-10-13")["occupied_boarding_gates"] == 6
     assert err(tools, "check_gate", boarding_gate_number="BLR-G9")[0] == "UNRESOLVED_ENTITY"
-    assert err(tools, "check_gate", date="2026-10-01")[0] == "UNRESOLVED_ENTITY"
+    assert err(tools, "check_gate", date="2026-10-29")[0] == "UNRESOLVED_ENTITY"
 
 
 # -- Rules -------------------------------------------------------------------------------
@@ -451,7 +458,8 @@ def test_search_rules_uses_vector_search_when_connected(seed):
 def test_list_controllers(tools):
     desks = ok(tools, "list_controllers")["desks"]
     assert [d["controller"] for d in desks] == ["Ananya Iyer", "Rohit Malhotra", "Divya Rao"]
-    assert desks[1]["aircraft"] == ["VT-DXC", "VT-DXD"]
+    assert desks[1] == {"desk_id": "desk-2", "controller": "Rohit Malhotra"}  # no aircraft owned
+    assert "fewest open" in ok(tools, "list_controllers")["assignment"]
     assert not {d["controller"] for d in desks} & {c.name for c in tools.world.crew.values()}
 
 
@@ -480,8 +488,8 @@ def test_joint_plan_refuses_repeated_seats(tools):
 
 
 def test_ranges_and_lists_on_list_fields(tools, seed):
-    late = ok(tools, "lookup", entity="pairings", filters={"date": {"gte": "2026-09-19"}})
-    expected = [p for p in seed.pairings if any(d.date >= date(2026, 9, 19) for d in p.days)]
+    late = ok(tools, "lookup", entity="pairings", filters={"date": {"gte": "2026-10-17"}})
+    expected = [p for p in seed.pairings if any(d.date >= date(2026, 10, 17) for d in p.days)]
     assert late["count"] == len(expected) > 0
     either = ok(tools, "lookup", entity="crew", filters={"ratings": ["A320", "ATR72"]})
     assert either["count"] == 150
@@ -495,7 +503,7 @@ def test_ranges_and_lists_on_list_fields(tools, seed):
         {"seniority": [{"foo": 1}]},
         {"base": None},
         {"seniority": {"gte": [1]}},
-        {"days": "2026-09-15"},
+        {"days": "2026-10-13"},
     ],
 )
 def test_filters_that_would_crash_or_match_everything_are_refused(tools, filters):
@@ -533,17 +541,17 @@ def test_lower_case_ids_are_the_same_ids(tools):
 
 
 def test_ripple_on_a_flight_hits_that_flight_and_puts_later_ones_at_risk(tools):
-    out = ok(tools, "ripple", event={"flight_id": "DX402-2026-09-15"})
+    out = ok(tools, "ripple", event={"flight_id": "DX402-2026-10-13"})
     (row,) = out["affected_pairings"]
-    assert row["directly_affected_flights"] == ["DX402-2026-09-15"]
-    assert row["at_risk_flights"] == ["DX403-2026-09-15", "DX404-2026-09-15"]
-    assert out["passengers"] == tools.world.flights["DX402-2026-09-15"].seats
+    assert row["directly_affected_flights"] == ["DX402-2026-10-13"]
+    assert row["at_risk_flights"] == ["DX403-2026-10-13", "DX404-2026-10-13"]
+    assert out["passengers"] == tools.world.flights["DX402-2026-10-13"].booked == 134
 
 
 def test_ripple_leaves_out_flights_already_flown(tools):
-    out = ok(tools, "ripple", event={"flight_id": "DX401-2026-09-14"})
+    out = ok(tools, "ripple", event={"flight_id": "DX401-2026-10-12"})
     assert out["affected_pairings"] == [] and out["passengers"] == 0
-    assert "DX401-2026-09-14" in out["already_departed"] and "already departed" in out["note"]
+    assert "DX401-2026-10-12" in out["already_departed"] and "already departed" in out["note"]
     out = ok(tools, "ripple", event={"crew_id": "C-3983"})
     assert out["affected_pairings"] == [] and "no flights left" in out["note"]
 
@@ -552,14 +560,14 @@ def test_ripple_names_one_disruption_with_a_time(tools):
     code, _ = err(tools, "ripple", event={"pairing_id": "P-2291", "crew_id": "C-9999"})
     assert code == "INVALID_ARGUMENT"
     assert err(tools, "ripple", event={"aircraft": "VT-DXA"})[0] == "AMBIGUOUS_QUERY"
-    code, _ = err(tools, "ripple", event={"crew_id": "C-1042", "from_utc": "2026-09-15T00:00:00Z"})
+    code, _ = err(tools, "ripple", event={"crew_id": "C-1042", "from_utc": "2026-10-13T00:00:00Z"})
     assert code == "INVALID_ARGUMENT"
 
 
 def test_gate_schedule_for_a_date(tools):
-    out = ok(tools, "check_gate", boarding_gate_number="BLR-G1", date="2026-09-16")
-    assert out["date"] == "2026-09-16" and "occupied" not in out
-    assert out["schedule"] and all(s["flight_id"].endswith("2026-09-16") for s in out["schedule"])
+    out = ok(tools, "check_gate", boarding_gate_number="BLR-G1", date="2026-10-14")
+    assert out["date"] == "2026-10-14" and "occupied" not in out
+    assert out["schedule"] and all(s["flight_id"].endswith("2026-10-14") for s in out["schedule"])
     assert err(tools, "check_gate", boarding_gate_number="BLR-G1", delay_minutes=30)[0] == (
         "INVALID_ARGUMENT"
     )

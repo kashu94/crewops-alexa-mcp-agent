@@ -116,7 +116,7 @@ def _station(d: Mapping[str, Any], key: str, ctx: str) -> str:
 
 
 def parse_utc(value: Any, ctx: str = "value") -> datetime:
-    """``2026-09-14T02:30:00Z`` -> aware UTC datetime."""
+    """``2026-10-12T02:30:00Z`` -> aware UTC datetime."""
     if not isinstance(value, str):
         raise DataError(f"{ctx}: expected an ISO-8601 UTC timestamp, got {value!r}")
     try:
@@ -166,9 +166,17 @@ class Crew:
     base: str
     ratings: tuple[AircraftType, ...]
     seniority: int
-    """Years of service. Shown to the controller; never used to rank options."""
+    """Years of service: paid as a callout allowance, so it ranks only through cost."""
     reachability_minutes: int
     status: CrewStatus
+    airline: str | None = None
+    """The airline that employs them (its two-letter code). Cover comes only from it."""
+    experience_years: int | None = None
+    """Years flying, which orders a command upgrade among first officers."""
+    command_qualified: bool = False
+    """A first officer cleared to command (upgrade trained): may fill a captain's seat."""
+    right_seat_qualified: bool = False
+    """A captain current in the right seat: may fill a first officer's seat."""
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any], ctx: str = "crew") -> Crew:
@@ -186,7 +194,20 @@ class Crew:
             seniority=_int(d, "seniority", ctx),
             reachability_minutes=_int(d, "reachability_minutes", ctx),
             status=_enum(CrewStatus, d, "status", ctx),
+            airline=_str(d, "airline", ctx) if d.get("airline") is not None else None,
+            experience_years=_int(d, "experience_years", ctx)
+            if d.get("experience_years") is not None
+            else None,
+            command_qualified=_flag(d, "command_qualified", ctx),
+            right_seat_qualified=_flag(d, "right_seat_qualified", ctx),
         )
+
+
+def _flag(d: Mapping[str, Any], key: str, ctx: str) -> bool:
+    value = d.get(key, False)
+    if not isinstance(value, bool):
+        raise DataError(f"{ctx}.{key}: expected true or false, got {value!r}")
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,7 +332,7 @@ class RiskSignal:
 @dataclass(frozen=True, slots=True)
 class Flight:
     flight_id: str
-    """Unique per day, e.g. ``DX401-2026-09-14``."""
+    """Unique per day, e.g. ``DX401-2026-10-12``."""
     flight_no: str
     """What people say, e.g. ``DX401``. Flies on several dates."""
     date: date
@@ -518,12 +539,26 @@ class CostTable:
     delay_per_duty_hour: int
     cancellation_per_flight: int
     hotel_overnight: int
+    seniority_allowance_pilot: int = 0
+    """Paid per year of seniority on a callout: senior crew cost more to call in."""
+    seniority_allowance_cabin: int = 0
+    travel_per_10_minutes: int = 0
+    """Travel allowance per 10 minutes the crew member needs to reach the airport."""
 
     def callout(self, rank: Rank, on_reserve: bool) -> int:
         """Cost of calling someone in: cheaper from reserve than from a day off."""
         if on_reserve:
             return self.reserve_callout_pilot if rank.is_pilot else self.reserve_callout_cabin
         return self.dayoff_callout_pilot if rank.is_pilot else self.dayoff_callout_cabin
+
+    def seniority_allowance(self, rank: Rank, seniority: int) -> int:
+        per_year = (
+            self.seniority_allowance_pilot if rank.is_pilot else self.seniority_allowance_cabin
+        )
+        return per_year * seniority
+
+    def travel(self, reach_minutes: int) -> int:
+        return self.travel_per_10_minutes * -(-reach_minutes // 10)
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any], ctx: str = "costs") -> CostTable:
@@ -537,4 +572,7 @@ class CostTable:
             delay_per_duty_hour=_int(d, "delay_cost_per_duty_hour", ctx),
             cancellation_per_flight=_int(d, "cancellation_per_flight", ctx),
             hotel_overnight=_int(d, "hotel_overnight", ctx),
+            seniority_allowance_pilot=int(d.get("seniority_allowance_pilot", 0)),
+            seniority_allowance_cabin=int(d.get("seniority_allowance_cabin", 0)),
+            travel_per_10_minutes=int(d.get("travel_per_10_minutes", 0)),
         )
