@@ -48,6 +48,9 @@ ROLE_TOOLS: dict[Role, frozenset[str]] = {
 }
 CREW_SELF_ONLY = frozenset({"duty_clock", "notification_brief", "check_legality"})
 """Tools crew may call only about themselves."""
+CREW_OWN_RECORDS = frozenset({"crew", "certifications", "pairing_crew"})
+"""What crew may look up, and only filtered to their own crew id: their profile, their
+certificates and their trips."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +73,17 @@ def allowed_tools(caller: Caller) -> frozenset[str]:
     return out
 
 
+def own_records(caller: Caller, name: str, args: Mapping[str, Any]) -> bool:
+    """A crew member looking up their own profile, certificates or trips."""
+    return (
+        Role.CREW in caller.roles
+        and name == "lookup"
+        and bool(caller.crew_id)
+        and args.get("entity") in CREW_OWN_RECORDS
+        and (args.get("filters") or {}).get("crew_id") == caller.crew_id
+    )
+
+
 def authorize(caller: Caller, name: str, args: Mapping[str, Any]) -> None:
     staff = any(name in ROLE_TOOLS.get(r, ()) for r in caller.roles if r is not Role.CREW)
     if staff:
@@ -80,6 +94,8 @@ def authorize(caller: Caller, name: str, args: Mapping[str, Any]) -> None:
         if caller.crew_id and args.get("crew_id") == caller.crew_id:
             return
         raise ToolError(FORBIDDEN, f"crew may use {name} only about themselves")
+    if own_records(caller, name, args):
+        return  # "is my medical valid?": their own records, filtered to them
     raise ToolError(FORBIDDEN, f"your role may not use {name}")
 
 

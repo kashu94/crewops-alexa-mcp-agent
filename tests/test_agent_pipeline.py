@@ -286,3 +286,69 @@ def test_cover_options_read_as_a_sentence(pipeline):
     text = ask(pipeline, prompt).text
     assert "the cheapest legal choice is to assign Captain D. Reddy (C-3310)" in text
     assert "Assign " not in text
+
+
+# -- Conversation, identity and voice --------------------------------------------------
+
+ROHIT = Caller("rohit", frozenset({Role.CONTROLLER}), desk="desk-2")
+NAIR = Caller("crew1042", frozenset({Role.CREW}), crew_id="C-1042")
+
+
+@pytest.mark.parametrize(
+    ("text", "starts"),
+    [
+        ("Hi", "Hello Rohit."),
+        ("hello alexa", "Hello Rohit."),
+        ("Good morning!", "Hello Rohit."),
+        ("how are you?", "All good, thanks, Rohit."),
+        ("Thank you", "You're welcome."),
+        ("ok thanks", "You're welcome."),
+        ("bye", "Goodbye, Rohit."),
+    ],
+)
+def test_greetings_and_thanks_get_a_reply_not_a_lookup(pipeline, text, starts):
+    answer = ask(pipeline, text, ROHIT)
+    assert answer.source == "smalltalk" and answer.text.startswith(starts)
+    assert answer.trace == []
+
+
+def test_who_am_i_comes_from_the_sign_in(pipeline):
+    me = ask(pipeline, "what is my name", ROHIT)
+    assert me.text.startswith("You're Rohit Malhotra") and "desk-2" in me.text
+    assert ask(pipeline, "who am I?", NAIR).text.startswith("You're A. Nair (C-1042), Captain")
+    # A real question that opens with a greeting is still answered.
+    assert ask(pipeline, "hi, who covers C-1042 on 15 Sep?", ROHIT).source == "template"
+
+
+def test_my_certificate_means_the_asker_and_never_everyone(pipeline):
+    controller = ask(pipeline, "is my certification valid?", ROHIT)
+    assert "not on the crew roster" in controller.text and controller.trace == []
+    crew = ask(pipeline, "is my certification valid?", NAIR)
+    assert crew.text.startswith("4 certifications: C-1042 licence")
+    assert "600" not in ask(pipeline, "list certifications", ROHIT).text
+    # Crew read only their own records.
+    other = ask(pipeline, "is C-3310's medical valid?", NAIR)
+    assert "C-3310 medical" not in other.text
+
+
+@pytest.mark.parametrize(
+    ("heard", "means"),
+    [
+        ("see 3231 is sick who covers", "C-3231 is sick who covers"),
+        ("C 32 31 is sick", "C-3231 is sick"),
+        ("c3231 sick", "C-3231 sick"),
+        ("who flies pee 2291", "who flies P-2291"),
+        ("is D X 412 late", "is DX412 late"),
+        ("I want to see 2026-09-15", "I want to see 2026-09-15"),
+        ("see you at 10", "see you at 10"),
+    ],
+)
+def test_ids_are_read_as_voice_input_writes_them(heard, means):
+    from crewops.agent.entities import spoken_ids
+
+    assert spoken_ids(heard) == means
+
+
+def test_a_spoken_crew_id_is_answered(pipeline):
+    answer = ask(pipeline, "see 3231 is sick who covers", ROHIT)
+    assert answer.question.startswith("C-3231") and "C-3231 flies 2 pairings" in answer.text

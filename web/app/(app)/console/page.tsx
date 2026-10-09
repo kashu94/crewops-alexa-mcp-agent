@@ -17,7 +17,6 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { AlexaModule } from "@/components/alexa";
 import { useLiveListener } from "@/components/live";
 import { Actions, DeskBanner, Recommendation } from "@/components/disruption";
 import { HandlingBanner } from "@/components/handling";
@@ -214,22 +213,7 @@ export default function ControllerWorkspace() {
   const isController = me.roles.includes("controller");
   const ready = queue.filter((q) => q.kind === "ready_for_plan" || q.kind === "to_resolve").length;
   const sentBack = queue.filter((q) => q.kind.startsWith("sent_back")).length;
-  const current = feed?.find((d) => d.disruption_id === selected);
 
-  const suggestions = useMemo(() => {
-    const out: string[] = [];
-    const crew = typeof current?.details?.crew_id === "string" ? current.details.crew_id : null;
-    if (current?.report_type === "crew_unavailable" && crew) {
-      out.push(`${crew} is sick. Who covers?`);
-      out.push(`How many duty hours does ${crew} have?`);
-    }
-    if (current?.report_type === "flight_delay" && typeof current.details.flight_id === "string") {
-      out.push(`What does the delay to ${current.details.flight_id.split("-")[0]} do to the crew?`);
-    }
-    out.push("Who is on reserve at BLR on 15 Sep?");
-    out.push("Which single flight leg has the most seats at risk if cancelled?");
-    return out.slice(0, 4);
-  }, [current]);
 
   return (
     // On wide screens the workspace fits the window exactly; only the panels scroll.
@@ -237,7 +221,7 @@ export default function ControllerWorkspace() {
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Crew control</h1>
-          <p className="text-sm text-muted">Disruptions as they arrive, the assistant, and legal cover ranked by cost.</p>
+          <p className="text-sm text-muted">Disruptions as they arrive and legal cover ranked by cost. Ask Alexa+ from the button in the corner.</p>
         </div>
         {isController && queue.length > 0 && (
           <span className="flex items-center gap-1.5 rounded-full bg-pending-soft px-3 py-1 text-xs font-semibold text-amber-800">
@@ -261,12 +245,9 @@ export default function ControllerWorkspace() {
         )}
         <Kpi label="Resolved" value={feed ? resolved : "–"} tone="ok" icon={BadgeCheck} />
       </div>
-      <div className="grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(280px,1fr)_minmax(380px,1.25fr)_minmax(360px,1.25fr)]">
+      <div className="grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(320px,2fr)_minmax(460px,3fr)]">
         <Panel title="Ingestion feed" icon={<Radio size={14} className="text-critical" />} className="xl:h-full xl:min-h-0" bodyClassName="overflow-y-auto p-2">
           <Feed items={feed} selected={selected} onDesk={onDesk} onSelect={setSelected} />
-        </Panel>
-        <Panel title="Alexa+ voice" icon={<Activity size={14} className="text-accent" />} className="xl:h-full xl:min-h-0" bodyClassName="flex flex-col overflow-hidden">
-          <AlexaModule suggestions={suggestions} className="flex-1" />
         </Panel>
         <Panel title="Solution engine" icon={<Cpu size={14} className="text-accent" />} className="xl:h-full xl:min-h-0" bodyClassName="overflow-y-auto">
           {selected ? (

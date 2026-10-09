@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ChevronDown, LogOut, Plane, Radio } from "lucide-react";
+import { Activity, ChevronDown, LogOut, Mic, Plane, Radio } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -22,6 +22,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <TopBar />
         <Banner />
         <main className="mx-auto w-full max-w-[1500px] flex-1 px-4 py-5 sm:px-6">{children}</main>
+        <AlexaButton />
       </div>
     </LiveProvider>
   );
@@ -136,6 +137,28 @@ function TopBar() {
         </div>
       </div>
     </header>
+  );
+}
+
+/** Alexa+ on every page: a round button in the corner that opens the assistant. */
+function AlexaButton() {
+  const path = usePathname();
+  if (path.startsWith("/assistant")) return null;
+  return (
+    <Link
+      href="/assistant"
+      aria-label="Ask Alexa+"
+      title="Ask Alexa+"
+      className="group fixed bottom-6 right-6 z-40 grid h-16 w-16 place-items-center rounded-full"
+    >
+      <span className="animate-ring absolute inset-0 rounded-full border-2 border-sky-300/70" />
+      <span className="relative grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-sky-400 via-sky-500 to-indigo-500 text-white shadow-lg shadow-sky-200 ring-4 ring-white transition group-hover:scale-105">
+        <Mic size={24} />
+      </span>
+      <span className="pointer-events-none absolute right-[4.6rem] whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white opacity-0 shadow transition group-hover:opacity-100">
+        Ask Alexa+
+      </span>
+    </Link>
   );
 }
 

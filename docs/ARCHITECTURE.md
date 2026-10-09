@@ -65,9 +65,12 @@ speech and is discarded unless it keeps every fact.
 | Stage | Model calls | Job |
 |---|---|---|
 | **Guardrail on input** | 0 | Bedrock Guardrails screens the question for harmful content and prompt attacks. |
+| **Spoken ids** | 0 | Ids as voice input writes them ("see 3231", "C 32 31", "pee 2291", "D X 412") become C-3231, P-2291, DX412. Only the exact shape of an id is rewritten; a date or "see you at 10" is left alone. |
+| **Conversation** | 0 | Greetings, thanks, goodbyes and "who am I" are answered from the sign-in, before routing, so "hello" is never read as a lookup. |
 | **Router** | 0 | Ordered regex rules classify the question; ids, dates and stations are extracted by pattern only. |
 | **Semantic fallback** | 0 | Embedding match against the example questions. Borrows the closest one's intent, never its ids or answer, and only above a similarity floor measured on paraphrases. |
 | **Triage** | 0–1 (Nova Micro) | Classifies intent only when both stages above abstain. No tools. A reply it cannot parse means a lookup. |
+| **Whose records** | 0 | "My" means the asker. Crew may look up their own profile, certificates and trips. Anyone else asking about "my certificate" or "my duty" is told they are not on the crew roster, rather than shown everyone's; a certificate question naming no one, no kind and no horizon is asked back. |
 | **Premise check** | 0 | Something the question states that the roster contradicts ("FO C-1042" for a captain, an unknown station) is asked about before anything runs. |
 | **Planner** | 0 | Makes the obvious first tool calls for the intent, and the calls that follow from their results, with the caller's own role checks. |
 | **Advisor** | 0–9 (Nova 2 Lite) | Consulted only when the planned calls produced nothing usable (the question named no exact ids, or every planned call failed). It sees the planned results as its own earlier calls, calls more through the caller's role checks, and drafts the answer, which must state at least one sourced fact. At most 8 rounds of tool calls, with the time budget checked before each model call; each call has one attempt and a firm timeout. Only a finished reply counts: a cut-off or filtered one is no answer. Cannot submit, approve or commit anything. |
@@ -394,8 +397,8 @@ the signed-in user, so every role rule stays in one place.
   channel.
 - **Conversations.** Each assistant session has its own conversation id, so short replies
   and "she" are read with the question before.
-- **Reporting.** Reporters, controllers and approvers record any of the eight disruption
-  types on one page, picking crew, flights, gates and stations from the operation
+- **Reporting.** Reporters record any of the eight disruption types on one page (a
+  controller or approver who hears of one first can still report it through Alexa+), picking crew, flights, gates and stations from the operation
   (`report_reference`), and follow their own reports (`my_reports`): how each stands, and
   for one handled internally, what was done.
 

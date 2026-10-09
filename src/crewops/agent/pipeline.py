@@ -21,14 +21,16 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from crewops.agent.context import Turn, as_reply, carry_ids
-from crewops.agent.entities import Vocabulary, extract
+from crewops.agent.entities import Vocabulary, extract, spoken_ids
 from crewops.agent.intents import Intent, Tier
 from crewops.agent.pii import redact, redact_text
 from crewops.agent.planner import MISSING, ToolCall, false_premise, followup_calls, seed_calls
 from crewops.agent.render import render
 from crewops.agent.router import Route, Router, route_by_rules
+from crewops.agent.smalltalk import small_talk
 from crewops.agent.verifier import Verification, keeps_every_fact, verify
 from crewops.tools import Caller, CrewOpsTools, TraceEntry, allowed_tools, dispatch
+from crewops.tools.dispatch import own_records
 from crewops.tools.errors import AMBIGUOUS_QUERY, NEEDS_CONFIRMATION
 
 log = logging.getLogger(__name__)
@@ -41,6 +43,16 @@ SCOPE = (
     "like to check?"
 )
 MAX_FOLLOWUP_ROUNDS = 3
+ABOUT_A_CREW_MEMBER = frozenset(
+    {
+        Intent.LOOKUP_CERT,
+        Intent.LOOKUP_DUTY_CLOCK,
+        Intent.LOOKUP_ROSTER,
+        Intent.LOOKUP_RISK,
+        Intent.CHECK_LEGALITY,
+    }
+)
+"""Questions about one crew member's own records: "my" means the asker only for crew."""
 
 ToolRunner = Callable[[str, dict[str, Any]], TraceEntry]
 """(tool name, arguments) -> the recorded call, run for the signed-in caller."""
@@ -116,7 +128,8 @@ class Pipeline:
         """``previous``: the caller's last turn in this conversation, already checked to be
         recent. It can only fill in what this question leaves out (see ``agent.context``)."""
         started = time.monotonic()
-        question = (question or "").strip()
+        # Voice input writes "C-3231" as "see 3231": read ids in the form they are written.
+        question = spoken_ids((question or "").strip())
         if not question:
             return Answer(
                 question, "What would you like to know?", None, source="clarify", awaiting="detail"
@@ -140,6 +153,9 @@ class Pipeline:
                 log.exception("question screening failed")
                 screening_note = f"question screening unavailable ({type(exc).__name__})"
 
+        if chat := small_talk(question, caller, self.tools.world):
+            return Answer(question, chat, None, source="smalltalk")
+
         context_notes: list[str] = []
         reply = previous is not None and previous.awaiting == "detail"
         own = extract(question, self.vocab) if reply else None
@@ -158,6 +174,25 @@ class Pipeline:
             # "my duty hours", "am I legal for P-2291": the signed-in crew member themselves.
             route.entities.crew_ids.append(caller.crew_id)
             route.notes.append(f"'I' and 'my' read as the signed-in crew member, {caller.crew_id}")
+        elif (
+            not caller.crew_id
+            and route.intent in ABOUT_A_CREW_MEMBER
+            and not route.entities.crew_ids
+            and not route.entities.names
+            and not route.entities.pairing_ids
+            and FIRST_PERSON_RE.search(question)
+        ):
+            # "is my certification valid?" from a controller: they are not on the roster,
+            # so there is nothing of theirs to look up, and listing everyone's is wrong.
+            return Answer(
+                question,
+                "You're not on the crew roster, so you hold no certificates, duty hours or "
+                "trips here. Ask about a crew member by id, for example: is C-1042's medical "
+                "valid?",
+                route,
+                source="clarify",
+                awaiting="detail",
+            )
         allowed = allowed_tools(caller)
 
         def may_see(crew_id: str) -> bool:
@@ -255,7 +290,7 @@ class Pipeline:
     ) -> list[TraceEntry]:
         out = []
         for call in calls:
-            if call.name not in allowed:
+            if call.name not in allowed and not own_records(caller, call.name, call.args):
                 notes.append(f"skipped {call.name}: not available to your role")
                 continue
             out.append(dispatch(self.tools, caller, call.name, call.args))

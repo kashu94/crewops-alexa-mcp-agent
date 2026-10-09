@@ -45,6 +45,10 @@ MISSING: dict[Intent, str] = {
     Intent.RESOLVE_ILLEGAL: "the crew member and the date of the assignment in question",
     Intent.EXPLAIN_RULE: "a rule id such as RULE-REST-04, or the question in words",
     Intent.LOOKUP_DUTY_CLOCK: "a crew id such as C-1042",
+    Intent.LOOKUP_CERT: (
+        "whose certificates (a crew id such as C-1042), which kind (licence, medical, "
+        "recurrent training, dangerous goods) or a horizon such as within 30 days"
+    ),
     Intent.DRAFT_NOTIFICATION: "the crew member and the pairing they are called out for",
     Intent.LOOKUP_CREW: "something to narrow by: a crew id, a name, a rank, a base or a rating",
 }
@@ -185,7 +189,9 @@ def seed_calls(
             else:
                 add("lookup", entity="flights", filters=_flight_filters(ents))
 
-        case Intent.LOOKUP_CERT:
+        case Intent.LOOKUP_CERT if ents.crew or ents.cert_types or ents.horizon_days:
+            # Never every certificate on file: a question naming no one, no certificate and
+            # no horizon is asked back (MISSING), not answered with 600 rows.
             filters = _clean(
                 crew_id=ents.crew, cert_type=ents.cert_types[0] if ents.cert_types else None
             )

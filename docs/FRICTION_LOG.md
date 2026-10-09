@@ -2033,6 +2033,72 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Cause: The reporter's view did not read the audit trail.
 - Fix: The reporter's record and their report list show crew control's remark.
 
+### FL-159: "What is my name" was answered with all 600 certificates
+
+- Date: 2026-10-09
+- Where: answer pipeline
+- Found by: live run (the project owner)
+- Severity: High
+- What went wrong: A controller asking "what is my name" or "is my certification valid?"
+  heard a list of every certificate on file, starting "600 certifications".
+- Cause: Nothing answered questions about the asker. The semantic router matched "my name"
+  to a certificate lookup, and a certificate lookup naming no one ran with no filter. A
+  controller is not on the crew roster, so "my" had no one to point at.
+- Fix: "Who am I" questions are answered from the sign-in. A controller asking about "my"
+  certificates or duty is told they are not on the crew roster, and a certificate question
+  naming no one, no kind and no horizon is asked back.
+
+### FL-160: Crew could not ask about their own certificates
+
+- Date: 2026-10-09
+- Where: tool permissions
+- Found by: probe while fixing FL-159
+- Severity: Medium
+- What went wrong: A crew member asking "is my medical valid?" was told their role has no
+  access.
+- Cause: Crew had no lookup tool at all, only their own duty clock, legality and briefs.
+- Fix: Crew may look up their own profile, certificates and trips, filtered to their own
+  crew id and nothing else.
+
+### FL-161: "Hi" and "thank you" got the list of what CrewOps can do
+
+- Date: 2026-10-09
+- Where: answer pipeline
+- Found by: live run (the project owner)
+- Severity: Low
+- What went wrong: Greetings, thanks and goodbyes were read as crew lookups with nothing to
+  look up.
+- Cause: Every utterance went to the router.
+- Fix: Greetings, thanks, goodbyes and "how are you" get a short reply, by name, before
+  routing; a question that opens with "hi" is still answered.
+
+### FL-162: Spoken crew ids were heard as "see 3231"
+
+- Date: 2026-10-09
+- Where: answer pipeline (voice)
+- Found by: live run (the project owner)
+- Severity: Medium
+- What went wrong: Asking "C-3231 is sick" by voice got "I need who is unavailable".
+- Cause: Speech recognition writes the letter C as "see", "sea" or "C 32 31", and ids are
+  matched by exact pattern only.
+- Fix: Ids are rewritten from their spoken shapes (a letter or its sound, then four digits
+  for crew and pairings, three for flights) before anything else reads the question. Dates
+  and ordinary words are left alone.
+
+### FL-163: The voice module could not be paused and cut long answers off
+
+- Date: 2026-10-09
+- Where: web Alexa+ module
+- Found by: live run (the project owner)
+- Severity: Low
+- What went wrong: A spoken answer could not be paused or stopped, a long answer was cut
+  off after five lines, the latest exchange looked like every other one, and the module
+  was squeezed into a console column.
+- Cause: The first version of the module was built for a narrow column.
+- Fix: Pause, resume and stop while it speaks; the answer scrolls; the latest exchange is
+  highlighted (and marked while it is spoken); Alexa+ has its own page, two columns wide,
+  opened from a round button in the corner of every page.
+
 #### Evaluation and tests
 
 ### FL-019: Two evaluation checks could never fail

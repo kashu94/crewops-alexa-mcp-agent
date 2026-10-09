@@ -30,7 +30,7 @@ export function viewsFor(roles: Role[]): View[] {
   if (has("controller", "auditor", "admin", "super_admin")) views.push(ALL.console);
   if (has("controller", "approver", "auditor", "admin", "super_admin")) views.push(ALL.disruptions);
   if (has("approver", "auditor")) views.push(ALL.approvals);
-  if (has("reporter", "controller", "approver")) views.push(ALL.report);
+  if (has("reporter")) views.push(ALL.report);
   if (has("crew")) views.push(ALL.crew);
   if (has("admin", "super_admin")) views.push(ALL.admin);
   views.push(ALL.assistant);

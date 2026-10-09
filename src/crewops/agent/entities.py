@@ -53,6 +53,39 @@ class Vocabulary:
 
 
 # --------------------------------------------------------------------------
+# Spoken ids
+# --------------------------------------------------------------------------
+
+_D = r"(\d)[\s,.-]*"
+_END = r"\b(?![\s,./-]*\d)"  # the id's last digit: no more digits follow (not a date)
+SPOKEN_CREW_RE = re.compile(rf"\b(?:c|see|sea|cee|si)\b[\s.-]*{_D}{_D}{_D}(\d){_END}", re.I)
+SPOKEN_PAIRING_RE = re.compile(rf"\b(?:p|pee|pea)\b[\s.-]*{_D}{_D}{_D}(\d){_END}", re.I)
+SPOKEN_FLIGHT_RE = re.compile(
+    rf"\b(?:d\.?\s*x|dee\s*ex|d\s*ex)\.?[\s-]*{_D}{_D}(\d)\b(?![\s-]*\d)", re.I
+)
+SPOKEN_TAIL_RE = re.compile(r"\bvt[\s.-]*(d[\s.-]*x[\s.-]*[a-f])\b", re.I)
+LOWER_ID_RE = re.compile(r"\b([cp])-(\d+)\b|\b(dx)(\d{3})\b")
+
+
+def spoken_ids(text: str) -> str:
+    """Ids as speech recognition writes them, in the form the patterns read.
+
+    Voice input turns "C-3231" into "see 3231", "C 32 31" or "c3231", and "DX412" into
+    "D X 412". Only the exact shapes of an id are rewritten (a letter or its sound, then
+    four digits for crew and pairings, three for flights), so "see you at 10" is left
+    alone. Whether the id exists is still the tools' call."""
+    text = SPOKEN_CREW_RE.sub(lambda m: "C-" + "".join(m.groups()), text)
+    text = re.sub(r"\bc(\d{4})\b", r"C-\1", text, flags=re.I)
+    text = SPOKEN_PAIRING_RE.sub(lambda m: "P-" + "".join(m.groups()), text)
+    text = re.sub(r"\bp(\d{4})\b", r"P-\1", text, flags=re.I)
+    text = SPOKEN_FLIGHT_RE.sub(lambda m: "DX" + "".join(m.groups()), text)
+    text = SPOKEN_TAIL_RE.sub(lambda m: "VT-" + re.sub(r"[\s.-]", "", m.group(1)).upper(), text)
+    return LOWER_ID_RE.sub(
+        lambda m: f"{m.group(1).upper()}-{m.group(2)}" if m.group(1) else f"DX{m.group(4)}", text
+    )
+
+
+# --------------------------------------------------------------------------
 # Patterns
 # --------------------------------------------------------------------------
 
