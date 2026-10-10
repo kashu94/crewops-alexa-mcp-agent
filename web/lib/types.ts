@@ -95,12 +95,22 @@ export type MyReport = {
   details: Record<string, unknown>;
   handled: string | null;
   remark: string | null;
+  /** The controller desk it went to: empty until it is analysed, or if it was refused. */
+  desks?: { desk_id: string; controller: string }[];
 };
 
 export type Reference = {
   crew: { crew_id: string; name: string; rank: string; base: string; airline: string | null }[];
   airlines: { code: string; name: string; color: string; aircraft: string[] }[];
-  flights: { flight_id: string; flight_no: string; date: string; from: string; to: string; dep_utc: string; gate: string | null }[];
+  flights: {
+    flight_id: string;
+    flight_no: string;
+    date: string;
+    from: string;
+    to: string;
+    dep_utc: string;
+    gate: string | null;
+  }[];
   aircraft: string[];
   gates: string[];
   stations: string[];

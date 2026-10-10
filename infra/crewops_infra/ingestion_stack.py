@@ -161,9 +161,16 @@ class IngestionStack(Stack):
                 removal_policy=RemovalPolicy.DESTROY,
             ),
         )
-        # Only what the worker does: look items up, query the status index, and put items
-        # (a transactional put needs dynamodb:PutItem; there is no separate action).
-        table.grant(self.worker, "dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem")
+        # Only what the worker does: look items up, query the status index, put items, and
+        # move the roster version of each crew member a report takes out (an update). Each
+        # part of a transaction needs its own action; there is no separate transact action.
+        table.grant(
+            self.worker,
+            "dynamodb:GetItem",
+            "dynamodb:Query",
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+        )
         self.worker.add_event_source(
             sources.SqsEventSource(self.queue, batch_size=10, report_batch_item_failures=True)
         )

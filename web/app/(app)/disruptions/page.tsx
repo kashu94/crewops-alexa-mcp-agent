@@ -81,7 +81,7 @@ export default function Disruptions() {
       if (s === "network" || !me.desk) return true;
       // Not analysed yet: whose it is is not known, so it shows under the whole network only.
       if (d.status === "REPORTED") return false;
-      // Touching no aircraft at all (a closed gate nobody was using): any desk's.
+      // No desk recorded (an older record touching no aircraft): any desk's.
       const mine = desks.length === 0 || desks.includes(me.desk);
       return s === "mine" ? mine : !mine;
     },

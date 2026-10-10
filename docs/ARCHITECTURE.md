@@ -475,8 +475,8 @@ they submitted.
 | Controller | Yes | Yes | Yes | | Own desk | |
 | Approver | Yes | Yes | | Yes | Yes | |
 | Auditor | | Read only | | | Yes | |
-| Admin | | | | | Yes | Rules, rosters, users below admin |
-| Super admin | | | | | Yes | Everything, including admins |
+| Admin | | | | | Yes | Tighten rule thresholds, alert addresses |
+| Super admin | | | | | Yes | As admin, and relax rule thresholds |
 
 ### What can be reported
 

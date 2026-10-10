@@ -4,6 +4,8 @@ import {
   Activity,
   AlertOctagon,
   BadgeCheck,
+  Building2,
+  ChevronRight,
   DoorClosed,
   DoorOpen,
   Inbox,
@@ -15,9 +17,10 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { AIRLINES, AirlineBadge, airlineOf } from "@/components/airline";
+import { Modal } from "@/components/modal";
 import { Button, clock, cx, day, Empty, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
 import { describe, shownStatus, type MyReport, type Reference } from "@/lib/types";
@@ -34,11 +37,26 @@ type Kind =
 
 const KINDS: { kind: Kind; title: string; hint: string; icon: typeof Users }[] = [
   { kind: "crew_unavailable", title: "Sick crew", hint: "One crew member can't fly", icon: AlertOctagon },
-  { kind: "multiple_crew_unavailable", title: "Multiple sick crew", hint: "Several out together, covered as one", icon: Users },
-  { kind: "certification_lapse", title: "Certification expiry", hint: "A licence, medical or training lapses", icon: BadgeCheck },
+  {
+    kind: "multiple_crew_unavailable",
+    title: "Multiple sick crew",
+    hint: "Several out together, covered as one",
+    icon: Users,
+  },
+  {
+    kind: "certification_lapse",
+    title: "Certification expiry",
+    hint: "A licence, medical or training lapses",
+    icon: BadgeCheck,
+  },
   { kind: "flight_delay", title: "Delay", hint: "A departure leaves late", icon: Activity },
   { kind: "gate_closure", title: "Gate closure", hint: "A gate is out of use for a while", icon: DoorClosed },
-  { kind: "station_disruption", title: "Station closure", hint: "An airport closes (weather, runway)", icon: TowerControl },
+  {
+    kind: "station_disruption",
+    title: "Station closure",
+    hint: "An airport closes (weather, runway)",
+    icon: TowerControl,
+  },
   { kind: "gate_change", title: "Gate change", hint: "Move one departure to another gate", icon: DoorOpen },
   { kind: "aircraft_technical", title: "Aircraft fault", hint: "An aircraft is unavailable", icon: Wrench },
 ];
@@ -62,7 +80,15 @@ function Label({ text, hint, children }: { text: string; hint?: string; children
 const utc = (v: FormDataEntryValue | null) => (v ? `${String(v)}:00Z` : "");
 const text = (v: FormDataEntryValue | null) => String(v ?? "").trim();
 
-function CrewChips({ reference, value, onChange }: { reference: Reference; value: string[]; onChange: (v: string[]) => void }) {
+function CrewChips({
+  reference,
+  value,
+  onChange,
+}: {
+  reference: Reference;
+  value: string[];
+  onChange: (v: string[]) => void;
+}) {
   const [typed, setTyped] = useState("");
   const add = () => {
     const id = typed.trim().toUpperCase();
@@ -93,9 +119,16 @@ function CrewChips({ reference, value, onChange }: { reference: Reference; value
       {value.length > 0 && (
         <ul className="flex flex-wrap gap-1.5">
           {value.map((id) => (
-            <li key={id} className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft py-1 pl-2.5 pr-1 text-xs text-sky-900">
+            <li
+              key={id}
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft py-1 pl-2.5 pr-1 text-xs text-sky-900"
+            >
               <Mono className="font-semibold">{id}</Mono>
-              {name(id) && <span className="text-sky-800/80">{name(id)!.name}, {name(id)!.rank}</span>}
+              {name(id) && (
+                <span className="text-sky-800/80">
+                  {name(id)!.name}, {name(id)!.rank}
+                </span>
+              )}
               <button
                 type="button"
                 aria-label={`Remove ${id}`}
@@ -112,7 +145,17 @@ function CrewChips({ reference, value, onChange }: { reference: Reference; value
   );
 }
 
-function Fields({ kind, reference, crewIds, setCrewIds }: { kind: Kind; reference: Reference; crewIds: string[]; setCrewIds: (v: string[]) => void }) {
+function Fields({
+  kind,
+  reference,
+  crewIds,
+  setCrewIds,
+}: {
+  kind: Kind;
+  reference: Reference;
+  crewIds: string[];
+  setCrewIds: (v: string[]) => void;
+}) {
   const first = reference.week[0] ?? "";
   const last = reference.week[reference.week.length - 1] ?? "";
   const dates = (
@@ -143,10 +186,24 @@ function Fields({ kind, reference, crewIds, setCrewIds }: { kind: Kind; referenc
   const span = (
     <div className="grid grid-cols-2 gap-3">
       <Label text="From (UTC)">
-        <input name="from_utc" type="datetime-local" required min={`${first}T00:00`} max={`${last}T23:59`} className={input} />
+        <input
+          name="from_utc"
+          type="datetime-local"
+          required
+          min={`${first}T00:00`}
+          max={`${last}T23:59`}
+          className={input}
+        />
       </Label>
       <Label text="Until (UTC)">
-        <input name="to_utc" type="datetime-local" required min={`${first}T00:00`} max={`${last}T23:59`} className={input} />
+        <input
+          name="to_utc"
+          type="datetime-local"
+          required
+          min={`${first}T00:00`}
+          max={`${last}T23:59`}
+          className={input}
+        />
       </Label>
     </div>
   );
@@ -170,7 +227,10 @@ function Fields({ kind, reference, crewIds, setCrewIds }: { kind: Kind; referenc
     case "multiple_crew_unavailable":
       return (
         <>
-          <Label text="Crew members" hint="Two to twelve. They are covered together, so none is offered to cover another.">
+          <Label
+            text="Crew members"
+            hint="Two to twelve. They are covered together, so none is offered to cover another."
+          >
             <CrewChips reference={reference} value={crewIds} onChange={setCrewIds} />
           </Label>
           {dates}
@@ -300,7 +360,10 @@ function Fields({ kind, reference, crewIds, setCrewIds }: { kind: Kind; referenc
 }
 
 function detailsOf(kind: Kind, f: FormData, crewIds: string[]): Record<string, unknown> {
-  const dates = () => ({ from_date: text(f.get("from_date")), to_date: text(f.get("to_date")) || text(f.get("from_date")) });
+  const dates = () => ({
+    from_date: text(f.get("from_date")),
+    to_date: text(f.get("to_date")) || text(f.get("from_date")),
+  });
   switch (kind) {
     case "crew_unavailable":
       return {
@@ -308,12 +371,18 @@ function detailsOf(kind: Kind, f: FormData, crewIds: string[]): Record<string, u
         ...dates(),
         reason: text(f.get("reason")),
         // Taken ill part-way through the first day: legs before this are still flown.
-        ...(text(f.get("from_time")) ? { from_utc: `${text(f.get("from_date"))}T${text(f.get("from_time"))}:00Z` } : {}),
+        ...(text(f.get("from_time"))
+          ? { from_utc: `${text(f.get("from_date"))}T${text(f.get("from_time"))}:00Z` }
+          : {}),
       };
     case "multiple_crew_unavailable":
       return { crew_ids: crewIds, ...dates(), reason: text(f.get("reason")) };
     case "certification_lapse":
-      return { crew_id: text(f.get("crew_id")).toUpperCase(), cert_type: text(f.get("cert_type")), valid_to: text(f.get("valid_to")) };
+      return {
+        crew_id: text(f.get("crew_id")).toUpperCase(),
+        cert_type: text(f.get("cert_type")),
+        valid_to: text(f.get("valid_to")),
+      };
     case "flight_delay":
       return { flight_id: text(f.get("flight_id")).toUpperCase(), delay_minutes: Number(f.get("delay_minutes")) };
     case "gate_closure":
@@ -325,12 +394,105 @@ function detailsOf(kind: Kind, f: FormData, crewIds: string[]): Record<string, u
         cause: text(f.get("cause")) || "internal",
       };
     case "station_disruption":
-      return { station: text(f.get("station")), from_utc: utc(f.get("from_utc")), to_utc: utc(f.get("to_utc")), reason: text(f.get("reason")) };
+      return {
+        station: text(f.get("station")),
+        from_utc: utc(f.get("from_utc")),
+        to_utc: utc(f.get("to_utc")),
+        reason: text(f.get("reason")),
+      };
     case "gate_change":
       return { flight_id: text(f.get("flight_id")).toUpperCase(), new_gate: text(f.get("new_gate")) };
     case "aircraft_technical":
       return { aircraft: text(f.get("aircraft")), from_utc: utc(f.get("from_utc")), to_utc: utc(f.get("to_utc")) };
   }
+}
+
+/** Where a report went: the controller desk, or why it has none yet. */
+function deskLine(r: MyReport): string {
+  if (r.status === "REJECTED") return "Not sent to crew control: it was refused";
+  const desks = r.desks ?? [];
+  if (desks.length > 0) return desks.map((d) => `${d.controller} (${d.desk_id})`).join(", ");
+  if (r.status === "QUEUED" || r.status === "REPORTED") return "Being assigned: within a minute of the analysis";
+  return "No controller desk";
+}
+
+const DETAIL_LABEL: Record<string, string> = {
+  crew_id: "Crew member",
+  crew_ids: "Crew members",
+  from_date: "From",
+  to_date: "Until",
+  from_utc: "Unavailable from (UTC)",
+  to_utc: "Until (UTC)",
+  reason: "Reason",
+  flight_id: "Flight",
+  delay_minutes: "Delay (minutes)",
+  gate: "Gate",
+  new_gate: "New gate",
+  station: "Station",
+  cert_type: "Certificate",
+  valid_to: "Valid until",
+  aircraft: "Aircraft",
+  cause: "Cause",
+};
+
+function shown(value: unknown): string {
+  if (Array.isArray(value)) return value.join(", ");
+  if (typeof value === "string") return value.replace(/_/g, " ");
+  return String(value);
+}
+
+/** Everything about one report, in a dialog over the blurred page. */
+function ReportDetail({ r, scope, onClose }: { r: MyReport; scope: "mine" | "crew"; onClose: () => void }) {
+  const details = Object.entries(r.details ?? {}).filter(([, v]) => v !== null && v !== undefined && v !== "");
+  return (
+    <Modal
+      onClose={onClose}
+      title={
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <AirlineBadge compact code={airlineOf(String(r.details.flight_id ?? ""))} />
+            <Status value={shownStatus(r.status, r.handled ? "internal" : null)} />
+            <Mono className="text-xs text-muted">{r.disruption_id}</Mono>
+          </div>
+          <h2 className="text-base font-semibold leading-snug">{describe(r)}</h2>
+        </div>
+      }
+    >
+      <dl className="grid grid-cols-[minmax(0,10rem)_1fr] gap-x-4 gap-y-2 text-sm">
+        <dt className="text-muted">Reported</dt>
+        <dd>
+          {day(r.reported_utc)} <Mono>{clock(r.reported_utc)}</Mono>
+          {scope === "crew" && r.reported_by && <span className="text-muted"> · by {r.reported_by}</span>}
+        </dd>
+        <dt className="flex items-center gap-1 text-muted">
+          <Building2 size={13} /> Controller desk
+        </dt>
+        <dd className={cx((r.desks ?? []).length > 0 ? "font-medium" : "text-muted")}>{deskLine(r)}</dd>
+        {details.map(([k, v]) => (
+          <Fragment key={k}>
+            <dt className="text-muted">{DETAIL_LABEL[k] ?? shown(k)}</dt>
+            <dd className={k.endsWith("_id") || k.endsWith("_ids") || k === "gate" ? "font-mono" : ""}>
+              {k.endsWith("_utc") && typeof v === "string" ? `${day(v)} ${clock(v)}` : shown(v)}
+            </dd>
+          </Fragment>
+        ))}
+      </dl>
+      {r.narrative && (
+        <p className="mt-4 rounded-xl bg-sunken px-3 py-2 text-sm italic text-slate-700">“{r.narrative}”</p>
+      )}
+      <div
+        className={cx(
+          "mt-4 rounded-xl px-3 py-2 text-sm",
+          r.status === "REJECTED" ? "bg-critical-soft text-red-900" : "bg-accent-soft/60 text-sky-950",
+        )}
+      >
+        {r.handled ?? r.outcome}
+      </div>
+      {r.remark && (
+        <p className="mt-2 rounded-xl bg-ok-soft px-3 py-2 text-sm text-emerald-900">Crew control: {r.remark}</p>
+      )}
+    </Modal>
+  );
 }
 
 function MyReports({
@@ -344,6 +506,8 @@ function MyReports({
   scope: "mine" | "crew";
   onScope: (s: "mine" | "crew") => void;
 }) {
+  const [open, setOpen] = useState<MyReport | null>(null);
+  const close = useCallback(() => setOpen(null), []);
   return (
     <Panel
       title={
@@ -365,7 +529,11 @@ function MyReports({
       }
       icon={<Inbox size={14} className="text-accent" />}
       action={
-        <button onClick={onRefresh} className="rounded-md p-1 text-muted hover:bg-sunken hover:text-foreground" title="Refresh">
+        <button
+          onClick={onRefresh}
+          className="rounded-md p-1 text-muted hover:bg-sunken hover:text-foreground"
+          title="Refresh"
+        >
           <RefreshCw size={14} />
         </button>
       }
@@ -377,31 +545,36 @@ function MyReports({
       ) : (
         <ol className="flex flex-col gap-2">
           {reports.map((r) => (
-            <li key={r.disruption_id} className="rounded-xl border border-line px-3 py-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <AirlineBadge compact code={airlineOf(String(r.details.flight_id ?? ""))} />
-                  <span className="truncate text-sm font-medium">{describe(r)}</span>
-                </span>
-                <Status value={shownStatus(r.status, r.handled ? "internal" : null)} />
-              </div>
-              <p className="mt-0.5 text-[11px] text-muted">
-                <Mono>{r.disruption_id}</Mono> · {day(r.reported_utc)} <Mono>{clock(r.reported_utc)}</Mono>
-                {scope === "crew" && r.reported_by && <> · by {r.reported_by}</>}
-              </p>
-              {r.narrative && <p className="mt-1 text-xs italic text-slate-600">“{r.narrative}”</p>}
-              <p className={cx("mt-1.5 text-xs", r.status === "REJECTED" ? "text-critical" : "text-slate-700")}>
-                {r.handled ?? r.outcome}
-              </p>
-              {r.remark && (
-                <p className="mt-1 rounded-lg bg-ok-soft px-2 py-1 text-xs text-emerald-900">
-                  Crew control: {r.remark}
+            <li key={r.disruption_id}>
+              <button
+                type="button"
+                onClick={() => setOpen(r)}
+                className="group w-full rounded-xl border border-line px-3 py-2.5 text-left transition hover:border-sky-300 hover:bg-sky-50/40"
+                title="Show the whole report"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <AirlineBadge compact code={airlineOf(String(r.details.flight_id ?? ""))} />
+                    <span className="truncate text-sm font-medium">{describe(r)}</span>
+                  </span>
+                  <Status value={shownStatus(r.status, r.handled ? "internal" : null)} />
+                </div>
+                <p className="mt-0.5 truncate text-[11px] text-muted">
+                  <Mono>{r.disruption_id}</Mono> · {day(r.reported_utc)} <Mono>{clock(r.reported_utc)}</Mono>
+                  {scope === "crew" && r.reported_by && <> · by {r.reported_by}</>}
                 </p>
-              )}
+                <p className="mt-1 flex items-center gap-1 truncate text-xs text-slate-600">
+                  <Building2 size={12} className="shrink-0" /> {deskLine(r)}
+                </p>
+                <span className="mt-1.5 flex items-center gap-0.5 text-[11px] font-medium text-accent opacity-80 group-hover:opacity-100">
+                  View report <ChevronRight size={12} />
+                </span>
+              </button>
             </li>
           ))}
         </ol>
       )}
+      {open && <ReportDetail r={open} scope={scope} onClose={close} />}
     </Panel>
   );
 }
@@ -426,7 +599,10 @@ export default function ReportPage() {
   }, [loadReports]);
 
   // A new report is analysed within a minute: look again while one is still being read.
-  const waiting = useMemo(() => (reports ?? []).some((r) => r.status === "REPORTED" || r.status === "QUEUED"), [reports]);
+  const waiting = useMemo(
+    () => (reports ?? []).some((r) => r.status === "REPORTED" || r.status === "QUEUED"),
+    [reports],
+  );
   useEffect(() => {
     if (!waiting) return;
     const t = setInterval(loadReports, 10_000);

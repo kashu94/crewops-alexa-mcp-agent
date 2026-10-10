@@ -47,8 +47,8 @@ anyone hears it.
 | **Controller** | Review disruptions and options, submit one plan for approval |
 | **Approver** | Approve or reject submitted plans; approval commits them |
 | **Auditor** | Read-only access to every disruption, decision and audit record |
-| **Admin** | Manage users and roles, rule thresholds, roster uploads |
-| **Super admin** | Manage admins, system-wide settings, emergency access |
+| **Admin** | Tighten rule thresholds, read the system activity log, manage alert addresses |
+| **Super admin** | Everything an admin does, and relax a rule threshold back towards regulation (an admin may only tighten one) |
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#roles-and-approvals).
 
@@ -393,7 +393,7 @@ cd web && npm install && npm run dev # http://localhost:3000
 | Controller | controllers, auditors, admins | Live figures for the role, the ingestion feed of disruptions, and the solution engine: the recommendation, each seat's legal cover ranked by cost with cancellation last, every rule's margin checked on demand, crew another desk also wants, and the plan submitted from there. Each disruption's full record adds coverage figures, its desk, crew another desk is competing for (with a joint plan across both), recommendation cards by policy, a plain explanation of the chosen option, every legal option to choose from (the first ten, then the rest on request; anyone reported unavailable since is struck through), the regulated substitutes, operating short or cancelling, each chosen only after a warning, cover suggested by other desks, every excluded candidate and why, the trip's flights and crew, plans and the audit trail. A committed disruption shows the options as they stood and the choice made. Every record says in one sentence how it gets resolved (re-crew, a decision, or handled internally), shows gate moves and late flights with passengers booked, and lists who has been told and why; one handled internally is marked resolved with a remark |
 | Approver | approvers, auditors | The four-eyes queue: each waiting plan, approved with a second confirming click or sent back with a reason |
 | Crew | crew | Notices for me (a certificate about to lapse), this week's duty calendar, my flights, duty-limit gauges, reporting myself unavailable (never twice for the same days), and what became of my reports |
-| Admin | admins | Rule thresholds (tighten only), the system activity log, and alert addresses |
+| Admin | admins | Rule thresholds (an admin tightens, only a super admin relaxes), the system activity log, and alert addresses |
 | Alexa+ | everyone | Talk or type, hear the answer (Amazon Polly) with pause, resume and stop, and follow up. The latest exchange stands out from the conversation beside it. A round Alexa+ button in the corner of every page opens it. |
 
 The app opens on sign-in, which offers to continue as whoever is signed in; the session ends

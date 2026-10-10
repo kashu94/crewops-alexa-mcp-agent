@@ -173,6 +173,13 @@ def test_rule_thresholds_are_read_by_staff_and_changed_by_admins(api):
     assert api.activity(admin)[0]["action"] == "RULE_CHANGED"
     with pytest.raises(ApiError):
         api.activity(ROHIT)
+    # Relaxing it again (13h back to 12h rest) is a super admin's call, not an admin's.
+    with pytest.raises(ApiError) as err:
+        api.set_threshold(admin, "RULE-REST-04", "min_rest_hours", 12, 13, "x")
+    assert err.value.code == "FORBIDDEN"
+    boss = Caller("vikram", frozenset({Role.SUPER_ADMIN}))
+    assert api.set_threshold(boss, "RULE-REST-04", "min_rest_hours", 12, 13, "rota")["value"] == 12
+    assert api.activity(admin)[0]["actor"] == "vikram"
 
 
 def test_the_feed_lists_disruptions_for_staff(api):
@@ -703,3 +710,15 @@ def test_another_desk_suggests_cover_and_the_owner_sees_it(api):
     with pytest.raises(ApiError) as err:
         api.suggest(ANANYA, "r-sick1042", "P-9999/Captain/-", "C-3983")
     assert err.value.code == "INVALID"
+
+
+def test_a_filed_report_names_the_controller_desk_it_went_to(api):
+    from test_reports import VALID_DETAILS
+
+    queued = api.report(IMRAN, "gate_closure", VALID_DETAILS["gate_closure"])
+    (mine,) = api.my_reports(IMRAN)
+    assert mine["disruption_id"] == queued["report_id"] and mine["desks"] == []  # not yet
+    # Once analysed it goes to the least-loaded desk: desk-2 already has r-sick1042.
+    filed(api.table, "r-gate0042", "gate_closure", VALID_DETAILS["gate_closure"], by="imran")
+    shown = {r["disruption_id"]: r for r in api.my_reports(IMRAN)}
+    assert shown["r-gate0042"]["desks"] == [{"desk_id": "desk-1", "controller": "Ananya Iyer"}]

@@ -45,15 +45,34 @@ const ALERT_TEAMS = [
   ["customer_care", "Customer care (passengers)"],
 ] as const;
 
-type Address = { subscription_id: string; email: string; role: string; added_by: string; added_utc: string; status: string };
+type Address = {
+  subscription_id: string;
+  email: string;
+  role: string;
+  added_by: string;
+  added_utc: string;
+  status: string;
+};
 
 type Message = { tone: "ok" | "error"; text: string } | null;
 
-function ThresholdRow({ t, onSaved }: { t: Threshold; onSaved: (m: Message) => void }) {
+function ThresholdRow({
+  t,
+  mayRelax,
+  onSaved,
+}: {
+  t: Threshold;
+  /** A super admin: may relax a threshold as well as tighten it. */
+  mayRelax: boolean;
+  onSaved: (m: Message) => void;
+}) {
   const [value, setValue] = useState(t.value);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const changed = value !== t.value;
+  // Less strict than now: a higher limit, or a shorter minimum rest.
+  const relaxing = t.stricter === "lower" ? value > t.value : value < t.value;
+  const blocked = relaxing && !mayRelax;
   const regulatory = t.stricter === "lower" ? t.max : t.min;
 
   async function save() {
@@ -80,7 +99,9 @@ function ThresholdRow({ t, onSaved }: { t: Threshold; onSaved: (m: Message) => v
           <p className="text-sm font-semibold">{t.label}</p>
           <Mono className="text-[11px] text-muted">{t.rule_id}</Mono>
         </div>
-        <span className={cx("font-mono text-2xl font-semibold tabular-nums", changed ? "text-accent" : "text-slate-900")}>
+        <span
+          className={cx("font-mono text-2xl font-semibold tabular-nums", changed ? "text-accent" : "text-slate-900")}
+        >
           {value}
           <span className="text-sm text-muted">{t.unit}</span>
         </span>
@@ -121,11 +142,21 @@ function ThresholdRow({ t, onSaved }: { t: Threshold; onSaved: (m: Message) => v
             placeholder={`Why ${t.label.toLowerCase()} changes from ${t.value}${t.unit}`}
             className="min-w-0 flex-1 rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-accent"
           />
-          <Button tone="accent" disabled={busy || !reason.trim()} onClick={save}>
+          <Button tone="accent" disabled={busy || !reason.trim() || blocked} onClick={save}>
             {busy ? <Spinner /> : <Save size={14} />} Save
           </Button>
-          <Button tone="ghost" onClick={() => setValue(t.value)}>Undo</Button>
+          <Button tone="ghost" onClick={() => setValue(t.value)}>
+            Undo
+          </Button>
         </div>
+      )}
+      {blocked && (
+        <p className="mt-2 text-[11px] text-amber-800">
+          This relaxes the rule. Only a super admin may relax a threshold; an admin may only tighten it.
+        </p>
+      )}
+      {!blocked && relaxing && (
+        <p className="mt-2 text-[11px] text-muted">Relaxes the rule: recorded as a super admin&apos;s change.</p>
       )}
       {value === regulatory && t.value !== regulatory && (
         <p className="mt-2 text-[11px] text-muted">Restores the regulatory value.</p>
@@ -136,7 +167,8 @@ function ThresholdRow({ t, onSaved }: { t: Threshold; onSaved: (m: Message) => v
 
 function describeEvent(e: Event): string {
   if (e.action === "RULE_CHANGED") return `${e.rule_id} ${e.param?.replace(/_/g, " ")} ${e.from} → ${e.to}`;
-  if (e.action.startsWith("ALERT")) return `${e.action === "ALERT_ADDED" ? "Alert address added" : "Alert address removed"} (${e.role})`;
+  if (e.action.startsWith("ALERT"))
+    return `${e.action === "ALERT_ADDED" ? "Alert address added" : "Alert address removed"} (${e.role})`;
   return `${e.action.replace(/_/g, " ").toLowerCase()} ${e.disruption_id ?? ""}${e.plan_id ? ` · ${e.plan_id}` : ""}`;
 }
 
@@ -184,7 +216,9 @@ export default function Admin() {
     <div className="flex flex-col gap-4">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Administration</h1>
-        <p className="text-sm text-muted">Rule thresholds, system activity and alert addresses. Plan decisions stay with controllers and approvers.</p>
+        <p className="text-sm text-muted">
+          Rule thresholds, system activity and alert addresses. Plan decisions stay with controllers and approvers.
+        </p>
       </div>
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
 
@@ -194,7 +228,7 @@ export default function Admin() {
           icon={<Gauge size={14} className="text-accent" />}
           action={
             <span className="flex items-center gap-1 text-[11px] text-muted">
-              <ShieldAlert size={12} /> Stricter only, never looser than regulation
+              <ShieldAlert size={12} /> Admins tighten; only a super admin relaxes. Never looser than regulation
             </span>
           }
         >
@@ -206,6 +240,7 @@ export default function Admin() {
                 <ThresholdRow
                   key={`${t.rule_id}-${t.param}-${t.value}`}
                   t={t}
+                  mayRelax={me.roles.includes("super_admin")}
                   onSaved={(m) => {
                     setMessage(m);
                     load();
@@ -216,9 +251,16 @@ export default function Admin() {
           )}
         </Panel>
 
-        <Panel title="System activity" icon={<History size={14} className="text-accent" />} className="xl:max-h-[640px]" bodyClassName="overflow-y-auto p-2">
+        <Panel
+          title="System activity"
+          icon={<History size={14} className="text-accent" />}
+          className="xl:max-h-[640px]"
+          bodyClassName="overflow-y-auto p-2"
+        >
           {!events ? (
-            <div className="p-2"><Spinner /></div>
+            <div className="p-2">
+              <Spinner />
+            </div>
           ) : events.length === 0 ? (
             <Empty icon={<ScrollText size={22} />}>No activity yet.</Empty>
           ) : (
@@ -251,7 +293,11 @@ export default function Admin() {
             const f = new FormData(form);
             const email = String(f.get("email") ?? "");
             const role = String(f.get("role") ?? "");
-            run(() => tool("add_alert_address", { email, role }), `AWS has emailed ${email} a confirmation link.`, () => form.reset());
+            run(
+              () => tool("add_alert_address", { email, role }),
+              `AWS has emailed ${email} a confirmation link.`,
+              () => form.reset(),
+            );
           }}
         >
           <Field label="Email address" name="email" type="email" required maxLength={254} />
@@ -283,13 +329,20 @@ export default function Admin() {
             {addresses.map((a) => (
               <li key={a.subscription_id} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
                 <span className="min-w-0 flex-1 truncate">{a.email}</span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs capitalize">{a.role.replace(/_/g, " ")}</span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs capitalize">
+                  {a.role.replace(/_/g, " ")}
+                </span>
                 <span className="text-xs text-muted">{a.status}</span>
                 <button
                   className="rounded-lg p-1.5 text-muted transition hover:bg-critical-soft hover:text-critical"
                   title="Remove"
                   disabled={busy}
-                  onClick={() => run(() => tool("remove_alert_address", { subscription_id: a.subscription_id }), `Removed ${a.email}.`)}
+                  onClick={() =>
+                    run(
+                      () => tool("remove_alert_address", { subscription_id: a.subscription_id }),
+                      `Removed ${a.email}.`,
+                    )
+                  }
                 >
                   <Trash2 size={14} />
                 </button>

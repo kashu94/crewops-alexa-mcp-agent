@@ -25,6 +25,7 @@ from crewops.agent.context import Turn
 from crewops.agent.memory import ConversationMemory, valid_conversation
 from crewops.analysis.runner import UNAVAILABLE_STATUSES
 from crewops.domain import DataError, Report, Role, authorize
+from crewops.domain.desks import owning_desks
 from crewops.domain.reports import OPERATIONAL_REPORTERS, crew_out_of
 from crewops.mcp import views
 from crewops.notify.subscriptions import AlertError, AlertSubscriptions
@@ -616,12 +617,17 @@ class CrewOpsApi:
             "narrative": report.get("narrative") or "",
             "handled": None,
             "remark": None,
+            "desks": [],
         }
         item = get_disruption(self.table, filed["report_id"])
         if item is not None:
-            handling = from_dynamo(item.get("analysis") or {}).get("handling") or {}
+            analysis = from_dynamo(item.get("analysis") or {})
+            handling = analysis.get("handling") or {}
+            # The controller desk it went to: set when it is analysed, so none before.
+            desks = owning_desks(analysis, lambda _pairing: None) if analysis else []
             return out | {
                 "status": item["status"],
+                "desks": [{"desk_id": d.desk_id, "controller": d.controller} for d in desks],
                 "outcome": _outcome(item["status"], handling),
                 "handled": handling.get("text") if handling.get("kind") == "internal" else None,
                 "remark": _remark(self.table, filed["report_id"], item["status"]),
@@ -711,7 +717,15 @@ class CrewOpsApi:
             raise ApiError("FORBIDDEN", "only an admin changes rule thresholds")
         try:
             out = rule_store.set_threshold(
-                self.table, rule_id, param, value, expected, caller.user_id, reason, self.clock()
+                self.table,
+                rule_id,
+                param,
+                value,
+                expected,
+                caller.user_id,
+                reason,
+                self.clock(),
+                may_relax=Role.SUPER_ADMIN in caller.roles,
             )
         except rule_store.RuleError as exc:
             raise ApiError(exc.code, exc.message) from None

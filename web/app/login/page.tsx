@@ -3,7 +3,7 @@
 import { ArrowRight, Lock, LogOut, Plane, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
-import { RouteMap } from "@/components/login-art";
+import { NightApproach } from "@/components/login-art";
 import { Button, Field, Notice, Spinner } from "@/components/ui";
 import { signIn, signOut } from "@/lib/client";
 import { homeFor, type Me } from "@/lib/roles";
@@ -53,34 +53,33 @@ export default function Login() {
 
   return (
     <main className="grid flex-1 lg:grid-cols-[1.1fr_1fr]">
-      <section className="relative hidden overflow-hidden bg-gradient-to-br from-[#0c2340] via-[#0f3a66] to-sky-600 p-12 text-white lg:flex lg:flex-col lg:justify-between">
-        <div aria-hidden className="absolute -right-24 -top-24 h-96 w-96 rounded-full bg-sky-400/20 blur-3xl" />
-        <div aria-hidden className="absolute -bottom-32 left-10 h-96 w-96 rounded-full bg-indigo-400/20 blur-3xl" />
-        <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-[48%] opacity-90">
-          <RouteMap />
-        </div>
+      <section className="relative hidden overflow-hidden bg-[#040a18] p-12 text-white lg:flex lg:flex-col lg:justify-between">
+        <NightApproach />
         <div className="relative flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/15 backdrop-blur">
-            <Plane size={20} />
+          <span className="grid h-10 w-10 place-items-center rounded-xl border border-white/15 bg-white/10 backdrop-blur-md">
+            <Plane size={18} />
           </span>
-          <span className="text-lg font-semibold">CrewOps with Alexa+</span>
+          <span className="text-base font-medium tracking-wide text-white/90">CrewOps with Alexa+</span>
         </div>
-        <div className="relative">
-          <h1 className="max-w-md text-4xl font-semibold leading-tight tracking-tight">
-            Crew control that answers in seconds, and proves every answer.
+        <div className="relative max-w-lg">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-200/70">Crew control</p>
+          <h1 className="mt-4 text-[2.6rem] font-light leading-[1.12] tracking-tight text-white">
+            Every disruption, answered in seconds. <span className="font-semibold">Every answer, proven.</span>
           </h1>
-          <ul className="mt-8 flex flex-col gap-4">
+          <ul className="mt-10 flex flex-col gap-3.5">
             {POINTS.map(({ icon: Icon, text }) => (
-              <li key={text} className="flex items-center gap-3 text-sky-100">
-                <span className="grid h-8 w-8 place-items-center rounded-lg bg-white/10">
-                  <Icon size={16} />
+              <li key={text} className="flex items-center gap-3 text-sm text-slate-200/90">
+                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/15 bg-white/5 backdrop-blur-sm">
+                  <Icon size={13} />
                 </span>
                 {text}
               </li>
             ))}
           </ul>
         </div>
-        <p className="relative font-mono text-xs text-sky-200/80">BLR · DEL · BOM · HYD · CCU · GOI</p>
+        <p className="relative text-[11px] uppercase tracking-[0.22em] text-slate-300/60">
+          Deccan Express · Konkan Skyways · Nilgiri Connect
+        </p>
       </section>
 
       <section className="flex items-center justify-center px-4 py-12">

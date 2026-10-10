@@ -82,3 +82,20 @@ def test_the_replaced_value_must_be_a_number(table, expected):
     with pytest.raises(rules.RuleError) as err:
         rules.set_threshold(table, "RULE-REST-04", "min_rest_hours", 13, expected, "p", "x", AT)
     assert err.value.code == "INVALID"
+
+
+def test_only_a_super_admin_may_relax_a_threshold(table):
+    rules.set_threshold(table, "RULE-REST-04", "min_rest_hours", 14, 12, "priya", "review", AT)
+    # Back from 14h to 13h rest is less strict: refused without the right to relax.
+    with pytest.raises(rules.RuleError) as err:
+        rules.set_threshold(table, "RULE-REST-04", "min_rest_hours", 13, 14, "priya", "x", AT)
+    assert err.value.code == "FORBIDDEN" and "only a super admin" in err.value.message
+    rules.set_threshold(
+        table, "RULE-REST-04", "min_rest_hours", 13, 14, "vikram", "rota", AT, may_relax=True
+    )
+    # Directions differ by rule: for a limit, a higher number is the relaxation.
+    duty = next(t for t in rules.THRESHOLDS if t.param == "max_duty_hours")
+    rest = next(t for t in rules.THRESHOLDS if t.param == "min_rest_hours")
+    assert rules.relaxes(duty, 55, 58) and not rules.relaxes(duty, 58, 55)
+    assert rules.relaxes(rest, 14, 13) and not rules.relaxes(rest, 13, 14)
+    assert not rules.relaxes(rest, 13, 13)

@@ -1,4 +1,5 @@
-"""Rule thresholds an admin may tighten, and the record of every change.
+"""Rule thresholds an admin may tighten (and only a super admin relax), and the record of
+every change.
 
 The legality rules' numbers live in the operations table (``CONFIG / RULE#id``), so the
 engine reads whatever is stored there the next time it loads the operation (the MCP server
@@ -14,7 +15,9 @@ RULE-REST-04        min_rest_hours          12 - 16    Rest between release and 
 ==================  ======================  =========  ====================================
 
 Each range stops at the regulatory value the operation was built with, so a change can only
-make the rules stricter, or restore them: no setting makes an illegal duty legal. A change
+make the rules stricter, or restore them: no setting makes an illegal duty legal. Any
+admin may tighten a threshold; relaxing one (back towards the regulatory value) needs a
+super admin, as relaxing a company fatigue limit needs a senior manager's sign-off. A change
 names the value it expects to replace (two admins cannot overwrite each other unseen), must
 give a reason, and rewrites the rule's sentence so explanations quote the new number. It
 is recorded as an audit event (``CONFIG / AUDIT#ts#RULE_CHANGED#rule#id``).
@@ -56,6 +59,11 @@ class Threshold:
     stricter: str
     """"lower" when a smaller number is stricter (a limit), "higher" for a minimum."""
     text: Callable[[dict[str, Any]], str]
+
+
+def relaxes(t: Threshold, before: float, after: float) -> bool:
+    """Whether moving ``t`` from ``before`` to ``after`` makes the rule less strict."""
+    return after > before if t.stricter == "lower" else after < before
 
 
 def _g(value: Any) -> str:
@@ -167,9 +175,11 @@ def set_threshold(
     actor: str,
     reason: str,
     at: datetime,
+    *,
+    may_relax: bool = False,
 ) -> dict[str, Any]:
     """Change one threshold from ``expected`` to ``value``, with the rule's sentence and an
-    audit event, in one transaction."""
+    audit event, in one transaction. Relaxing it needs ``may_relax`` (a super admin)."""
     t = BY_KEY.get((rule_id, param))
     if t is None:
         raise RuleError("INVALID", f"{rule_id} {param} is not adjustable")
@@ -193,6 +203,17 @@ def set_threshold(
     if item is None:
         raise RuleError("NOT_FOUND", f"no rule {rule_id}")
     params = from_dynamo(item.get("params") or {})
+    current = params.get(param)
+    if current is None or float(current) != float(expected):
+        raise RuleError(
+            "CONFLICT", f"{t.label} is no longer {expected:g}{t.unit}; reload and try again"
+        )
+    if relaxes(t, float(current), value) and not may_relax:
+        raise RuleError(
+            "FORBIDDEN",
+            f"{t.label} from {float(current):g}{t.unit} to {value:g}{t.unit} relaxes the rule: "
+            "only a super admin may relax a threshold; an admin may only tighten it",
+        )
     params[param] = value
     when = _iso(at)
     try:

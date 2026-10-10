@@ -562,6 +562,59 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Suggestion: Say whether ID tokens, access tokens or both are accepted, and make the
   example match.
 
+### FL-191: Every sick report failed in AWS while every test passed
+
+- Date: 2026-10-09
+- Service / tool: AWS IAM with DynamoDB transactions; moto in the tests
+- Severity: High (every crew-out report since the plans feature; found in a live run)
+- Task attempted: File a sick report as a crew member and as a reporter, and see it reach
+  a controller's desk.
+- Steps taken: Both were accepted and queued, then never appeared. The report worker's
+  log showed, on every retry: `AccessDeniedException ... not authorized to perform:
+  dynamodb:UpdateItem on resource: .../table/crewops-dev-ops because no identity-based
+  policy allows the dynamodb:UpdateItem action`, and the three messages went to the
+  dead-letter queue.
+- Expected: The worker's narrow grant (FL-029) to fail a test when the write changed.
+- Actual: Storing a report had since gained an update in its transaction (moving the
+  roster version of each crew member reported out), but moto does not enforce IAM, so
+  every offline test passed. Gate, delay and station reports bump nothing and kept working.
+- Workaround: The worker may also UpdateItem. The infra test now reads the actions off the
+  transaction `store_report` really sends and fails if the grant lacks any of them.
+- Suggestion: A way to run moto (or a local DynamoDB) against a CDK-synthesised role
+  policy, so a least-privilege grant is tested against the calls it must allow.
+
+### FL-194: `cdk deploy` from the web folder failed with "--app is required"
+
+- Date: 2026-10-09
+- Service / tool: AWS CDK CLI (`npx aws-cdk@2.1144.0`), Windows PowerShell
+- Severity: Low (a few minutes)
+- Task attempted: Deploy the four changed stacks from the Windows laptop.
+- Steps taken: Packaged the MCP server, then ran `npx --yes aws-cdk@2.1144.0 deploy
+  CrewOps-dev-Ingestion CrewOps-dev-Analysis CrewOps-dev-Notify CrewOps-dev-Mcp --profile
+  crewops` in the same terminal, which was still in `web\`.
+- Expected: The deploy, or a hint that this folder holds no CDK app.
+- Actual: `--app is required either in command-line, in cdk.json or in ~/.cdk.json`, with
+  no mention of the folder it looked in.
+- Workaround: Run it from the repository root, where `cdk.json` is; every deploy step now
+  says "from the repo root (not `web\`)".
+- Suggestion: Name the directory searched for `cdk.json`, or look in parent directories.
+
+### FL-195: A Lambda's logs were not in `/aws/lambda/<function>`
+
+- Date: 2026-10-09
+- Service / tool: AWS Lambda logging configuration, CloudWatch Logs, AWS CLI
+- Severity: Low (minutes, while chasing FL-191)
+- Task attempted: Read the report worker's errors.
+- Steps taken: `aws logs filter-log-events --log-group-name
+  /aws/lambda/CrewOps-dev-Ingestion-ReportWorker...`, the name most guides give.
+- Expected: The function's log lines.
+- Actual: `ResourceNotFoundException: The specified log group does not exist.` The stacks
+  give each function its own log group (with a retention), which the function's logging
+  configuration points at instead.
+- Workaround: Read the group from `aws lambda get-function-configuration ... --query
+  LoggingConfig.LogGroup`, then filter that group.
+- Suggestion: Have the CLI error say when a function logs to a custom group.
+
 ## 3. Core software stack and local tooling (Python, uv, Node, test tooling)
 
 ### FL-010: Every CDK synth and test run prints a Node end-of-life banner
@@ -1253,6 +1306,46 @@ Entries in section 4 are about our own code, so they use a shorter form:
   tool configuration.
 - Fix: Such calls are dropped from the history.
 
+### FL-159: "What is my name" was answered with all 600 certificates
+
+- Date: 2026-10-09
+- Where: answer pipeline
+- Found by: live run (the project owner)
+- Severity: High
+- What went wrong: A controller asking "what is my name" or "is my certification valid?"
+  heard a list of every certificate on file, starting "600 certifications".
+- Cause: Nothing answered questions about the asker. The semantic router matched "my name"
+  to a certificate lookup, and a certificate lookup naming no one ran with no filter. A
+  controller is not on the crew roster, so "my" had no one to point at.
+- Fix: "Who am I" questions are answered from the sign-in. A controller asking about "my"
+  certificates or duty is told they are not on the crew roster, and a certificate question
+  naming no one, no kind and no horizon is asked back.
+
+### FL-161: "Hi" and "thank you" got the list of what CrewOps can do
+
+- Date: 2026-10-09
+- Where: answer pipeline
+- Found by: live run (the project owner)
+- Severity: Low
+- What went wrong: Greetings, thanks and goodbyes were read as crew lookups with nothing to
+  look up.
+- Cause: Every utterance went to the router.
+- Fix: Greetings, thanks, goodbyes and "how are you" get a short reply, by name, before
+  routing; a question that opens with "hi" is still answered.
+
+### FL-162: Spoken crew ids were heard as "see 3231"
+
+- Date: 2026-10-09
+- Where: answer pipeline (voice)
+- Found by: live run (the project owner)
+- Severity: Medium
+- What went wrong: Asking "C-3231 is sick" by voice got "I need who is unavailable".
+- Cause: Speech recognition writes the letter C as "see", "sea" or "C 32 31", and ids are
+  matched by exact pattern only.
+- Fix: Ids are rewritten from their spoken shapes (a letter or its sound, then four digits
+  for crew and pairings, three for flights) before anything else reads the question. Dates
+  and ordinary words are left alone.
+
 ### FL-168: "What disruptions are on my desk" read out 150 risk scores
 
 - Date: 2026-10-09
@@ -1404,6 +1497,18 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Fix: A RETRY error leaves the plan submitted; contention is date-aware; plans are capped
   at 20 seats.
 
+### FL-160: Crew could not ask about their own certificates
+
+- Date: 2026-10-09
+- Where: tool permissions
+- Found by: probe while fixing FL-159
+- Severity: Medium
+- What went wrong: A crew member asking "is my medical valid?" was told their role has no
+  access.
+- Cause: Crew had no lookup tool at all, only their own duty clock, legality and briefs.
+- Fix: Crew may look up their own profile, certificates and trips, filtered to their own
+  crew id and nothing else.
+
 ### FL-170: Every disruption on an aircraft went to the same desk
 
 - Date: 2026-10-09
@@ -1470,6 +1575,21 @@ Entries in section 4 are about our own code, so they use a shorter form:
   and the console offered choices only on coverable seats.
 - Fix: A seat with no legal crew may be chosen to be cancelled or flown short, on the server
   and on the record page, and counts as decided once it is.
+
+### FL-190: Admin and super admin were the same role in code
+
+- Date: 2026-10-09
+- Where: roles, README and ARCHITECTURE
+- Found by: the project owner's question
+- Severity: Medium
+- What went wrong: The docs gave the super admin "manage admins, system-wide settings,
+  emergency access" and the admin "users and roles, roster uploads", but every check
+  treated the two alike and none of those actions existed in the app.
+- Cause: The role table was written before the admin features, and never revisited.
+- Fix: One real distinction, as airlines draw it: an admin may only tighten a rule
+  threshold, and relaxing one back towards regulation needs a super admin. It is checked
+  against the stored value, and the admin page says so. Accounts are still created by the
+  provisioning command; the role table now says only what is built.
 
 #### Ingestion, analysis, search and configuration
 
@@ -1644,6 +1764,94 @@ Entries in section 4 are about our own code, so they use a shorter form:
   scoring would have covered only the first page; the index command printed raw tracebacks.
 - Fix: Hyphenated ids split into parts, an index-size guard, one-line errors.
 
+### FL-127: The settings command crashed with a traceback on a missing output
+
+- Date: 2026-10-08
+- Where: web settings command
+- Found by: review
+- Severity: Low
+- What went wrong: A stack deployed before an output existed made `python -m
+  crewops.web_env` end in a raw KeyError traceback.
+- Cause: Only the stack reads were inside the error handling, not the use of their outputs.
+- Fix: Building the settings is inside it too; a missing output gives a one-line message.
+
+### FL-151: A late flight named "the next departure at its gate" days ahead
+
+- Date: 2026-10-08
+- Where: disruption analysis (gates)
+- Found by: smoke run of every report type on the seed
+- Severity: Low
+- What went wrong: A 60-minute delay told the gate agent of a departure boarding 30 hours
+  later that its gate was "free in time, 1815 min before it boards".
+- Cause: The next slot at the gate was taken however far away it was.
+- Fix: Only a departure boarding within three hours of the late one leaving is told.
+
+### FL-152: A refused gate change suggested a remote stand instead of staying put
+
+- Date: 2026-10-08
+- Where: disruption analysis (gates)
+- Found by: smoke run of every report type on the seed
+- Severity: Low
+- What went wrong: Asked to move DX401 onto a gate already held, the analysis first
+  suggested its own current gate as the "new" one, then, with that excluded, a remote stand,
+  although the flight could simply keep its gate. Flight information and customer care
+  would have been told about a gate change that never happened.
+- Cause: The alternative search treated the flight's own gate like any other.
+- Fix: The flight keeps its own gate when that stays free for it, and then only the
+  station's gate control and duty manager are told. Otherwise the first free gate is
+  suggested.
+
+### FL-153: Capped analyses did not count the new lists they cut
+
+- Date: 2026-10-08
+- Where: disruption analysis (stored size)
+- Found by: test run
+- Severity: Low
+- What went wrong: A long station closure stored only the first late departures, gate moves
+  and notices, with nothing saying more existed.
+- Cause: The count of what was left out covered only the original lists.
+- Fix: Late departures, gate moves, next-at-gate entries and notices are counted too.
+
+### FL-154: A long delay double-booked gates and "moved" flights onto their own gate
+
+- Date: 2026-10-08
+- Where: disruption analysis (gates)
+- Found by: independent review
+- Severity: High
+- What went wrong: For DX401 400 minutes late, the aircraft's own later leg was moved
+  "because the gate is still held by late DX401" onto a gate another flight held, and DX451
+  was "moved" from BLR-G1 to BLR-G1, which gate control would have been emailed.
+- Cause: The gate check treated the late aircraft's later legs as on time, kept a moved
+  flight's original departure time, and kept looking for clashes at the gate it had
+  already left.
+- Fix: Late departures clash only by their own late times and move with their own late
+  departure; each moved flight is tracked at its new gate; a move onto the same gate is
+  impossible. Tests check, over hundreds of delays, that no gate is held twice.
+
+### FL-155: A flight re-gated by another desk's delay pulled that desk in
+
+- Date: 2026-10-08
+- Where: disruption analysis (desks)
+- Found by: independent review
+- Severity: Medium
+- What went wrong: A delay to a desk-1 aircraft that re-gated a desk-3 flight belonged to
+  both desks, so the desk-3 controller could mark it resolved.
+- Cause: The aircraft a disruption touches included every flight it re-gated.
+- Fix: Only the flights the disruption is about decide its desks; for a gate closure those
+  are the moved flights themselves. Disruptions analysed before desks were recorded stay
+  closable by nobody, as before.
+
+### FL-157: Two bused departures on one trip day counted only one as late
+
+- Date: 2026-10-08
+- Where: disruption analysis (gate closure)
+- Found by: independent review
+- Severity: Low
+- What went wrong: When a gate closure sent two departures of the same duty day to a remote
+  stand, the earlier one's 15 minutes went missing from the late list and the notices.
+- Cause: Each duty day kept the last bused departure instead of the first.
+- Fix: The earliest one sets the day's slip, and every later leg slips with it.
+
 ### FL-172: Moving the demo week to October moved real dates too
 
 - Date: 2026-10-09
@@ -1712,19 +1920,6 @@ Entries in section 4 are about our own code, so they use a shorter form:
 
 #### MCP server, memory and notifications
 
-### FL-139: Whoever filed a report could read the desk's whole view of it
-
-- Date: 2026-10-08
-- Where: MCP server
-- Found by: review
-- Severity: High
-- What went wrong: A reporter or crew member reading their own report got the trip's crew
-  names and ids, the ranked replacements with costs, the plans, the audit trail and, once
-  added, other open disruptions and their desks (for example r-sick1938 on desk-1).
-- Cause: The filer was let in for the same full record as staff.
-- Fix: A filer who is not staff gets only the status, a plain outcome ("Crew control is
-  arranging cover.") and their own report.
-
 ### FL-017: A server's "forbidden" told a caller which disruptions exist
 
 - Date: 2026-10-07
@@ -1789,6 +1984,42 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - What went wrong: Removing an unconfirmed address failed without a reason, and lapsed
   unconfirmed addresses stayed listed and counted toward the limit.
 - Fix: The tools explain both; removal works once confirmed or after the address lapses.
+
+### FL-139: Whoever filed a report could read the desk's whole view of it
+
+- Date: 2026-10-08
+- Where: MCP server
+- Found by: review
+- Severity: High
+- What went wrong: A reporter or crew member reading their own report got the trip's crew
+  names and ids, the ranked replacements with costs, the plans, the audit trail and, once
+  added, other open disruptions and their desks (for example r-sick1938 on desk-1).
+- Cause: The filer was let in for the same full record as staff.
+- Fix: A filer who is not staff gets only the status, a plain outcome ("Crew control is
+  arranging cover.") and their own report.
+
+### FL-148: Live options for a delayed seat were worked out for the wrong day
+
+- Date: 2026-10-08
+- Where: MCP server, full record
+- Found by: independent review
+- Severity: Medium
+- What went wrong: When the delay was on a later day of a trip, the options shown were
+  judged as if the first day were late, so a listed person could fail approval.
+- Cause: The record dropped the seat's delay date, and the search then defaulted to the
+  trip's first day.
+- Fix: The delay date is kept; a test covers a delay on the trip's second day.
+
+### FL-158: The resolve remark never reached whoever reported it
+
+- Date: 2026-10-08
+- Where: MCP server, web report page
+- Found by: independent review
+- Severity: Low
+- What went wrong: "Mark resolved" said the remark goes to the reporter, but the reporter
+  saw only "Resolved by crew control."
+- Cause: The reporter's view did not read the audit trail.
+- Fix: The reporter's record and their report list show crew control's remark.
 
 ### FL-175: A crew member's sick report landed nowhere
 
@@ -1943,17 +2174,6 @@ Entries in section 4 are about our own code, so they use a shorter form:
   under the old conversation id.
 - Cause: The id was captured when listening started.
 - Fix: The id is read when the question is sent.
-
-### FL-127: The settings command crashed with a traceback on a missing output
-
-- Date: 2026-10-08
-- Where: web settings command
-- Found by: review
-- Severity: Low
-- What went wrong: A stack deployed before an output existed made `python -m
-  crewops.web_env` end in a raw KeyError traceback.
-- Cause: Only the stack reads were inside the error handling, not the use of their outputs.
-- Fix: Building the settings is inside it too; a missing output gives a one-line message.
 
 ### FL-129: Long spoken answers were cut off inside the speaker card
 
@@ -2142,18 +2362,6 @@ Entries in section 4 are about our own code, so they use a shorter form:
   also what the page now shows as the recommendation. A pick that is no longer a legal option
   blocks Submit until the controller chooses again.
 
-### FL-148: Live options for a delayed seat were worked out for the wrong day
-
-- Date: 2026-10-08
-- Where: MCP server, full record
-- Found by: independent review
-- Severity: Medium
-- What went wrong: When the delay was on a later day of a trip, the options shown were
-  judged as if the first day were late, so a listed person could fail approval.
-- Cause: The record dropped the seat's delay date, and the search then defaulted to the
-  trip's first day.
-- Fix: The delay date is kept; a test covers a delay on the trip's second day.
-
 ### FL-149: A seat that became coverable after the analysis broke Submit
 
 - Date: 2026-10-08
@@ -2180,72 +2388,6 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Fix: Competing disruptions carry their report type, and only absences (sick, certificate
   lapse) go into the joint plan.
 
-### FL-151: A late flight named "the next departure at its gate" days ahead
-
-- Date: 2026-10-08
-- Where: disruption analysis (gates)
-- Found by: smoke run of every report type on the seed
-- Severity: Low
-- What went wrong: A 60-minute delay told the gate agent of a departure boarding 30 hours
-  later that its gate was "free in time, 1815 min before it boards".
-- Cause: The next slot at the gate was taken however far away it was.
-- Fix: Only a departure boarding within three hours of the late one leaving is told.
-
-### FL-152: A refused gate change suggested a remote stand instead of staying put
-
-- Date: 2026-10-08
-- Where: disruption analysis (gates)
-- Found by: smoke run of every report type on the seed
-- Severity: Low
-- What went wrong: Asked to move DX401 onto a gate already held, the analysis first
-  suggested its own current gate as the "new" one, then, with that excluded, a remote stand,
-  although the flight could simply keep its gate. Flight information and customer care
-  would have been told about a gate change that never happened.
-- Cause: The alternative search treated the flight's own gate like any other.
-- Fix: The flight keeps its own gate when that stays free for it, and then only the
-  station's gate control and duty manager are told. Otherwise the first free gate is
-  suggested.
-
-### FL-153: Capped analyses did not count the new lists they cut
-
-- Date: 2026-10-08
-- Where: disruption analysis (stored size)
-- Found by: test run
-- Severity: Low
-- What went wrong: A long station closure stored only the first late departures, gate moves
-  and notices, with nothing saying more existed.
-- Cause: The count of what was left out covered only the original lists.
-- Fix: Late departures, gate moves, next-at-gate entries and notices are counted too.
-
-### FL-154: A long delay double-booked gates and "moved" flights onto their own gate
-
-- Date: 2026-10-08
-- Where: disruption analysis (gates)
-- Found by: independent review
-- Severity: High
-- What went wrong: For DX401 400 minutes late, the aircraft's own later leg was moved
-  "because the gate is still held by late DX401" onto a gate another flight held, and DX451
-  was "moved" from BLR-G1 to BLR-G1, which gate control would have been emailed.
-- Cause: The gate check treated the late aircraft's later legs as on time, kept a moved
-  flight's original departure time, and kept looking for clashes at the gate it had
-  already left.
-- Fix: Late departures clash only by their own late times and move with their own late
-  departure; each moved flight is tracked at its new gate; a move onto the same gate is
-  impossible. Tests check, over hundreds of delays, that no gate is held twice.
-
-### FL-155: A flight re-gated by another desk's delay pulled that desk in
-
-- Date: 2026-10-08
-- Where: disruption analysis (desks)
-- Found by: independent review
-- Severity: Medium
-- What went wrong: A delay to a desk-1 aircraft that re-gated a desk-3 flight belonged to
-  both desks, so the desk-3 controller could mark it resolved.
-- Cause: The aircraft a disruption touches included every flight it re-gated.
-- Fix: Only the flights the disruption is about decide its desks; for a gate closure those
-  are the moved flights themselves. Disruptions analysed before desks were recorded stay
-  closable by nobody, as before.
-
 ### FL-156: A joint plan across desks left out a rival report of several sick crew
 
 - Date: 2026-10-08
@@ -2255,80 +2397,6 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - What went wrong: "Build a joint plan" ignored crew out in a competing multiple-sick report.
 - Cause: The list of absence types predated the new report type.
 - Fix: It includes several-crew reports.
-
-### FL-157: Two bused departures on one trip day counted only one as late
-
-- Date: 2026-10-08
-- Where: disruption analysis (gate closure)
-- Found by: independent review
-- Severity: Low
-- What went wrong: When a gate closure sent two departures of the same duty day to a remote
-  stand, the earlier one's 15 minutes went missing from the late list and the notices.
-- Cause: Each duty day kept the last bused departure instead of the first.
-- Fix: The earliest one sets the day's slip, and every later leg slips with it.
-
-### FL-158: The resolve remark never reached whoever reported it
-
-- Date: 2026-10-08
-- Where: MCP server, web report page
-- Found by: independent review
-- Severity: Low
-- What went wrong: "Mark resolved" said the remark goes to the reporter, but the reporter
-  saw only "Resolved by crew control."
-- Cause: The reporter's view did not read the audit trail.
-- Fix: The reporter's record and their report list show crew control's remark.
-
-### FL-159: "What is my name" was answered with all 600 certificates
-
-- Date: 2026-10-09
-- Where: answer pipeline
-- Found by: live run (the project owner)
-- Severity: High
-- What went wrong: A controller asking "what is my name" or "is my certification valid?"
-  heard a list of every certificate on file, starting "600 certifications".
-- Cause: Nothing answered questions about the asker. The semantic router matched "my name"
-  to a certificate lookup, and a certificate lookup naming no one ran with no filter. A
-  controller is not on the crew roster, so "my" had no one to point at.
-- Fix: "Who am I" questions are answered from the sign-in. A controller asking about "my"
-  certificates or duty is told they are not on the crew roster, and a certificate question
-  naming no one, no kind and no horizon is asked back.
-
-### FL-160: Crew could not ask about their own certificates
-
-- Date: 2026-10-09
-- Where: tool permissions
-- Found by: probe while fixing FL-159
-- Severity: Medium
-- What went wrong: A crew member asking "is my medical valid?" was told their role has no
-  access.
-- Cause: Crew had no lookup tool at all, only their own duty clock, legality and briefs.
-- Fix: Crew may look up their own profile, certificates and trips, filtered to their own
-  crew id and nothing else.
-
-### FL-161: "Hi" and "thank you" got the list of what CrewOps can do
-
-- Date: 2026-10-09
-- Where: answer pipeline
-- Found by: live run (the project owner)
-- Severity: Low
-- What went wrong: Greetings, thanks and goodbyes were read as crew lookups with nothing to
-  look up.
-- Cause: Every utterance went to the router.
-- Fix: Greetings, thanks, goodbyes and "how are you" get a short reply, by name, before
-  routing; a question that opens with "hi" is still answered.
-
-### FL-162: Spoken crew ids were heard as "see 3231"
-
-- Date: 2026-10-09
-- Where: answer pipeline (voice)
-- Found by: live run (the project owner)
-- Severity: Medium
-- What went wrong: Asking "C-3231 is sick" by voice got "I need who is unavailable".
-- Cause: Speech recognition writes the letter C as "see", "sea" or "C 32 31", and ids are
-  matched by exact pattern only.
-- Fix: Ids are rewritten from their spoken shapes (a letter or its sound, then four digits
-  for crew and pairings, three for flights) before anything else reads the question. Dates
-  and ordinary words are left alone.
 
 ### FL-163: The voice module could not be paused and cut long answers off
 
@@ -2413,6 +2481,56 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - What went wrong: "Open disruptions" lost its left edge and "Resolved" its right.
 - Cause: Their outline was drawn outside the box, and the workspace clips its overflow.
 - Fix: A border inside the box.
+
+### FL-192: Parallel calls on an ended session knocked out each other's retries
+
+- Date: 2026-10-09
+- Where: web app MCP client
+- Found by: live run (the project owner)
+- Severity: Medium
+- What went wrong: Signed in as rohit.malhotra, the console failed with `tool disruptions
+  failed Error [McpError]: MCP error -32000: Connection closed`.
+- Cause: The console makes several calls at once over one cached connection. When
+  AgentCore had ended its session, the first call to fail opened a new connection for its
+  retry, and each later failure closed whatever connection was cached, which was that new
+  one, failing the call on it.
+- Fix: A retry replaces the cached connection only if it is the one that failed; otherwise
+  it uses the newer one. A test reproduces the race and fails on the old code.
+
+### FL-193: The reporter's report lists cut every report off
+
+- Date: 2026-10-09
+- Where: web report page
+- Found by: the project owner
+- Severity: Medium
+- What went wrong: In "My reports" and "From crew", a report's description, note and
+  outcome were truncated, with no way to read them, and nothing said which controller had
+  the disruption.
+- Cause: The list had only a narrow column and showed everything in it.
+- Fix: Each report is a short card (summary, status, the controller desk it went to, or
+  why none yet); opening it shows every detail in a dialog over the blurred page, closed
+  by its button, Escape or a click outside. The server returns each report's desk.
+
+### FL-196: Smaller web defects from the walkthrough and screenshots
+
+- Date: 2026-10-09
+- Where: web app
+- Found by: the project owner, and screenshots of the October data
+- Severity: Low
+- What went wrong, and the fix for each:
+  - Answers were one plain paragraph; they now show lists, ids and amounts set apart.
+  - The assistant page scrolled as a page and inside its conversation; only the
+    conversation scrolls now.
+  - Log out and other buttons showed no hand cursor; every button and link does.
+  - "Planning this is for its desk's controller." did not say whose; the panel names the
+    owning desk and controller.
+  - Approvers looked for "my desk", which they do not have; the desk filter is replaced
+    by a note that only controllers hold a desk.
+  - Wording: "crew controller", not "crew control", on the report form; crew are asked
+    "Anything to tell the reporter?"; the "Four-eyes approval queue" heading is gone.
+  - Another desk's gate closure spoke of crew options it does not have; a controller's own
+    other disruption was named by their name instead of "your desk"; the sign-in map's
+    labels overlapped and a plane waited at its corner (since replaced by a new backdrop).
 
 #### Evaluation and tests
 

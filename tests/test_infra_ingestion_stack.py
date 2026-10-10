@@ -118,7 +118,15 @@ def test_report_worker_gets_only_the_table_actions_it_uses():
         action = statement["Action"]
         actions.update(action if isinstance(action, list) else [action])
     dynamo = {a for a in actions if a.startswith("dynamodb:")}
-    assert dynamo == {"dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem"}
+    assert dynamo == {
+        "dynamodb:GetItem",
+        "dynamodb:Query",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+    }
+    # Whatever storing a sick report sends must be allowed: moto does not enforce IAM, so
+    # this is the only check that the deployed worker may do what the tests do.
+    assert worker_writes() <= dynamo
     resources = str(worker["Properties"]["PolicyDocument"])
     assert "/index/*" in resources  # the status index query is allowed too
 
@@ -151,3 +159,35 @@ def test_without_operators_only_the_server_may_send():
     ]
     allowed = json.dumps(deny["Condition"]["ArnNotEquals"]["aws:PrincipalArn"])
     assert ":role/crewops-dev-mcp-runtime" in allowed and ":user/" not in allowed
+
+
+def worker_writes() -> set[str]:
+    """The DynamoDB actions storing a crew-out report needs, read off the transaction it
+    actually sends: each Put, Update, Delete or ConditionCheck is its own IAM action."""
+    from datetime import UTC, datetime
+
+    from crewops.domain import Report
+    from crewops.store.reports import store_report
+
+    sent: list[dict] = []
+
+    class Client:
+        def transact_write_items(self, TransactItems):  # noqa: N803 (boto3's name)
+            sent.extend(TransactItems)
+
+    class Table:
+        name = "t"
+        meta = type("Meta", (), {"client": Client()})()
+
+    doc = {
+        "report_id": "r-iamcheck1",
+        "type": "multiple_crew_unavailable",
+        "reported_by": {"user_id": "u-1", "roles": ["reporter"]},
+        "reported_utc": "2026-10-13T05:00:00Z",
+        "details": {"crew_ids": ["C-1042", "C-3310"], "from_date": "2026-10-13", "reason": "sick"},
+    }
+    store_report(Table(), Report.from_dict(doc), datetime(2026, 10, 13, 5, 1, tzinfo=UTC))
+    kinds = {k for item in sent for k in item}
+    names = {"Put": "PutItem", "Update": "UpdateItem", "Delete": "DeleteItem"}
+    names["ConditionCheck"] = "ConditionCheckItem"
+    return {f"dynamodb:{names[k]}" for k in kinds}

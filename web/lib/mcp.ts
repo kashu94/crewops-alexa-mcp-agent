@@ -54,12 +54,17 @@ function sweep(now: number) {
   }
 }
 
-function clientFor(accessToken: string, fresh: boolean): { key: string; entry: Entry } {
+/** The cached connection for this token, or a new one. ``failed`` is a connection a call
+ * just saw break: only that one is replaced. When several calls share a connection and it
+ * breaks, the first to retry opens a new one and the rest reuse it, rather than each
+ * closing the last one's fresh connection (which fails it mid-call with "Connection
+ * closed"). */
+function clientFor(accessToken: string, failed?: Entry): { key: string; entry: Entry } {
   const now = Date.now();
   sweep(now);
   const key = keyOf(accessToken);
   const existing = clients.get(key);
-  if (existing && !fresh) {
+  if (existing && existing !== failed) {
     existing.used = now;
     return { key, entry: existing };
   }
@@ -74,13 +79,10 @@ function clientFor(accessToken: string, fresh: boolean): { key: string; entry: E
 
 /** Call one MCP tool as the signed-in user: their access token goes to AgentCore, whose
  * authorizer and the server both verify it. */
-export async function callTool(
-  accessToken: string,
-  name: ToolName,
-  args: Record<string, unknown>,
-): Promise<unknown> {
-  for (const fresh of [false, true]) {
-    const { key, entry } = clientFor(accessToken, fresh);
+export async function callTool(accessToken: string, name: ToolName, args: Record<string, unknown>): Promise<unknown> {
+  let failed: Entry | undefined;
+  for (const retry of [false, true]) {
+    const { key, entry } = clientFor(accessToken, failed);
     try {
       const client = await entry.client;
       const result = await client.callTool({ name, arguments: args }, undefined, { timeout: TIMEOUT_MS });
@@ -90,8 +92,9 @@ export async function callTool(
       if (err instanceof ToolCallError) throw err;
       // A transport failure (an ended session): drop that connection for every later call.
       drop(key, entry);
+      failed = entry;
       // Reads get one retry on a new connection; a write may already have happened.
-      if (fresh || TOOLS[name].write) throw err;
+      if (retry || TOOLS[name].write) throw err;
     }
   }
   throw new Error("unreachable");
