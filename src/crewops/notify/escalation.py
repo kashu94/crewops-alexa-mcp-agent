@@ -59,6 +59,8 @@ def schedule_check(
     """A one-time check ``minutes`` from now for a disruption that just reached a desk."""
     if (change.before, change.after) not in STARTS_CLOCK:
         return None
+    if change.report_type == "planned_leave":
+        return None  # re-crewed weeks ahead: no ten-minute clock
     name = schedule_name(prefix, change.disruption_id, now)
     when = now + timedelta(minutes=minutes)
     scheduler.create_schedule(

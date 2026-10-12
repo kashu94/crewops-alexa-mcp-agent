@@ -56,7 +56,7 @@ class AnalysisStack(Stack):
             # The whole operation is loaded and every candidate assessed: give it CPU.
             memory_size=1024,
             timeout=ANALYSIS_TIMEOUT,
-            environment={"CREWOPS_STAGE": settings.stage},
+            environment={"CREWOPS_STAGE": settings.stage, "CREWOPS_REAL_TIME": "1"},
             log_group=logs.LogGroup(
                 self,
                 "DisruptionAnalyserLogs",

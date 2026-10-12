@@ -1,6 +1,7 @@
-"""Load the seed operating week into DynamoDB.
+"""Load the operation into DynamoDB: the seed week and every week after it to 31 December.
 
     uv run python -m crewops.ingestion.load_seed            # validate, then write
+    uv run python -m crewops.ingestion.load_seed --week-only  # just the seed week
     uv run python -m crewops.ingestion.load_seed --dry-run  # validate and count only
     uv run python -m crewops.ingestion.load_seed --replace  # dev/test: empty the table first
 
@@ -32,6 +33,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed-dir", type=Path, default=None, help="defaults to data/seed")
     parser.add_argument("--dry-run", action="store_true", help="validate and count only")
     parser.add_argument(
+        "--week-only",
+        action="store_true",
+        help="load only the seed week, not the calendar carried forward to 31 December",
+    )
+    parser.add_argument(
         "--replace",
         action="store_true",
         help="dev/test only: delete every item in the table, then load the week",
@@ -42,6 +48,11 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings.from_env()
 
     seed = load_seed(args.seed_dir)
+    if not args.week_only:
+        from crewops.ingestion.calendar import LAST_DAY, extend
+
+        print(f"Rostering every week to {LAST_DAY} (each checked legal; about 20 s)...")
+        seed = extend(seed)
     issues = validate(seed)
     for issue in issues:
         print(issue, file=sys.stderr)

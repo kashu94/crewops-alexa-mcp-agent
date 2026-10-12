@@ -119,5 +119,9 @@ def test_the_speaker_announces_an_escalation(ops_table):
         "desk-1",
     )
     assert alert["event"] == "ESCALATED" and alert["title"] == "Escalated"
-    assert alert["text"].startswith("Still waiting: C-1042 unavailable 2026-10-13 to 2026-10-14")
+    # It flies the day it was reported: medium, said first so the room knows how urgent.
+    assert alert["severity"] == "medium"
+    assert alert["text"].startswith(
+        "Medium severity. Still waiting: C-1042 unavailable 2026-10-13 to 2026-10-14"
+    )
     assert alert["text"].endswith("On Ananya Iyer's desk. The duty supervisor has been told.")

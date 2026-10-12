@@ -8,8 +8,10 @@ export type FeedItem = {
   reported_by: string | null;
   details: Record<string, unknown>;
   summary: string;
-  /** recrew: crew control covers seats; decision: no legal cover; internal: handled elsewhere. */
-  handling?: "recrew" | "decision" | "internal" | null;
+  /** recrew: crew control covers seats; decision: no legal cover; internal: handled elsewhere;
+   * recorded: an absence on days with nothing to cover, kept on record. */
+  handling?: "recrew" | "decision" | "internal" | "recorded" | null;
+  severity?: Severity | null;
   desks?: string[];
   airlines?: string[];
 };
@@ -82,7 +84,10 @@ export type Unavailable = {
   to_date: string;
 };
 
-export type Handling = { kind: "recrew" | "decision" | "internal"; text: string };
+export type Handling = { kind: "recrew" | "decision" | "internal" | "recorded"; text: string };
+
+/** How serious a disruption is, worked out from its analysis (crewops.analysis.severity). */
+export type Severity = { level: "high" | "medium" | "low"; reasons: string[] };
 
 export type MyReport = {
   disruption_id: string;
@@ -227,12 +232,15 @@ export type Plan = {
   submitted_utc?: string | null;
   decided_by?: string | null;
   decided_utc?: string | null;
+  fingerprint?: string | null;
+  approval_seal?: string | null;
 };
 
 export type Detail = {
   disruption_id: string;
   status: string;
   summary: string;
+  severity?: Severity | null;
   report_type: string | null;
   reported_utc: string | null;
   reported_by?: string | null;
@@ -286,6 +294,9 @@ export type QueueItem = {
   uncovered?: string[];
   warnings?: string[];
   reason?: string | null;
+  submitted_utc?: string | null;
+  /** SHA-256 of exactly what was submitted (crewops.plans.fingerprint). */
+  fingerprint?: string | null;
 };
 
 const s = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -303,6 +314,8 @@ export function describe(item: Pick<FeedItem, "report_type" | "details">): strin
       const to = s(d.to_date) && s(d.to_date) !== s(d.from_date) ? ` to ${s(d.to_date)}` : "";
       return `${ids.length} crew unavailable ${s(d.from_date)}${to} (${s(d.reason)}): ${ids.join(", ")}`;
     }
+    case "planned_leave":
+      return `${s(d.crew_id)} on planned leave ${s(d.from_date)} to ${s(d.to_date)} (${s(d.reason).replace(/_/g, " ")})`;
     case "gate_closure":
       return `${s(d.gate)} closed ${s(d.from_utc).slice(11, 16)}–${s(d.to_utc).slice(11, 16)}Z (${s(d.reason)})`;
     case "certification_lapse":
@@ -337,6 +350,7 @@ export function byRule(verdicts: Verdict[]): Verdict[] {
 /** The status as a desk reads it: a disruption ready but with nothing to re-crew is to be
  * resolved (or decided), not "options ready". */
 export function shownStatus(status: string, handling?: string | null): string {
+  if (status === "CLOSED" && handling === "recorded") return "RECORDED";
   if (status !== "OPTIONS_READY") return status;
   if (handling === "internal") return "TO_RESOLVE";
   if (handling === "decision") return "DECISION_NEEDED";

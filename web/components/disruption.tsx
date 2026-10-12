@@ -25,6 +25,7 @@ import type { Detail, Plan, Seat } from "@/lib/types";
 import { Info } from "./info";
 import { useMe } from "./me";
 import { seatKey } from "./workspace";
+import { FourEyes } from "./four-eyes";
 import { Button, clock, cx, day, Mono, Notice, rupees, Status } from "./ui";
 
 const STRATEGY: Record<string, string> = {
@@ -317,6 +318,15 @@ export function PlanList({ plans }: { plans: Plan[] }) {
           <p className="mt-1 text-xs text-muted">
             {p.desk} · submitted by {p.submitted_by}
           </p>
+          <FourEyes
+            className="mt-2"
+            fingerprint={p.fingerprint}
+            seal={p.approval_seal}
+            submittedBy={p.submitted_by}
+            submittedAt={p.submitted_utc}
+            approvedBy={p.approval_seal ? p.decided_by : null}
+            approvedAt={p.approval_seal ? p.decided_utc : null}
+          />
           <ul className="mt-2 flex flex-col gap-1 text-xs">
             {p.assignments.map((a) => (
               <li key={a} className="rounded bg-sunken px-2 py-1 font-mono">

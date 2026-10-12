@@ -42,8 +42,8 @@ def desk_of(record: dict[str, Any]) -> str | None:
 def recipients(record: dict[str, Any], links: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The linked Alexa accounts this change is for."""
     change = change_of(record)
-    if change is None:
-        return []
+    if change is None or change.report_type == "planned_leave":
+        return []  # leave is re-crewed weeks ahead: nothing to chime about
     allowed = [link for link in links if link.get("notifications") and link.get("username")]
     if change.after == "SUBMITTED":
         return [link for link in allowed if "approver" in (link.get("roles") or [])]
@@ -57,11 +57,28 @@ def recipients(record: dict[str, Any], links: list[dict[str, Any]]) -> list[dict
     return []
 
 
+def rated(record: dict[str, Any]) -> str | None:
+    """The disruption's severity (high, medium or low) from the analysis in the record."""
+    from boto3.dynamodb.types import TypeDeserializer
+
+    from crewops.analysis.severity import severity
+
+    image = (record.get("dynamodb") or {}).get("NewImage") or {}
+    try:
+        analysis = TypeDeserializer().deserialize(image["analysis"])
+        report = TypeDeserializer().deserialize(image["report"])
+        today = datetime.now(UTC).date()
+        return severity(analysis, str(report.get("reported_utc") or ""), today)["level"]
+    except Exception:
+        return None
+
+
 def announcement(record: dict[str, Any]) -> str | None:
-    """The alert in words, as the Echo says it."""
+    """The alert in words, as the Echo says it, the severity first when it matters."""
     from boto3.dynamodb.types import TypeDeserializer
 
     from crewops.alerts import spoken
+    from crewops.analysis.severity import spoken_level
     from crewops.domain import Report
     from crewops.tools.port import describe_report
 
@@ -80,6 +97,9 @@ def announcement(record: dict[str, Any]) -> str | None:
         text = f"CrewOps: the plan for {what} was sent back to your desk."
     else:
         text = f"CrewOps: new on your desk. {what}. Open CrewOps to plan the cover."
+    level = rated(record)
+    if level in ("high", "medium") and change.after == "OPTIONS_READY":
+        text = text.replace("CrewOps:", f"CrewOps, {spoken_level(level).lower()}:", 1)
     return spoken(text)
 
 

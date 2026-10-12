@@ -230,7 +230,11 @@ def notices_for(
         )
         return out
 
-    if kind in (ReportType.CREW_UNAVAILABLE, ReportType.MULTIPLE_CREW_UNAVAILABLE):
+    if kind in (
+        ReportType.CREW_UNAVAILABLE,
+        ReportType.MULTIPLE_CREW_UNAVAILABLE,
+        ReportType.PLANNED_LEAVE,
+    ):
         if uncovered_flights:
             flights = [world.flights.get(f) for f in uncovered_flights]
             names = ", ".join(sorted({f.flight_no for f in flights if f}))

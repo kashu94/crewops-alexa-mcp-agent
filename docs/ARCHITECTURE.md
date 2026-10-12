@@ -58,6 +58,13 @@ choosing which tools to call, and turning a verified answer into speech.
 
 ## The answer pipeline
 
+Two guards sit in front of the models. A circuit breaker shared by the process
+(`crewops.agent.breaker`) pauses Bedrock calls for a minute after three outage failures in a
+row, so answers come from the templates at once rather than after a timeout, then lets one
+call through to test it. An override check (`crewops.agent.injection`) refuses the common
+prompt-injection phrasings before any model or guardrail call; its refusals and the
+guardrail's are written to the activity log (`SECURITY / AUDIT#…#BLOCKED_PROMPT`).
+
 Each stage spends a model call only when the previous one could not settle the question.
 The one exception is the explainer, which rewords an already-settled judgement answer for
 speech and is discarded unless it keeps every fact.
@@ -215,6 +222,12 @@ the records whose status changed. Each change goes to two places:
   [Who is told](#who-is-told)). An admin subscribes addresses to a team exactly as to a
   role: the SNS filter is the team's name.
 
+- **Severity** (`crewops.analysis.severity`). High, medium or low with the reasons, worked out
+  from the stored analysis when read, so older disruptions are rated too: hard factors (no
+  legal cover, cancel or fly short recommended, an unfilled joint seat, a duty-limit breach)
+  make it high; softer ones (cover only from outside today's reserves, flying within a day,
+  300 or more passengers, three or more seats, late departures) make it medium, and three of
+  them high. Spoken first by the speaker, Alexa and desktop alerts.
 - **Escalation.** When a change leaves a disruption waiting on a desk (REPORTED or SUBMITTED
   to OPTIONS_READY), the notifier creates a one-time EventBridge Scheduler schedule
   (`at(...)`, deleted after it runs) for `CREWOPS_ESCALATE_AFTER_MINUTES` later (10). The
@@ -517,6 +530,23 @@ so the first two injection cases guard against regressions rather than test a li
 The tests assert the last five rows always hold. Rewording scores are reported, never
 asserted, so the set cannot quietly become a tuning target.
 
+## Operating calendar and "now"
+
+The seed is one hand-built week; `crewops.ingestion.calendar` carries it forward to 31
+December when it is loaded. Each later week repeats the flights (trip P-2291 becomes P-2391,
+then P-2491) and rotates each line of flying within its group of crew of the same airline,
+rank and base, one person along a week; crew on leave or with a lapsed certificate get no
+line, and the reserve pool stays on call. The whole calendar is then assessed by the legality
+engine, and anyone who would break a rule (usually rest across the weekend) is swapped with a
+fit colleague, keeping a swap only if it reduces the illegal seats, so it always ends. The
+same seed always gives the same calendar.
+
+`build_world(seed, now)` takes the engine's "now": the seed's moment in tests, the real time
+when `CREWOPS_REAL_TIME=1` (every deployed stack). Duties rostered before now count as flown
+in the hour limits; a trip that has started can no longer be re-crewed; "the 15th" or "on
+Friday" in a question means the next one from today. Reports cover today to 60 days ahead
+(checked by the server); planned leave, an admin's, runs to the end of the calendar.
+
 ## Data store
 
 One DynamoDB table holds the whole operation: crew, certifications, duty clocks, reserves,
@@ -561,6 +591,11 @@ A gate problem on its own does not change crew legality. It matters only when it
 departure, so the analysis turns that slip into a delay and checks the knock-on effect.
 
 ### Plan lifecycle
+
+Every plan carries a SHA-256 fingerprint of what was submitted (`crewops.plans.fingerprint`);
+approval recomputes it and refuses a changed plan, the commit is conditioned on it, and the
+approval is sealed over it with the approver and time. Both values are on the plan and in the
+APPROVED audit event.
 
 ```
 REPORTED ─► OPTIONS_READY ─► SUBMITTED ─────────────► COMMITTED

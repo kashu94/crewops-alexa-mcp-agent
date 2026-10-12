@@ -13,6 +13,7 @@ turn (``agent.context``), read from and written back to AgentCore Memory.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
@@ -22,12 +23,25 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from crewops import alerts as alert_briefs
+from crewops.agent.breaker import MODEL_BREAKER
 from crewops.agent.context import Turn
 from crewops.agent.memory import ConversationMemory, valid_conversation
-from crewops.analysis.runner import ALL_STATUSES, UNAVAILABLE_STATUSES
+from crewops.analysis.runner import (
+    ALL_STATUSES,
+    OPEN_STATUSES,
+    UNAVAILABLE_STATUSES,
+    absences_from,
+)
+from crewops.analysis.severity import severity
 from crewops.domain import DataError, Report, Role, authorize
 from crewops.domain.desks import owning_desks
-from crewops.domain.reports import OPERATIONAL_REPORTERS, crew_out_of
+from crewops.domain.reports import (
+    ABSENCE_TYPES,
+    LEAVE_FILERS,
+    OPERATIONAL_REPORTERS,
+    ReportType,
+    crew_out_of,
+)
 from crewops.mcp import views
 from crewops.notify.subscriptions import AlertError, AlertSubscriptions
 from crewops.plans.service import PlanError, Plans
@@ -35,6 +49,7 @@ from crewops.plans.service import seat_key as _seat_key
 from crewops.plans.service import summary as plan_summary
 from crewops.store import plans as plan_store
 from crewops.store import rules as rule_store
+from crewops.store import security as security_store
 from crewops.store.items import from_dynamo
 from crewops.store.reports import (
     add_suggestion,
@@ -56,6 +71,12 @@ FEED_CACHE_SECONDS = 4.0
 """How long one speaker-feed read serves every screen that polls."""
 """How long one loaded operation answers questions before it is read again. Plan actions
 on this server reload it at once; changes made elsewhere show within this time."""
+log = logging.getLogger(__name__)
+
+REPORT_AHEAD_DAYS = 60
+"""How far ahead a disruption may be reported: further than this is leave planning."""
+CREW_LOOK_BACK_DAYS = 5
+"""How far back crew see their own flights."""
 READERS = frozenset({Role.CONTROLLER, Role.APPROVER, Role.AUDITOR, Role.ADMIN, Role.SUPER_ADMIN})
 ADMINS = frozenset({Role.ADMIN, Role.SUPER_ADMIN})
 FEED_STATUSES = ("REPORTED", "OPTIONS_READY", "SUBMITTED", "COMMITTED", "CLOSED")
@@ -84,6 +105,10 @@ def _airline(tools: Any, code: str) -> dict[str, str]:
     return {"code": code, "name": a.name if a else code, "color": a.color if a else "#64748b"}
 
 
+def _iso_z(at: datetime) -> str:
+    return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _crew_name(tools: Any, crew_id: str | None) -> str | None:
     crew = tools.world.crew.get(crew_id) if crew_id else None
     return crew.name if crew else None
@@ -95,6 +120,8 @@ def _outcome(status: str, handling: Mapping[str, Any]) -> str:
         return "Handled; crew control will mark it resolved."
     if status == "OPTIONS_READY" and handling.get("kind") == "decision":
         return "Crew control is deciding what to do with operations."
+    if status == "CLOSED" and handling.get("kind") == "recorded":
+        return "Recorded: no flights to cover on those days, and not called out for cover then."
     return OUTCOME.get(status, status)
 
 
@@ -185,6 +212,7 @@ class CrewOpsApi:
         self.cache_seconds = cache_seconds
         self._live: Any = None
         self._loaded = 0.0
+        self._refreshing = False
         self._loading = threading.Lock()
         # The pipeline keeps per-question state (model usage, the advisor's last run), so
         # one question at a time uses it; tool calls run on other threads meanwhile.
@@ -199,11 +227,29 @@ class CrewOpsApi:
     # ------------------------------------------------------------------
 
     def live(self) -> Any:
+        """The current operation. Loaded once; after that, a stale copy keeps answering
+        while a fresh one loads in the background, so no question waits on the reload."""
         with self._loading:
-            if self._live is None or time.monotonic() - self._loaded > self.cache_seconds:
+            if self._live is None:
                 self._live = self.live_factory()
                 self._loaded = time.monotonic()
+                return self._live
+            stale = time.monotonic() - self._loaded > self.cache_seconds
+            if stale and not self._refreshing:
+                self._refreshing = True
+                threading.Thread(target=self._refresh, daemon=True).start()
             return self._live
+
+    def _refresh(self) -> None:
+        try:
+            fresh = self.live_factory()
+            with self._loading:
+                self._live, self._loaded = fresh, time.monotonic()
+        except Exception:
+            log.exception("reloading the operation failed; the previous copy stays")
+        finally:
+            with self._loading:
+                self._refreshing = False
 
     def invalidate(self) -> None:
         with self._loading:
@@ -229,6 +275,12 @@ class CrewOpsApi:
         with self._asking:
             answer, usage = live.ask(question, caller, previous)
         record = answer.to_dict()
+        blocked = next((n for n in record["notes"] if str(n).startswith("blocked:")), None)
+        if record["source"] == "refused" and blocked:
+            # Who tried what, for the admin's activity log (the question already redacted).
+            security_store.log_blocked(
+                self.table, caller.user_id, str(blocked), str(record["question"]), self.clock()
+            )
         if remembered:
             turn = Turn.of(answer, self.clock())
             self._remembering.submit(
@@ -242,6 +294,8 @@ class CrewOpsApi:
             "intent": (record["route"] or {}).get("intent"),
             "notes": record["notes"],
             "model_calls": usage.get("calls", 0),
+            # Whether the model service is in use or paused (crewops.agent.breaker).
+            "models": MODEL_BREAKER.status(),
         }
 
     def whoami(self, caller: Caller) -> dict[str, Any]:
@@ -299,6 +353,8 @@ class CrewOpsApi:
             raise ApiError("INVALID", str(exc)) from None
         if reason := authorize(report):
             raise ApiError("FORBIDDEN", reason)
+        if outside := self._outside_window(report):
+            raise ApiError("INVALID", outside)
         if overlap := self._already_out(report.details, report.report_type.value, report.report_id):
             raise ApiError("DUPLICATE", overlap)
         self.send(report.to_dict())
@@ -308,6 +364,31 @@ class CrewOpsApi:
             "status": "queued",
             "note": "It is checked against the roster and analysed within a minute.",
         }
+
+    def _outside_window(self, report: Report) -> str | None:
+        """Why a report's dates are out of bounds, or None. A disruption is about today
+        and the next two months; further ahead is leave, booked through rostering, which
+        may run to the end of the rostered period. Nothing is reported for the past."""
+        tools = self.live().pipeline.tools
+        today = tools.world.snapshot_utc.date()
+        last = tools.week[-1] if tools.week else today
+        leave = report.report_type is ReportType.PLANNED_LEAVE
+        earliest = today + timedelta(days=1) if leave else today
+        latest = last if leave else min(last, today + timedelta(days=REPORT_AHEAD_DAYS))
+        d = report.details
+        days: list[date] = [date.fromisoformat(d[k]) for k in ("from_date", "to_date") if k in d]
+        days += [date.fromisoformat(d[k][:10]) for k in ("from_utc", "to_utc") if d.get(k)]
+        if d.get("flight_id"):
+            days.append(date.fromisoformat(str(d["flight_id"])[-10:]))
+        # A certificate may already have lapsed; one lapsing beyond the window is not a
+        # disruption yet.
+        if d.get("valid_to") and date.fromisoformat(d["valid_to"]) > latest:
+            return f"valid_to: up to {latest} (two months ahead)"
+        bad = [x for x in days if not earliest <= x <= latest]
+        if not bad:
+            return None
+        what = "leave" if leave else "a disruption"
+        return f"dates for {what} run from {earliest} to {latest}; {bad[0]} is outside that"
 
     # ------------------------------------------------------------------
     # Plans
@@ -335,6 +416,9 @@ class CrewOpsApi:
                     "reported_by": (report.get("reported_by") or {}).get("user_id"),
                     "details": report.get("details", {}),
                     "summary": analysis.get("summary", ""),
+                    "severity": severity(analysis, report.get("reported_utc"))
+                    if analysis
+                    else None,
                     "handling": (analysis.get("handling") or {}).get("kind"),
                     "airlines": analysis.get("airlines") or [],
                     "desks": [
@@ -396,6 +480,9 @@ class CrewOpsApi:
             "disruption_id": disruption_id,
             "status": item["status"],
             "summary": analysis.get("summary", ""),
+            "severity": severity(analysis, report.get("reported_utc"), self.clock().date())
+            if analysis
+            else None,
             "report_type": report.get("type"),
             "reported_utc": report.get("reported_utc"),
             "reported_by": (report.get("reported_by") or {}).get("user_id"),
@@ -502,15 +589,23 @@ class CrewOpsApi:
             raise ApiError("FORBIDDEN", "only crew have a roster")
         tools = self.live().pipeline.tools
         mine = tools.lookup("pairing_crew", {"crew_id": caller.crew_id})["rows"]
+        today = tools.world.snapshot_utc.date()
+        first = today - timedelta(days=CREW_LOOK_BACK_DAYS)
+        last = today + timedelta(days=REPORT_AHEAD_DAYS)
+        if tools.week:
+            last = min(last, tools.week[-1])  # nothing is rostered after the calendar ends
         pairings = []
         for row in mine:
             (p,) = tools.lookup("pairings", {"pairing_id": row["pairing_id"]})["rows"]
+            days = [d for d in p["days"] if first.isoformat() <= d["date"] <= last.isoformat()]
+            if not days:
+                continue  # outside the days a crew member sees
             pairings.append(
                 {
                     "pairing_id": p["pairing_id"],
                     "aircraft": p["aircraft"],
                     "role": row["role"],
-                    "days": p["days"],
+                    "days": days,
                 }
             )
         return {
@@ -520,6 +615,12 @@ class CrewOpsApi:
             "notices": self._crew_notices(caller.crew_id),
             "reported_unavailable": self._reported_out(caller.crew_id),
             "clock": tools.duty_clock(caller.crew_id),
+            # The days shown: a few back, two months ahead; reports only from today.
+            "window": {
+                "from": first.isoformat(),
+                "to": last.isoformat(),
+                "today": today.isoformat(),
+            },
             "pairings": sorted(pairings, key=lambda p: p["days"][0]["date"] if p["days"] else ""),
         }
 
@@ -542,7 +643,7 @@ class CrewOpsApi:
                     continue
                 report = from_dynamo(item.get("report") or {})
                 kind, d = report.get("type", ""), report.get("details") or {}
-                if kind not in ("crew_unavailable", "multiple_crew_unavailable"):
+                if kind not in ABSENCE_TYPES:
                     continue
                 days = {
                     (date.fromisoformat(d["from_date"]) + timedelta(days=i)).isoformat()
@@ -570,9 +671,7 @@ class CrewOpsApi:
             for item in disruptions_with_status(self.table, status):
                 report = from_dynamo(item.get("report") or {})
                 kind, d = report.get("type", ""), report.get("details") or {}
-                if kind in ("crew_unavailable", "multiple_crew_unavailable") and crew_id in (
-                    crew_out_of(kind, d)
-                ):
+                if kind in ABSENCE_TYPES and crew_id in (crew_out_of(kind, d)):
                     out.append(
                         {
                             "disruption_id": item["disruption_id"],
@@ -611,7 +710,8 @@ class CrewOpsApi:
     def my_reports(self, caller: Caller, scope: str = "mine", limit: int = 30) -> list[dict]:
         """Reports and how each stands, newest first: still being checked, refused (and
         why), or the disruption it became. ``scope`` "mine" is what the caller filed;
-        "crew" is what crew filed about themselves, for the reporting desk."""
+        "crew" is what crew filed about themselves, for the reporting desk; "leave" is the
+        planned leave admins booked."""
         limit = max(1, min(int(limit), 100))
         if scope == "crew":
             if not caller.roles & (OPERATIONAL_REPORTERS | READERS):
@@ -619,10 +719,19 @@ class CrewOpsApi:
             filed = [
                 f for f in filed_recently(self.table, 300) if "crew" in (f.get("roles") or [])
             ][:limit]
+        elif scope == "leave":
+            # Leave booked by rostering: the admins who book it, and crew control.
+            if not caller.roles & (LEAVE_FILERS | READERS):
+                raise ApiError("FORBIDDEN", "only admins and crew control see planned leave")
+            filed = [
+                f
+                for f in filed_recently(self.table, 5000)
+                if from_dynamo(f.get("report") or {}).get("type") == "planned_leave"
+            ][:limit]
         elif scope == "mine":
             filed = filed_by(self.table, caller.user_id, limit)
         else:
-            raise ApiError("INVALID", "scope is mine or crew")
+            raise ApiError("INVALID", "scope is mine, crew or leave")
         return [self._filed_state(f) for f in filed]
 
     def _filed_state(self, filed: Mapping[str, Any]) -> dict[str, Any]:
@@ -648,6 +757,7 @@ class CrewOpsApi:
                 "status": item["status"],
                 "desks": [{"desk_id": d.desk_id, "controller": d.controller} for d in desks],
                 "outcome": _outcome(item["status"], handling),
+                "handling": handling.get("kind"),
                 "handled": handling.get("text") if handling.get("kind") == "internal" else None,
                 "remark": _remark(self.table, filed["report_id"], item["status"]),
             }
@@ -664,7 +774,7 @@ class CrewOpsApi:
         the reason to refuse it, or None. Counts open disruptions and reports still in the
         queue (filed, neither stored nor refused yet); a resend of the same report is left
         to the worker, which stores it once."""
-        if report_type not in ("crew_unavailable", "multiple_crew_unavailable"):
+        if report_type not in ABSENCE_TYPES:
             return None
         wanted = set(crew_out_of(report_type, details))
         start, end = (
@@ -677,7 +787,7 @@ class CrewOpsApi:
                 return None
             d = other.get("details") or {}
             kind = other.get("type", "")
-            if kind not in ("crew_unavailable", "multiple_crew_unavailable"):
+            if kind not in ABSENCE_TYPES:
                 return None
             clash = wanted & set(crew_out_of(kind, d))
             if not clash:
@@ -846,9 +956,113 @@ class CrewOpsApi:
 
     def reference(self, caller: Caller) -> dict[str, Any]:
         """The crew, flights, aircraft, gates and stations a report can name."""
-        if not caller.roles & OPERATIONAL_REPORTERS:
-            raise ApiError("FORBIDDEN", "only reporters, controllers and approvers file reports")
-        return views.reference(self.live().pipeline.tools)
+        if not caller.roles & (OPERATIONAL_REPORTERS | LEAVE_FILERS):
+            raise ApiError("FORBIDDEN", "only reporters, crew control and admins file reports")
+        tools = self.live().pipeline.tools
+        today = tools.world.snapshot_utc.date()
+        return views.reference(tools, today, today + timedelta(days=REPORT_AHEAD_DAYS))
+
+    def operations(self, caller: Caller, start: str = "") -> dict[str, Any]:
+        """The operating week at a glance, for the reporting desk and crew control: every
+        flight with its airline, aircraft and crew, who is reported unavailable when, and
+        the open disruptions touching each flight (with how serious they are).
+
+        A reporter sees who is out and when, never why (sick, fatigue and the like are
+        crew control's business), nor the disruption records behind it."""
+        if not caller.roles & (OPERATIONAL_REPORTERS | READERS):
+            raise ApiError("FORBIDDEN", "your role does not see the operation")
+        tools = self.live().pipeline.tools
+        today = tools.world.snapshot_utc.date()
+        # A week at a time, from ``start``, inside what crew and reporters may see.
+        lo = today - timedelta(days=CREW_LOOK_BACK_DAYS)
+        hi = today + timedelta(days=REPORT_AHEAD_DAYS)
+        if tools.week:
+            lo, hi = max(lo, tools.week[0]), min(hi, tools.week[-1])
+        try:
+            first = date.fromisoformat(start) if start else today
+        except ValueError:
+            raise ApiError("INVALID", "start: a date (YYYY-MM-DD)") from None
+        first = min(max(first, lo), max(lo, hi - timedelta(days=6)))
+        week = [
+            (first + timedelta(days=i)).isoformat()
+            for i in range(7)
+            if first + timedelta(days=i) <= hi
+        ]
+        # Every status read once, and reused for flights and absences alike.
+        by_status = {s: disruptions_with_status(self.table, s) for s in UNAVAILABLE_STATUSES}
+        open_on: dict[str, list[dict[str, Any]]] = {}
+        for status in OPEN_STATUSES:
+            for item in by_status[status]:
+                analysis = from_dynamo(item.get("analysis") or {})
+                report = from_dynamo(item.get("report") or {})
+                flights = set(analysis.get("affected_flights") or [])
+                for s in analysis.get("seats") or []:
+                    impact = s.get("impact") or {}
+                    flights |= set(impact.get("uncovered_flights") or [])
+                    flights |= set(impact.get("at_risk_flights") or [])
+                flights |= {leg["flight_id"] for leg in analysis.get("late_departures") or []}
+                rated = severity(analysis, report.get("reported_utc"), today) if analysis else None
+                for f in flights:
+                    open_on.setdefault(f, []).append(
+                        {
+                            "disruption_id": item["disruption_id"],
+                            "status": item["status"],
+                            "report_type": report.get("type"),
+                            "severity": rated["level"] if rated else None,
+                        }
+                    )
+        items = [i for status in UNAVAILABLE_STATUSES for i in by_status[status]]
+        unavailable = [
+            u
+            for u in self._unavailable_list(tools, items)
+            if week and u["from_date"] <= week[-1] and u["to_date"] >= week[0]
+        ]
+        out_days: dict[str, set[str]] = {}
+        for u in unavailable:
+            first, last = date.fromisoformat(u["from_date"]), date.fromisoformat(u["to_date"])
+            out_days.setdefault(u["crew_id"], set()).update(
+                (first + timedelta(days=i)).isoformat() for i in range((last - first).days + 1)
+            )
+        partial = {
+            (crew_id, on.isoformat()): _iso_z(at)
+            for (crew_id, on), at in absences_from(items).items()
+        }
+        if not caller.roles & READERS:
+            private = ("reason", "self_reported", "disruption_id", "status", "handling")
+            unavailable = [{k: v for k, v in u.items() if k not in private} for u in unavailable]
+        out = views.operations(tools, open_on, out_days, unavailable, partial, week)
+        out["window"] = {"from": lo.isoformat(), "to": hi.isoformat(), "today": today.isoformat()}
+        return out
+
+    def _unavailable_list(self, tools: Any, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Everyone reported unavailable, by whom and for which days."""
+        out = []
+        for item in items:
+            report = from_dynamo(item.get("report") or {})
+            kind, d = report.get("type", ""), report.get("details") or {}
+            if kind not in ABSENCE_TYPES:
+                continue
+            by = report.get("reported_by") or {}
+            for crew_id in crew_out_of(kind, d):
+                crew = tools.world.crew.get(crew_id)
+                out.append(
+                    {
+                        "crew_id": crew_id,
+                        "name": _crew_name(tools, crew_id),
+                        "rank": crew.rank.value if crew else None,
+                        "airline": tools.world.airline_of_crew.get(crew_id),
+                        "from_date": d["from_date"],
+                        "to_date": d["to_date"],
+                        "reason": d.get("reason"),
+                        "self_reported": by.get("crew_id") == crew_id,
+                        "disruption_id": item["disruption_id"],
+                        "status": item["status"],
+                        "handling": (
+                            from_dynamo(item.get("analysis") or {}).get("handling") or {}
+                        ).get("kind"),
+                    }
+                )
+        return sorted(out, key=lambda r: (r["from_date"], r["crew_id"]))
 
     # ------------------------------------------------------------------
     # Rule thresholds and system activity

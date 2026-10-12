@@ -27,7 +27,7 @@ describe("roles and views", () => {
     expect(homeFor(["approver"])).toBe("/approvals");
     expect(homeFor(["controller"])).toBe("/console");
     expect(homeFor(["admin"])).toBe("/admin");
-    expect(homeFor(["reporter"])).toBe("/report");
+    expect(homeFor(["reporter"])).toBe("/operations");
   });
 
   it("shows only the views a role uses", () => {
@@ -35,7 +35,7 @@ describe("roles and views", () => {
     expect(viewsFor(["controller"]).map((v) => v.href)).toEqual(["/console", "/disruptions", "/assistant"]);
     expect(viewsFor(["approver"]).map((v) => v.href)).toEqual(["/disruptions", "/approvals", "/assistant"]);
     expect(viewsFor(["admin"]).map((v) => v.href)).toEqual(["/console", "/disruptions", "/admin", "/assistant"]);
-    expect(viewsFor(["reporter"]).map((v) => v.href)).toEqual(["/report", "/assistant"]);
+    expect(viewsFor(["reporter"]).map((v) => v.href)).toEqual(["/operations", "/report", "/assistant"]);
   });
 });
 
@@ -60,9 +60,7 @@ describe("the tool proxy", () => {
   });
 
   it("encodes the runtime ARN in the invocation URL", () => {
-    expect(
-      invocationUrl("ap-southeast-2", "arn:aws:bedrock-agentcore:ap-southeast-2:111111111111:runtime/x"),
-    ).toBe(
+    expect(invocationUrl("ap-southeast-2", "arn:aws:bedrock-agentcore:ap-southeast-2:111111111111:runtime/x")).toBe(
       "https://bedrock-agentcore.ap-southeast-2.amazonaws.com/runtimes/" +
         "arn%3Aaws%3Abedrock-agentcore%3Aap-southeast-2%3A111111111111%3Aruntime%2Fx/invocations?qualifier=DEFAULT",
     );

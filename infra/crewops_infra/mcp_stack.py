@@ -124,6 +124,7 @@ class McpStack(Stack):
             ),
             environment_variables={
                 "CREWOPS_STAGE": settings.stage,
+                "CREWOPS_REAL_TIME": "1",
                 "CREWOPS_USER_POOL_ID": auth.user_pool.user_pool_id,
                 "CREWOPS_USER_POOL_CLIENT_ID": auth.client.user_pool_client_id,
                 "CREWOPS_INGEST_QUEUE_URL": queue.queue_url,

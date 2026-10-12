@@ -106,7 +106,7 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why each piece was ch
 ## Repository layout
 
 ```
-data/seed/              Sample operating week (JSON)
+data/seed/              The seed operating week (JSON), carried forward to 31 December on load
 data/eval/              Gold questions, paraphrases, reference scenarios and the held-out set
 data/team/              The demo team: usernames and roles, nothing private
 src/crewops/
@@ -202,12 +202,33 @@ AWS_PROFILE=crewops
 
 Access keys never go in `.env`; they stay in `~/.aws`.
 
-After the first deploy, load the sample week into the table (about 1,400 items):
+After the first deploy, load the operation into the table (about 5,000 items):
 
 ```bash
 uv run python -m crewops.ingestion.load_seed --dry-run   # validate and count, no AWS calls
 uv run python -m crewops.ingestion.load_seed             # validate, then write
 ```
+
+The seed is one hand-built week (12 to 18 October 2026). The loader carries it forward to
+31 December (`crewops.ingestion.calendar`), past the judging period: the same flights each
+week with passengers booked varying a little, and the crew rotating within their airline,
+rank and base, so nobody flies the same days for ever; the reserve pool stays on call. Every
+generated week is checked with the legality engine (rest across the weekend, the 7- and
+28-day limits, certificates) and anyone who would break a rule is swapped with a colleague,
+so the roster is legal before any disruption. `--week-only` loads the seed week alone.
+
+The deployed services run on the real clock (`CREWOPS_REAL_TIME=1`, set by their stacks):
+flights before now count as flown, a disruption is reported for today up to two months
+ahead, crew see their flights from five days back to two months ahead, and the Operations
+board moves a week at a time across the same span. Tests, the evaluation and local runs keep
+the seed's own moment (12 October, 18:00 UTC), so they give the same result every time.
+
+**Planned leave.** Leave booked ahead (annual leave, a planned operation, a course) is not a
+disruption: an admin books it on the Admin page, up to the end of the rostered period, as
+rostering would. The person is never offered as cover then, and any trips they already have
+in that period go to a controller to re-crew in advance, with four-eyes approval as usual.
+Nothing about it is urgent, so it gets the controller's email but no escalation, no Echo
+chime, no desktop alert, no speaker announcement and no team emails.
 
 Loading only writes, so a table that holds an older week keeps it beside the new one. On the
 disposable `dev` and `test` stages, `--replace` empties the table first, including every
@@ -320,6 +341,30 @@ uv run python -m crewops.plans.desk --as rohit.malhotra close r-demo-0002 --reas
 This is an operator's tool, acting as the named team member with your AWS credentials; people
 reach the same rules through the assistant, signed in.
 
+**Four-eyes record.** Each plan gets a SHA-256 fingerprint at submission, over exactly what
+decides it (who replaces whom, costs, what is left uncovered, the rosters it was made against,
+who submitted it and when). The approval card shows it; approval computes it again and refuses
+a plan changed since (`TAMPERED`), and the commit only succeeds if the stored fingerprint is
+still the one checked. The approval is then sealed (SHA-256 over the fingerprint, the approver
+and the time), and both appear on the plan and in the audit trail. This is tamper evidence
+anyone can recompute, not a signature: nobody holds a private key.
+
+### Resilience and security of the assistant
+
+- **Circuit breaker** (`crewops.agent.breaker`). Every model call already has a firm timeout
+  and a deterministic fallback. After three outage failures in a row (timeouts, lost
+  connections, throttling, 5xx; never our own invalid requests), model calls pause for a
+  minute and every answer comes straight from the roster in DynamoDB through the templates,
+  at once, instead of each question waiting out a timeout. One call is then let through to
+  test the service. The assistant shows "Models paused" while it is open.
+- **Override check** (`crewops.agent.injection`). Before any model or guardrail call, the
+  common override phrasings ("ignore all previous instructions", "you are now an admin",
+  "bypass the RBAC checks", "approve without approval") are refused with a security alert;
+  ordinary questions such as "can we ignore the rest rule?" are not. Every refusal, by this
+  check or by the Bedrock Guardrail's prompt-attack filter, is recorded in the admin's
+  activity log with who asked and what. Neither is the real defence: the assistant has only
+  read tools, filtered by role, so no wording can make it submit, approve or change anything.
+
 ### The MCP server
 
 The assistant is served over MCP from AgentCore Runtime, signed in with the team's accounts.
@@ -405,6 +450,20 @@ uv run python -m crewops.web_env               # writes the public key for the w
 
 Signing out turns desktop alerts off in that browser. Without the keys the bell does not show.
 
+**Severity.** Every disruption is rated high, medium or low from its analysis, never by a
+model: high when a flight is at risk however it is handled (no legal crew, the best way out is
+to cancel or fly short, a seat left unfilled, a delay breaking a duty limit), medium when it
+needs a real decision or flies today or tomorrow (counted from today, not from when it was
+reported), low when a reserve covers it with time to
+spare. The console and disruption list show it with the reasons, and the speaker, Alexa and
+desktop alerts say it first ("Medium severity. …").
+
+**Absent on a day off.** Someone reported unavailable on days they fly nothing is recorded,
+not put on a desk: no alert, no escalation, nothing to plan, but they are not offered as
+cover on those days, and the record notes their next duty. If they were on call (reserve)
+then, it does go to a desk: the reserve pool at that base is one smaller. A reporter sees on
+the Operations board who is out and when, never why.
+
 Alerts and events name the disruption, its status, and for a team the flights, gates and
 times it acts on, never a crew member. A crew member whose certificate lapses is told on
 their own CrewOps page.
@@ -422,10 +481,11 @@ cd web && npm install && npm run dev # http://localhost:3000
 | View | Who | What it does |
 |---|---|---|
 | Disruptions | controllers, approvers, auditors, admins | Every disruption, filtered by desk (mine, other desks, the whole network), state (open, resolved, all) and type |
+| Operations | reporters (their landing page) | The operating week: a chart of passengers by day and airline, then every flight of the chosen day with airline, aircraft, captain, first officer, cabin crew and load. Crew reported unavailable are struck through in rose, and each flight shows its open disruptions with their severity. Click a crew name to report them unavailable that day, or "Delay" to report the flight late; the report form opens filled in. A side panel lists everyone out, by whom and for which days |
 | Report | reporters | Record any of the eight disruption types, picking crew, flights, gates and stations from the operation (a crew member taken ill part-way through a day from a time, a gate closure as an internal or outside cause), and follow every report you filed, and crew members' own, as waiting, refused with the reason, or its disruption's status |
 | Controller | controllers, auditors, admins | Live figures for the role, the ingestion feed of disruptions, and the solution engine: the recommendation, each seat's legal cover ranked by cost with cancellation last, every rule's margin checked on demand, crew another desk also wants, and the plan submitted from there. Each disruption's full record adds coverage figures, its desk, crew another desk is competing for (with a joint plan across both), recommendation cards by policy, a plain explanation of the chosen option, every legal option to choose from (the first ten, then the rest on request; anyone reported unavailable since is struck through), the regulated substitutes, operating short or cancelling, each chosen only after a warning, cover suggested by other desks, every excluded candidate and why, the trip's flights and crew, plans and the audit trail. A committed disruption shows the options as they stood and the choice made. Every record says in one sentence how it gets resolved (re-crew, a decision, or handled internally), shows gate moves and late flights with passengers booked, and lists who has been told and why; one handled internally is marked resolved with a remark |
 | Approver | approvers, auditors | The four-eyes queue: each waiting plan, approved with a second confirming click or sent back with a reason |
-| Crew | crew | Notices for me (a certificate about to lapse), this week's duty calendar, my flights, duty-limit gauges, reporting myself unavailable (never twice for the same days), and what became of my reports |
+| Crew | crew | Notices for me (a certificate about to lapse), this week's duty calendar (days reported unavailable in rose), my flights, duty-limit gauges, reporting myself unavailable (never twice for the same days), and what became of my reports |
 | Admin | admins | Rule thresholds (an admin tightens, only a super admin relaxes), the system activity log, and alert addresses |
 | Alexa+ | everyone | Talk or type, hear the answer (Amazon Polly) with pause, resume and stop, and follow up. The latest exchange stands out from the conversation beside it. A round Alexa+ button in the corner of every page opens it. |
 

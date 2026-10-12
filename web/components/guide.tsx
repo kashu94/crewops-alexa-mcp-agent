@@ -38,7 +38,10 @@ const AIRLINES_STEP: Step = {
 
 const STATUS_STEP: Step = {
   title: "What the coloured labels mean",
-  text: "Every disruption carries one label for where it stands. They change live as people act.",
+  text:
+    "Every disruption carries one label for where it stands, and changes live as people act. A second label says how " +
+    "serious it is: High (a flight is at risk however it is handled), Medium (it needs a real decision, or flies " +
+    "today or tomorrow) or Low (a reserve covers it with time to spare). Hover it for why.",
   visual: "statuses",
 };
 
@@ -102,6 +105,13 @@ const BY_ROLE: Partial<Record<Role, Step[]>> = {
   ],
   reporter: [
     {
+      title: "The operating week",
+      text:
+        "Operations shows a week at a time (arrows move it, from five days back to two months ahead), every flight by day: airline, aircraft, captain, first officer and cabin crew, " +
+        "passengers booked and any open disruption with its severity. Crew reported unavailable are struck through in " +
+        "rose. Click a crew name to report them unavailable that day, or 'Delay' to report a flight late.",
+    },
+    {
       title: "Record a disruption",
       text:
         "Pick the type (sick crew, delay, gate closure...), pick the crew, flight, gate or station from the lists and record " +
@@ -124,8 +134,10 @@ const BY_ROLE: Partial<Record<Role, Step[]>> = {
     {
       title: "Can't fly?",
       text:
-        "Tap 'I can't fly' to report yourself unavailable. It reaches the reporting desk and crew control at once, and you " +
-        "can follow it under 'My reports'. Days you have already reported cannot be reported again.",
+        "Your calendar shows the last five days and the next two months: flying days in blue, days off in grey, days " +
+        "you are out in rose, today outlined, with every flight listed below. Tap 'I can't fly' to report yourself unavailable. It reaches the reporting desk and crew control at once, and you " +
+        "can follow it under 'My reports'. Days you have already reported cannot be reported again, and show in rose " +
+        "in your week. Unwell on a day off? Report it too: nothing needs covering, but you won't be called out then.",
     },
   ],
   auditor: [
@@ -137,7 +149,7 @@ const BY_ROLE: Partial<Record<Role, Step[]>> = {
     {
       title: "Rules and alerts",
       text:
-        "Tighten legality thresholds (never looser than regulation; only a super admin may relax one back), read the " +
+        "Book planned leave (it is re-crewed in advance, with no urgency). Tighten legality thresholds (never looser than regulation; only a super admin may relax one back), read the " +
         "activity log, and subscribe email addresses to a role's or an operational team's alerts.",
     },
   ],

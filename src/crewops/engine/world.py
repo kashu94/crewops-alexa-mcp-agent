@@ -123,7 +123,11 @@ class World:
         return best
 
 
-def build_world(seed: SeedData) -> World:
+def build_world(seed: SeedData, now: datetime | None = None) -> World:
+    """The operation as the engine sees it at ``now``: the seed's own moment (the duty
+    clocks' time) when not given, as in tests and evaluation; the real time in a deployed
+    operation. Never earlier than the duty clocks: hours before them are already counted.
+    Duties rostered before ``now`` count as flown, so the hour limits see them."""
     flights = {f.flight_id: f for f in seed.flights}
 
     duty_days: dict[str, tuple[DutyDay, ...]] = {}
@@ -185,7 +189,7 @@ def build_world(seed: SeedData) -> World:
         reserves={k: tuple(v) for k, v in reserves.items()},
         costs=seed.costs,
         book=RuleBook.from_rules(seed.rules),
-        snapshot_utc=seed.snapshot_utc,
+        snapshot_utc=max(seed.snapshot_utc, now) if now else seed.snapshot_utc,
         reachability={c.crew_id: c.reachability_minutes for c in seed.crew},
         seniority={c.crew_id: c.seniority for c in seed.crew},
         risk={r.crew_id: r.score for r in seed.risk_signals},

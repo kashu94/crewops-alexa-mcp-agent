@@ -20,6 +20,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from crewops.agent import injection
+from crewops.agent.breaker import CircuitOpen
 from crewops.agent.context import Turn, as_reply, carry_ids
 from crewops.agent.entities import Vocabulary, extract, spoken_ids
 from crewops.agent.intents import Intent, Tier
@@ -143,11 +145,28 @@ class Pipeline:
                 source="refused",
             )
 
+        # A plain override attempt is refused before any model or guardrail call, and the
+        # refusal is logged by the API (crewops.agent.injection).
+        if attempt := injection.detect(question):
+            return Answer(
+                question,
+                injection.REFUSAL,
+                None,
+                source="refused",
+                notes=[f"blocked: override attempt ({attempt})"],
+            )
+
         screening_note = ""
         if self.screen_question is not None:
             try:
                 if blocked := self.screen_question(question):
-                    return Answer(question, blocked, None, source="refused")
+                    return Answer(
+                        question,
+                        blocked,
+                        None,
+                        source="refused",
+                        notes=["blocked: guardrail (prompt attack or denied topic)"],
+                    )
             except Exception as exc:
                 # Fail open: the verifier, role checks and redaction still stand, and an
                 # unreachable screening service must not take the desk offline.
@@ -257,7 +276,11 @@ class Pipeline:
                     )
             except Exception as exc:  # a model failure must never cost the user an answer
                 log.exception("drafter failed")
-                notes.append(f"model unavailable ({type(exc).__name__}); template used")
+                notes.append(
+                    "models paused after repeated failures; answered from the roster"
+                    if isinstance(exc, CircuitOpen)
+                    else f"model unavailable ({type(exc).__name__}); template used"
+                )
 
         if not trace:
             return Answer(
@@ -290,7 +313,11 @@ class Pipeline:
                 notes.append("rewording dropped or changed a fact; template used")
             except Exception as exc:
                 log.exception("explainer failed")
-                notes.append(f"rewording unavailable ({type(exc).__name__}); template used")
+                notes.append(
+                    "models paused after repeated failures; answered from the roster"
+                    if isinstance(exc, CircuitOpen)
+                    else f"rewording unavailable ({type(exc).__name__}); template used"
+                )
         return self._finish(question, text, route, trace, checked, "template", notes)
 
     # ------------------------------------------------------------------

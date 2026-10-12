@@ -488,9 +488,10 @@ def _mk_date(day: int, month: int, year: int) -> str | None:
 
 
 def extract_dates(text: str, vocab: Vocabulary) -> list[str]:
-    """ISO dates. A day without a year is in the operating week's year; "the 15th" and
-    "today" resolve inside the operating week, whose "now" is the snapshot."""
-    year = vocab.week_start.year
+    """ISO dates. A day without a year is in the operation's year. "The 15th", "on Friday"
+    and "today" look ahead from the operation's "now": the next such day on or after it,
+    within the rostered period."""
+    year = max(vocab.today, vocab.week_start).year
     found: list[tuple[int, str]] = []
     for m in ISO_DATE_RE.finditer(text):
         if iso := _mk_date(int(m.group(3)), int(m.group(2)), int(m.group(1))):
@@ -515,14 +516,13 @@ def extract_dates(text: str, vocab: Vocabulary) -> list[str]:
             found.append((m.start(), iso))
     if not found:
         for m in BARE_DAY_RE.finditer(text):
-            iso = _mk_date(int(m.group(1)), vocab.week_start.month, year)
-            if iso and vocab.week_start.isoformat() <= iso <= vocab.week_end.isoformat():
+            if iso := _next_day_of_month(int(m.group(1)), vocab):
                 found.append((m.start(), iso))
     if not found:
-        # "on Friday": the day of that name in the operating week.
+        # "on Friday": the next day of that name, from today.
         for m in WEEKDAY_RE.finditer(text):
             wanted = WEEKDAYS.index(m.group(1).lower())
-            day = vocab.week_start
+            day = max(vocab.today, vocab.week_start)
             while day <= vocab.week_end:
                 if day.weekday() == wanted:
                     found.append((m.start(), day.isoformat()))
@@ -533,6 +533,18 @@ def extract_dates(text: str, vocab: Vocabulary) -> list[str]:
     if not found and TOMORROW_RE.search(text):
         found.append((0, (vocab.today + timedelta(days=1)).isoformat()))
     return _dedupe([iso for _, iso in sorted(found, key=lambda t: t[0])])
+
+
+def _next_day_of_month(day: int, vocab: Vocabulary) -> str | None:
+    """ "The 15th": this month's if it is still to come, else next month's, in the period."""
+    start = max(vocab.today, vocab.week_start)
+    month, year = start.month, start.year
+    for _ in range(3):
+        iso = _mk_date(day, month, year)
+        if iso and start.isoformat() <= iso <= vocab.week_end.isoformat():
+            return iso
+        month, year = (1, year + 1) if month == 12 else (month + 1, year)
+    return None
 
 
 def extract_date_range(text: str, dates: list[str]) -> dict[str, str] | None:

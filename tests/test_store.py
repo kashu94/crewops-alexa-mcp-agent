@@ -145,13 +145,13 @@ def test_duplicate_keys_are_refused_before_any_write(seed):
 
 def test_loader_dry_run_needs_no_aws(monkeypatch, capsys):
     monkeypatch.setattr(loader, "load_env_file", lambda: {})  # never read a developer's .env
-    assert loader.main(["--dry-run"]) == 0
+    assert loader.main(["--dry-run", "--week-only"]) == 0
     assert f"{EXPECTED_ITEMS} items would be written" in capsys.readouterr().out
 
 
 def test_loader_refuses_without_named_profile(monkeypatch, capsys):
     monkeypatch.setattr(loader, "load_env_file", lambda: {})
-    assert loader.main([]) == 1
+    assert loader.main(["--week-only"]) == 1
     assert "AWS_PROFILE" in capsys.readouterr().err
 
 
@@ -164,7 +164,7 @@ def test_loader_writes_with_profile(monkeypatch, capsys, seed):
     # The loader must see a named profile, but boto3 must not look it up: hand it the moto
     # table directly, so no profile or credentials on this machine are ever read.
     monkeypatch.setattr("crewops.store.ops_store.table_for", lambda settings: table)
-    assert loader.main([]) == 0
+    assert loader.main(["--week-only"]) == 0
     assert f"Done: {EXPECTED_ITEMS} items." in capsys.readouterr().out
 
 
@@ -176,7 +176,7 @@ def test_loader_replace_empties_a_disposable_table_first(monkeypatch, capsys, se
     monkeypatch.setenv("AWS_REGION", "ap-southeast-2")
     monkeypatch.setenv("AWS_PROFILE", "crewops")
     monkeypatch.setattr("crewops.store.ops_store.table_for", lambda settings: table)
-    assert loader.main(["--replace"]) == 0
+    assert loader.main(["--replace", "--week-only"]) == 0
     assert "1 items deleted" in capsys.readouterr().out
     assert sum(1 for _ in OpsStore(table).scan()) == EXPECTED_ITEMS  # the old week is gone
 
@@ -191,5 +191,5 @@ def test_loader_never_replaces_a_kept_stage(monkeypatch, capsys):
         raise AssertionError("must not touch the table")
 
     monkeypatch.setattr("crewops.store.ops_store.table_for", boom)
-    assert loader.main(["--replace"]) == 1
+    assert loader.main(["--replace", "--week-only"]) == 1
     assert "not disposable" in capsys.readouterr().err

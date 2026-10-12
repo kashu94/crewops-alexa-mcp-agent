@@ -7,6 +7,7 @@ import { AIRLINES } from "@/components/airline";
 import { useMe } from "@/components/me";
 import { Button, clock, cx, day, Empty, Field, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
+import { shownStatus } from "@/lib/types";
 
 type Day = { date: string; flights: string[]; report_utc: string; release_utc: string };
 type Roster = {
@@ -22,11 +23,26 @@ type Roster = {
     last_rest_ended: string | null;
   };
   pairings: { pairing_id: string; aircraft: string; role: string; days: Day[] }[];
+  /** The days shown (a few back, two months ahead) and the operation's today. */
+  window?: { from: string; to: string; today: string };
   notices?: { disruption_id: string; status: string; at: string | null; message: string }[];
-  reported_unavailable?: { disruption_id: string; from_date: string; to_date: string; reason: string | null; status: string }[];
+  reported_unavailable?: {
+    disruption_id: string;
+    from_date: string;
+    to_date: string;
+    reason: string | null;
+    status: string;
+  }[];
 };
 
-type Filed = { disruption_id: string; status: string; outcome: string; reported_utc: string | null; details: Record<string, unknown> };
+type Filed = {
+  disruption_id: string;
+  status: string;
+  outcome: string;
+  reported_utc: string | null;
+  details: Record<string, unknown>;
+  handling?: string | null;
+};
 
 const REASONS = [
   ["sick", "Sick"],
@@ -54,30 +70,58 @@ function Gauge({ label, used, limit }: { label: string; used: number; limit: num
   );
 }
 
-/** The Monday-to-Sunday week (UTC) containing `asOf`, the operation's current day. */
-function weekOf(asOf: string): string[] {
-  const first = new Date(`${asOf.slice(0, 10)}T00:00:00Z`);
-  const monday = new Date(first);
-  monday.setUTCDate(first.getUTCDate() - ((first.getUTCDay() + 6) % 7));
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setUTCDate(monday.getUTCDate() + i);
-    return d.toISOString().slice(0, 10);
-  });
+function addDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Month grids (Monday first) covering ``from`` to ``to``: each cell a date, or null for
+ * the padding before the 1st. */
+function months(from: string, to: string): { label: string; cells: (string | null)[] }[] {
+  const out: { label: string; cells: (string | null)[] }[] = [];
+  let cursor = `${from.slice(0, 7)}-01`;
+  while (cursor <= to) {
+    const first = new Date(`${cursor}T00:00:00Z`);
+    const label = first.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
+    const cells: (string | null)[] = Array((first.getUTCDay() + 6) % 7).fill(null);
+    for (let d = cursor; d.slice(0, 7) === cursor.slice(0, 7); d = addDays(d, 1)) cells.push(d);
+    out.push({ label, cells });
+    const next = new Date(first);
+    next.setUTCMonth(first.getUTCMonth() + 1);
+    cursor = next.toISOString().slice(0, 10);
+  }
+  return out;
 }
 
 function ReportSheet({
   crewId,
   taken,
+  flying,
+  earliest,
+  latest,
   onClose,
 }: {
   crewId: string;
   taken: NonNullable<Roster["reported_unavailable"]>;
+  /** The dates they have a duty. */
+  flying: Set<string>;
+  /** Today to two months ahead: the server refuses anything else. */
+  earliest: string;
+  latest: string;
   onClose: (text?: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  // Days off in the chosen period: allowed (crew control should know), but nothing to cover.
+  const offOnly = useMemo(() => {
+    if (!from) return false;
+    const end = to && to >= from ? to : from;
+    // Compared as dates, never walked day by day: any year typed in stays instant.
+    return ![...flying].some((d) => d >= from && d <= end);
+  }, [from, to, flying]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -120,7 +164,10 @@ function ReportSheet({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/30 backdrop-blur-sm sm:items-center" onClick={() => onClose()}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/30 backdrop-blur-sm sm:items-center"
+      onClick={() => onClose()}
+    >
       <div
         role="dialog"
         aria-modal
@@ -144,13 +191,40 @@ function ReportSheet({
           }}
         >
           <div className="grid grid-cols-2 gap-3">
-            <Field label="From" name="from" type="date" required autoFocus value={from} onChange={(e) => setFrom(e.target.value)} />
-            <Field label="Until" name="to" type="date" hint="Optional: the same day if empty" min={from || undefined} />
+            <Field
+              label="From"
+              name="from"
+              type="date"
+              required
+              autoFocus
+              min={earliest}
+              max={latest}
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+            <Field
+              label="Until"
+              name="to"
+              type="date"
+              hint="Optional: the same day if empty"
+              min={from || earliest}
+              max={latest}
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+            />
           </div>
+          {offOnly && (
+            <p className="rounded-lg bg-violet-50 px-3 py-2 text-xs leading-relaxed text-violet-900">
+              You have no flights on these days, so nothing needs covering. Report it anyway if you&apos;re unwell:
+              it&apos;s recorded, and you won&apos;t be asked to cover anyone then.
+            </p>
+          )}
           {taken.length > 0 && (
             <p className="rounded-lg bg-sunken px-3 py-2 text-xs text-muted">
               Already reported:{" "}
-              {taken.map((t) => (t.from_date === t.to_date ? t.from_date : `${t.from_date} to ${t.to_date}`)).join("; ")}
+              {taken
+                .map((t) => (t.from_date === t.to_date ? t.from_date : `${t.from_date} to ${t.to_date}`))
+                .join("; ")}
             </p>
           )}
           <fieldset className="flex flex-col gap-1.5 text-sm">
@@ -171,7 +245,9 @@ function ReportSheet({
           <Button type="submit" tone="danger" disabled={busy}>
             {busy && <Spinner />} Tell crew control
           </Button>
-          <p className="text-center text-[11px] text-muted">Cover is worked out automatically; a controller and an approver decide it.</p>
+          <p className="text-center text-[11px] text-muted">
+            Cover is worked out automatically; a controller and an approver decide it.
+          </p>
         </form>
       </div>
     </div>
@@ -201,17 +277,41 @@ export default function Crew() {
     return () => clearInterval(t);
   }, [checking, reload]);
 
+  // Days reported unavailable (by them or by a reporter), with why: shown in their own colour.
+  const out = useMemo(() => {
+    const map = new Map<string, { reason: string | null; disruption_id: string }>();
+    (roster?.reported_unavailable ?? []).forEach((r) => {
+      for (
+        let d = new Date(`${r.from_date}T00:00:00Z`);
+        d.toISOString().slice(0, 10) <= r.to_date;
+        d.setUTCDate(d.getUTCDate() + 1)
+      ) {
+        map.set(d.toISOString().slice(0, 10), { reason: r.reason, disruption_id: r.disruption_id });
+      }
+    });
+    return map;
+  }, [roster]);
+
   const duties = useMemo(() => {
     const map = new Map<string, { pairing: string; aircraft: string; day: Day }>();
-    roster?.pairings.forEach((p) => p.days.forEach((d) => map.set(d.date, { pairing: p.pairing_id, aircraft: p.aircraft, day: d })));
+    roster?.pairings.forEach((p) =>
+      p.days.forEach((d) => map.set(d.date, { pairing: p.pairing_id, aircraft: p.aircraft, day: d })),
+    );
     return map;
   }, [roster]);
 
   if (!me.crew_id) return <Notice>This view is for crew members. Your account has no crew record.</Notice>;
   if (error) return <Notice tone="error">{error}</Notice>;
-  if (!roster) return <div className="text-muted"><Spinner /></div>;
+  if (!roster)
+    return (
+      <div className="text-muted">
+        <Spinner />
+      </div>
+    );
 
-  const week = weekOf(roster.clock.as_of);
+  // Older servers send no window: the duty clock's week then.
+  const today = roster.window?.today ?? roster.clock.as_of.slice(0, 10);
+  const win = roster.window ?? { from: today, to: addDays(today, 6), today };
 
   return (
     <div className="mx-auto flex max-w-md flex-col gap-4">
@@ -262,56 +362,141 @@ export default function Crew() {
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium">
                     {String(f.details.from_date ?? "")}
-                    {f.details.to_date && f.details.to_date !== f.details.from_date ? ` to ${String(f.details.to_date)}` : ""}
+                    {f.details.to_date && f.details.to_date !== f.details.from_date
+                      ? ` to ${String(f.details.to_date)}`
+                      : ""}
                   </span>
-                  <Status value={f.status} />
+                  <Status value={shownStatus(f.status, f.handling)} />
                 </div>
-                <p className={cx("mt-1 text-xs", f.status === "REJECTED" ? "text-critical" : "text-muted")}>{f.outcome}</p>
+                <p className={cx("mt-1 text-xs", f.status === "REJECTED" ? "text-critical" : "text-muted")}>
+                  {f.outcome}
+                </p>
               </li>
             ))}
           </ul>
         </Panel>
       )}
 
-      <Panel title="This week" icon={<CalendarDays size={14} className="text-accent" />}>
-        <ol className="grid grid-cols-7 gap-1.5 text-center">
-          {week.map((date) => {
-            const duty = duties.get(date);
-            const wd = new Date(`${date}T00:00:00Z`).toLocaleDateString("en-IN", { weekday: "short", timeZone: "UTC" });
-            return (
-              <li
-                key={date}
-                className={cx(
-                  "flex flex-col items-center gap-1 rounded-xl py-2 text-[11px]",
-                  duty ? "bg-accent text-white shadow-sm" : "bg-sunken text-muted",
-                )}
-                title={duty ? `${duty.pairing} on ${duty.aircraft}` : "Off"}
-              >
-                <span className="uppercase opacity-80">{wd}</span>
-                <span className="text-base font-semibold">{Number(date.slice(8, 10))}</span>
-                {duty ? <Plane size={12} /> : <MoonStar size={12} />}
-              </li>
-            );
-          })}
-        </ol>
+      <Panel
+        title="My calendar"
+        icon={<CalendarDays size={14} className="text-accent" />}
+        action={
+          <span className="text-[11px] text-muted">
+            {day(win.from)} – {day(win.to)}
+          </span>
+        }
+      >
+        <div className="flex max-h-[420px] flex-col gap-4 overflow-y-auto pr-1">
+          {months(win.from, win.to).map((m) => (
+            <section key={m.label}>
+              <h3 className="mb-1.5 text-xs font-semibold text-slate-700">{m.label}</h3>
+              <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase tracking-wide text-muted">
+                {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((w) => (
+                  <span key={w}>{w}</span>
+                ))}
+              </div>
+              <ol className="mt-1 grid grid-cols-7 gap-1 text-center">
+                {m.cells.map((date, i) => {
+                  if (!date) return <li key={`pad-${i}`} />;
+                  const shown = date >= win.from && date <= win.to;
+                  const duty = duties.get(date);
+                  const away = out.get(date);
+                  const past = date < win.today;
+                  return (
+                    <li
+                      key={date}
+                      className={cx(
+                        "relative flex h-10 flex-col items-center justify-center rounded-lg text-xs",
+                        !shown
+                          ? "text-slate-300"
+                          : away
+                            ? "bg-rose-50 text-rose-700 ring-2 ring-inset ring-rose-300"
+                            : duty
+                              ? "bg-accent text-white shadow-sm"
+                              : "bg-sunken text-muted",
+                        shown && past && "opacity-55",
+                        date === win.today && "outline outline-2 outline-offset-1 outline-slate-900",
+                      )}
+                      title={
+                        !shown
+                          ? undefined
+                          : away
+                            ? `Reported unavailable${away.reason ? ` (${away.reason.replace(/_/g, " ")})` : ""}${duty ? `: ${duty.pairing} being covered` : ""}`
+                            : duty
+                              ? `${duty.pairing} on ${duty.aircraft}: ${duty.day.flights.map((f) => f.split("-")[0]).join(", ")}`
+                              : "Off"
+                      }
+                    >
+                      <span className={cx("font-semibold", away && duty && "line-through decoration-2")}>
+                        {Number(date.slice(8, 10))}
+                      </span>
+                      {shown && (away ? <HeartPulse size={10} /> : duty ? <Plane size={10} /> : null)}
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          ))}
+        </div>
+        <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-accent" /> Flying
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-sunken ring-1 ring-line" /> Off
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-rose-50 ring-2 ring-rose-300" /> Unavailable or on leave
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm outline outline-2 outline-slate-900" /> Today
+          </span>
+        </p>
       </Panel>
 
       <Panel title="My flights" icon={<Plane size={14} className="text-accent" />}>
         {roster.pairings.length === 0 ? (
           <Empty icon={<MoonStar size={22} />}>No trips rostered.</Empty>
         ) : (
-          <ol className="flex flex-col gap-3">
-            {roster.pairings.flatMap((p) =>
-              p.days.map((d) => (
-                <li key={`${p.pairing_id}-${d.date}`} className="lift rounded-xl border border-line p-3">
+          <ol className="flex max-h-[560px] flex-col gap-3 overflow-y-auto pr-1">
+            {roster.pairings
+              .flatMap((p) => p.days.map((d) => ({ p, d })))
+              .sort((a, b) => a.d.report_utc.localeCompare(b.d.report_utc))
+              .map(({ p, d }) => (
+                <li
+                  key={`${p.pairing_id}-${d.date}`}
+                  className={cx(
+                    "lift rounded-xl border p-3",
+                    out.has(d.date) ? "border-rose-300 bg-rose-50/60" : "border-line",
+                    d.date < win.today && "opacity-60",
+                  )}
+                >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold">{day(d.date)}</span>
+                    <span className="flex items-center gap-2 text-sm font-semibold">
+                      {day(d.date)}
+                      {d.date < win.today && (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                          Flown
+                        </span>
+                      )}
+                      {d.date === win.today && (
+                        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-800">
+                          Today
+                        </span>
+                      )}
+                      {out.has(d.date) && (
+                        <span className="flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                          <HeartPulse size={10} /> Unavailable
+                        </span>
+                      )}
+                    </span>
                     <span className="text-xs text-muted">
                       <Mono>{p.pairing_id}</Mono> · <Mono>{p.aircraft}</Mono>
                     </span>
                   </div>
                   <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
-                    <Clock3 size={12} /> Report <Mono>{clock(d.report_utc)}</Mono> · Release <Mono>{clock(d.release_utc)}</Mono>
+                    <Clock3 size={12} /> Report <Mono>{clock(d.report_utc)}</Mono> · Release{" "}
+                    <Mono>{clock(d.release_utc)}</Mono>
                   </p>
                   <p className="mt-2 flex flex-wrap gap-1.5">
                     {d.flights.map((f) => (
@@ -321,8 +506,7 @@ export default function Crew() {
                     ))}
                   </p>
                 </li>
-              )),
-            )}
+              ))}
           </ol>
         )}
       </Panel>
@@ -330,9 +514,14 @@ export default function Crew() {
       <Panel title="Duty limits" icon={<Clock3 size={14} className="text-accent" />}>
         <div className="flex flex-col gap-4">
           <Gauge label="Duty, last 7 days" used={roster.clock.duty_hours_7d} limit={roster.clock.duty_limit_7d} />
-          <Gauge label="Flying, last 28 days" used={roster.clock.flight_hours_28d} limit={roster.clock.flight_limit_28d} />
+          <Gauge
+            label="Flying, last 28 days"
+            used={roster.clock.flight_hours_28d}
+            limit={roster.clock.flight_limit_28d}
+          />
           <p className="text-[11px] text-muted">
-            As of {day(roster.clock.as_of)}; last rest ended {day(roster.clock.last_rest_ended)} <Mono>{clock(roster.clock.last_rest_ended)}</Mono>.
+            As of {day(roster.clock.as_of)}; last rest ended {day(roster.clock.last_rest_ended)}{" "}
+            <Mono>{clock(roster.clock.last_rest_ended)}</Mono>.
           </p>
         </div>
       </Panel>
@@ -341,6 +530,9 @@ export default function Crew() {
         <ReportSheet
           crewId={roster.crew_id}
           taken={roster.reported_unavailable ?? []}
+          flying={new Set(duties.keys())}
+          earliest={win.today}
+          latest={win.to}
           onClose={(text) => {
             setSheet(false);
             if (text) {

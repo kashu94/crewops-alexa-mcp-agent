@@ -160,7 +160,10 @@ def build_server(
     async def report_disruption(
         report_type: str, details: dict, ctx: Context, narrative: str = ""
     ) -> dict:
-        """Report a disruption. report_type is one of crew_unavailable,
+        """Report a disruption (today to two months ahead), or, as an admin, book planned
+        leave (planned_leave: crew_id, from_date, to_date, reason annual_leave, medical,
+        training or personal; up to the end of the rostered period). report_type is one of
+        crew_unavailable,
         multiple_crew_unavailable, certification_lapse, flight_delay, aircraft_technical,
         station_disruption, gate_closure, gate_change. details depend on the type, e.g.
         crew_unavailable: {"crew_id": "C-1042", "from_date": "2026-10-13", "to_date":
@@ -226,10 +229,19 @@ def build_server(
         return await run(ctx, lambda c: api.my_roster(c))
 
     @mcp.tool(annotations=READ)
+    async def operations_overview(ctx: Context, start: str = "") -> dict:
+        """A week of the operation at a glance, from ``start`` (YYYY-MM-DD; today if
+        empty): every flight with its airline, aircraft and crew, who is reported
+        unavailable when, and the open disruptions on each flight. For the reporting desk
+        and crew control."""
+        return await run(ctx, lambda c: api.operations(c, start))
+
+    @mcp.tool(annotations=READ)
     async def my_reports(ctx: Context, scope: str = "mine", limit: int = 30) -> list:
         """Reports and how each stands, newest first: still being checked, refused (and
-        why), or the disruption it became. scope "mine" (what you filed) or "crew" (what
-        crew filed about themselves, for the reporting desk and crew control)."""
+        why), or the disruption it became. scope "mine" (what you filed), "crew" (what
+        crew filed about themselves, for the reporting desk and crew control) or "leave"
+        (planned leave booked by admins)."""
         return await run(ctx, lambda c: api.my_reports(c, scope, limit))
 
     @mcp.tool(annotations=READ)

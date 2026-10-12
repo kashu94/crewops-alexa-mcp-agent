@@ -1,11 +1,37 @@
 "use client";
 
-import { BellRing, Gauge, History, Mail, Save, ScrollText, ShieldAlert, Trash2 } from "lucide-react";
+import { BellRing, CalendarRange, Gauge, History, Mail, Save, ScrollText, ShieldAlert, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { useMe } from "@/components/me";
-import { Button, clock, cx, day, Empty, Field, Mono, Notice, Panel, Spinner } from "@/components/ui";
+import { Button, clock, cx, day, Empty, Field, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
+import { shownStatus } from "@/lib/types";
+
+type Leave = {
+  disruption_id: string;
+  status: string;
+  outcome: string;
+  handling?: string | null;
+  details: { crew_id?: string; from_date?: string; to_date?: string; reason?: string };
+};
+type LeaveReference = {
+  crew: { crew_id: string; name: string; rank: string }[];
+  today: string;
+  leave_until: string | null;
+};
+const LEAVE_REASONS = [
+  ["annual_leave", "Annual leave"],
+  ["medical", "Medical (planned)"],
+  ["training", "Training course"],
+  ["personal", "Personal"],
+] as const;
+
+function plusDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
 
 type Threshold = {
   rule_id: string;
@@ -167,6 +193,7 @@ function ThresholdRow({
 
 function describeEvent(e: Event): string {
   if (e.action === "RULE_CHANGED") return `${e.rule_id} ${e.param?.replace(/_/g, " ")} ${e.from} → ${e.to}`;
+  if (e.action === "BLOCKED_PROMPT") return `Security: question refused (${e.reason ?? "override attempt"})`;
   if (e.action.startsWith("ALERT"))
     return `${e.action === "ALERT_ADDED" ? "Alert address added" : "Alert address removed"} (${e.role})`;
   return `${e.action.replace(/_/g, " ").toLowerCase()} ${e.disruption_id ?? ""}${e.plan_id ? ` · ${e.plan_id}` : ""}`;
@@ -178,6 +205,8 @@ export default function Admin() {
   const [thresholds, setThresholds] = useState<Threshold[] | null>(null);
   const [events, setEvents] = useState<Event[] | null>(null);
   const [addresses, setAddresses] = useState<Address[] | null>(null);
+  const [leave, setLeave] = useState<Leave[] | null>(null);
+  const [leaveRef, setLeaveRef] = useState<LeaveReference | null>(null);
   const [message, setMessage] = useState<Message>(null);
   const [busy, setBusy] = useState(false);
 
@@ -189,6 +218,8 @@ export default function Admin() {
       setAddresses([]);
       fail(err);
     });
+    tool<Leave[]>("my_reports", { scope: "leave" }).then(setLeave, () => setLeave([]));
+    tool<LeaveReference>("report_reference").then(setLeaveRef, () => undefined);
   }, []);
 
   useEffect(() => {
@@ -217,7 +248,8 @@ export default function Admin() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Administration</h1>
         <p className="text-sm text-muted">
-          Rule thresholds, system activity and alert addresses. Plan decisions stay with controllers and approvers.
+          Rule thresholds, system activity, alert addresses and planned leave. Plan decisions stay with controllers and
+          approvers.
         </p>
       </div>
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
@@ -266,13 +298,27 @@ export default function Admin() {
           ) : (
             <ol className="flex flex-col">
               {events.map((e, i) => (
-                <li key={`${e.at}-${i}`} className="flex gap-3 rounded-lg px-2 py-2 text-sm hover:bg-sunken">
+                <li
+                  key={`${e.at}-${i}`}
+                  className={cx(
+                    "flex gap-3 rounded-lg px-2 py-2 text-sm",
+                    e.action === "BLOCKED_PROMPT" ? "bg-red-50 ring-1 ring-inset ring-red-200" : "hover:bg-sunken",
+                  )}
+                >
                   <Mono className="w-[86px] shrink-0 text-[11px] text-muted">
                     {day(e.at)} {clock(e.at)}
                   </Mono>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-slate-800">{describeEvent(e)}</span>
-                    <span className="block truncate text-[11px] text-muted">
+                    <span
+                      className={cx(
+                        "flex items-center gap-1.5 truncate",
+                        e.action === "BLOCKED_PROMPT" ? "font-medium text-red-800" : "text-slate-800",
+                      )}
+                    >
+                      {e.action === "BLOCKED_PROMPT" && <ShieldAlert size={13} className="shrink-0" />}
+                      {e.action === "BLOCKED_PROMPT" ? "Security: question refused" : describeEvent(e)}
+                    </span>
+                    <span className="block truncate text-[11px] text-muted" title={e.reason}>
                       {e.actor}
                       {e.reason ? ` — ${e.reason}` : ""}
                     </span>
@@ -351,6 +397,111 @@ export default function Admin() {
             ))}
           </ul>
         )}
+      </Panel>
+
+      <Panel title="Planned leave" icon={<CalendarRange size={14} className="text-accent" />}>
+        <p className="mb-3 text-xs leading-relaxed text-muted">
+          Leave booked ahead (annual leave, a planned operation, a course), as rostering would. The person is never
+          offered as cover in that period, and any trips they are already rostered on then go to a controller to re-crew
+          in advance, with four-eyes approval as usual. No ten-minute escalation: nothing about it is urgent.
+          Short-notice absences are reported as disruptions instead.
+        </p>
+        {leaveRef && (
+          <form
+            className="grid gap-3 sm:grid-cols-[1.4fr_1fr_1fr_1fr_auto] sm:items-end"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              const f = new FormData(form);
+              const from = String(f.get("from") ?? "");
+              run(
+                () =>
+                  tool("report_disruption", {
+                    report_type: "planned_leave",
+                    details: {
+                      crew_id: String(f.get("crew") ?? "").trim(),
+                      from_date: from,
+                      to_date: String(f.get("to") ?? "") || from,
+                      reason: f.get("reason"),
+                    },
+                  }),
+                "Leave recorded; its trips go to a controller to re-crew within a minute.",
+                () => form.reset(),
+              );
+            }}
+          >
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">Crew member</span>
+              <input
+                name="crew"
+                list="leave-crew"
+                required
+                placeholder="C-1042"
+                className="rounded-lg border border-line bg-surface px-3 py-2 outline-none focus:border-accent focus:ring-4 focus:ring-sky-100"
+              />
+              <datalist id="leave-crew">
+                {leaveRef.crew.map((c) => (
+                  <option key={c.crew_id} value={c.crew_id}>
+                    {c.name}, {c.rank}
+                  </option>
+                ))}
+              </datalist>
+            </label>
+            <Field
+              label="From"
+              name="from"
+              type="date"
+              required
+              min={plusDays(leaveRef.today, 1)}
+              max={leaveRef.leave_until ?? undefined}
+            />
+            <Field
+              label="Until"
+              name="to"
+              type="date"
+              min={plusDays(leaveRef.today, 1)}
+              max={leaveRef.leave_until ?? undefined}
+            />
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">Reason</span>
+              <select
+                name="reason"
+                className="rounded-lg border border-line bg-surface px-3 py-2 outline-none focus:border-accent"
+              >
+                {LEAVE_REASONS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button type="submit" tone="accent" disabled={busy}>
+              {busy ? <Spinner /> : <CalendarRange size={14} />} Book leave
+            </Button>
+          </form>
+        )}
+        <div className="mt-4">
+          {leave === null ? (
+            <Spinner />
+          ) : leave.length === 0 ? (
+            <Empty icon={<CalendarRange size={22} />}>No leave booked.</Empty>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {leave.map((l) => (
+                <li key={l.disruption_id} className="rounded-xl border border-line px-3 py-2 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">
+                      <Mono>{l.details.crew_id}</Mono> · {day(l.details.from_date)} – {day(l.details.to_date)} ·{" "}
+                      <span className="text-muted">{(l.details.reason ?? "").replace(/_/g, " ")}</span>
+                    </span>
+                    <Status value={shownStatus(l.status, l.handling)} />
+                  </div>
+                  <p className="mt-1 text-xs text-muted">{l.outcome}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </Panel>
     </div>
   );

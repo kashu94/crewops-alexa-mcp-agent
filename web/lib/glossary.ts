@@ -75,7 +75,8 @@ export const GLOSSARY = {
     text:
       "Re-crew: a seat has legal cover, so a plan is submitted and approved. Decision: no legal cover, so " +
       "crew control decides with operations. Handled internally: nothing to re-crew (gates moved, a delay " +
-      "every crew member absorbs); the desk marks it resolved with a remark.",
+      "every crew member absorbs); the desk marks it resolved with a remark. Recorded: someone out on days " +
+      "they fly nothing; kept on record so they are not called out, with no desk involved.",
   },
   remote_stand: {
     title: "Remote stand",

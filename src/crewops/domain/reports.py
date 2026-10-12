@@ -60,7 +60,22 @@ class ReportType(StrEnum):
     CERTIFICATION_LAPSE = "certification_lapse"
     MULTIPLE_CREW_UNAVAILABLE = "multiple_crew_unavailable"
     GATE_CLOSURE = "gate_closure"
+    PLANNED_LEAVE = "planned_leave"
+    """Leave booked ahead (annual leave, a planned operation, a course), recorded by an
+    admin, as rostering would: the person's trips then are re-crewed in advance."""
 
+
+ABSENCE_TYPES = frozenset(
+    {
+        ReportType.CREW_UNAVAILABLE,
+        ReportType.MULTIPLE_CREW_UNAVAILABLE,
+        ReportType.PLANNED_LEAVE,
+    }
+)
+"""Reports that take someone off the roster for whole days."""
+LEAVE_REASONS = frozenset({"annual_leave", "medical", "training", "personal"})
+LEAVE_FILERS = frozenset({Role.ADMIN, Role.SUPER_ADMIN})
+"""Leave is booked through rostering (the admins here), not reported to crew control."""
 
 OPERATIONAL_REPORTERS = frozenset({Role.REPORTER, Role.CONTROLLER, Role.APPROVER})
 UNAVAILABILITY_REASONS = frozenset({"sick", "fatigue", "personal", "other"})
@@ -134,6 +149,22 @@ def _crew_unavailable(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
             raise DataError(f"{ctx}.from_utc: must be on from_date ({start.isoformat()})")
         out["from_utc"] = _iso(at)
     return out
+
+
+def _planned_leave(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
+    start = parse_date(d.get("from_date"), f"{ctx}.from_date")
+    end = parse_date(d.get("to_date", d.get("from_date")), f"{ctx}.to_date")
+    if end < start:
+        raise DataError(f"{ctx}: to_date is before from_date")
+    reason = _text(d, "reason", ctx)
+    if reason not in LEAVE_REASONS:
+        raise DataError(f"{ctx}.reason: one of {sorted(LEAVE_REASONS)}, got {_shown(reason)}")
+    return {
+        "crew_id": _text(d, "crew_id", ctx),
+        "from_date": start.isoformat(),
+        "to_date": end.isoformat(),
+        "reason": reason,
+    }
 
 
 def _multiple_crew_unavailable(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
@@ -230,6 +261,7 @@ DETAIL_PARSERS: dict[ReportType, Callable[[Mapping[str, Any], str], dict[str, An
     ReportType.CERTIFICATION_LAPSE: _certification_lapse,
     ReportType.MULTIPLE_CREW_UNAVAILABLE: _multiple_crew_unavailable,
     ReportType.GATE_CLOSURE: _gate_closure,
+    ReportType.PLANNED_LEAVE: _planned_leave,
 }
 
 
@@ -238,7 +270,11 @@ def crew_out_of(report_type: str, details: Mapping[str, Any]) -> tuple[str, ...]
     certificate. Empty for reports about flights, aircraft, stations and gates."""
     if report_type == ReportType.MULTIPLE_CREW_UNAVAILABLE:
         return tuple(details.get("crew_ids") or ())
-    if report_type in (ReportType.CREW_UNAVAILABLE, ReportType.CERTIFICATION_LAPSE):
+    if report_type in (
+        ReportType.CREW_UNAVAILABLE,
+        ReportType.CERTIFICATION_LAPSE,
+        ReportType.PLANNED_LEAVE,
+    ):
         return (details["crew_id"],) if details.get("crew_id") else ()
     return ()
 
@@ -354,6 +390,8 @@ def check_timing(report: Report, received: datetime) -> str | None:
 def authorize(report: Report) -> str | None:
     """None if the sender may file this report, otherwise the reason they may not."""
     roles = report.reported_by.roles
+    if report.report_type is ReportType.PLANNED_LEAVE:
+        return None if roles & LEAVE_FILERS else "only an admin records planned leave"
     if roles & OPERATIONAL_REPORTERS:
         return None
     if Role.CREW in roles:

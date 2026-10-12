@@ -353,6 +353,32 @@ def _crew_out_seats(world: World, crew_id: str, dates: set[date]) -> list[tuple[
     return seats
 
 
+def off_duty_notes(world: World, crew_id: str, start: date, end: date) -> tuple[str, ...]:
+    """What still matters when someone is out on days they fly nothing: on-call days
+    in the period (one reserve fewer), and the next duty after it (are they fit for it?)."""
+    who = _crew_label(world, crew_id)
+    notes = []
+    for duty in world.reserves.get(crew_id, ()):
+        on_call = [d for d in duty.dates if start <= d <= end]
+        if on_call:
+            days = ", ".join(d.isoformat() for d in on_call)
+            notes.append(f"{who} was on call at {duty.base} on {days}: one reserve fewer there.")
+    later = [
+        day
+        for pairing in world.pairings.values()
+        if any(seat.crew_id == crew_id for seat in pairing.crew)
+        for day in pairing.days
+        if day.date > end
+    ]
+    if later:
+        nxt = min(later, key=lambda d: d.report_utc)
+        notes.append(
+            f"{who}'s next duty is {nxt.date}, reporting {_iso(nxt.report_utc)}: if still "
+            "unwell, they report again before then."
+        )
+    return tuple(notes)
+
+
 def _with_joint(seats: list[SeatAnalysis], world: World) -> JointPlan | None:
     """A joint plan over seats that can still be re-crewed, using each seat's own options.
 
@@ -376,7 +402,8 @@ def _crew_unavailable(world: World, report: Report) -> Analysis:
             report.report_id,
             report.report_type,
             f"{who} is unavailable {start} to {end} but has no rostered duty then: "
-            "nothing to cover.",
+            "nothing to cover. Recorded, so they are not called out on those days.",
+            notes=off_duty_notes(world, d["crew_id"], start, end),
         )
     part = (
         datetime.fromisoformat(d["from_utc"].replace("Z", "+00:00")) if d.get("from_utc") else None
@@ -394,10 +421,19 @@ def _crew_unavailable(world: World, report: Report) -> Analysis:
             notes=done,
         )
     notes = done + tuple(n for s in seats if (n := _joins_mid_day(world, s, part)))
+    if report.report_type is ReportType.PLANNED_LEAVE:
+        reason = d["reason"].replace("_", " ")
+        notes += (
+            f"Planned leave ({reason}) {start} to {end}: re-crew these trips in advance; "
+            "nothing here is urgent.",
+        )
+        lead = f"{who} on planned leave {start} to {end} ({reason}): "
+    else:
+        lead = f"{who} unavailable{when} ({d['reason']}): "
     return Analysis(
         report.report_id,
         report.report_type,
-        f"{who} unavailable{when} ({d['reason']}): " + _seat_summary(seats),
+        lead + _seat_summary(seats),
         seats=seats,
         joint=_with_joint(list(seats), world),
         notes=notes,
@@ -460,8 +496,10 @@ def _multiple_crew_unavailable(world: World, report: Report) -> Analysis:
         return Analysis(
             report.report_id,
             report.report_type,
-            f"{who}, but none has a flight left to crew then: nothing to cover.",
-            notes=done,
+            f"{who}, but none has a flight left to crew then: nothing to cover. Recorded, "
+            "so none of them is called out on those days.",
+            notes=done
+            + tuple(n for c in d["crew_ids"] for n in off_duty_notes(world, c, start, end)),
         )
     trips = sorted({s.seat.pairing_id for s in seats})
     shared = [p for p in trips if sum(s.seat.pairing_id == p for s in seats) > 1]
@@ -873,7 +911,7 @@ def analyse(
     """The analysis of one report against the current operation: what broke, who must be
     replaced and how, which gates move, who is told, and how it gets resolved."""
     kind = report.report_type
-    if kind is ReportType.CREW_UNAVAILABLE:
+    if kind in (ReportType.CREW_UNAVAILABLE, ReportType.PLANNED_LEAVE):
         a = _crew_unavailable(world, report)
     elif kind is ReportType.MULTIPLE_CREW_UNAVAILABLE:
         a = _multiple_crew_unavailable(world, report)

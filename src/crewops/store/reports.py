@@ -332,10 +332,21 @@ def record_analysis_failure(table: Any, disruption_id: str, reason: str, at: dat
     )
 
 
+STATUS_CLOSED = "CLOSED"
+
+
 def store_analysis(
-    table: Any, disruption_id: str, analysis: dict[str, Any], analysed: datetime
+    table: Any,
+    disruption_id: str,
+    analysis: dict[str, Any],
+    analysed: datetime,
+    record_only: str | None = None,
 ) -> AnalysisOutcome:
     """Attach an analysis to a REPORTED disruption and move it to OPTIONS_READY, once.
+
+    ``record_only`` (a reason) stores it CLOSED instead: an absence on days with nothing to
+    cover is kept on record (the person is not offered as cover then) without landing on a
+    desk, alerting anyone or starting an escalation clock.
 
     The update and its audit event are one transaction, conditioned on the disruption still
     being REPORTED. A retried or duplicated trigger therefore cannot analyse twice or
@@ -343,6 +354,18 @@ def store_analysis(
     Floats in the analysis are converted for DynamoDB, which has no float type.
     """
     at = _iso(analysed)
+    status = STATUS_CLOSED if record_only else STATUS_OPTIONS_READY
+    audit: dict[str, Any] = {
+        schema.PK: disruption_pk(disruption_id),
+        schema.SK: f"AUDIT{S}{at}{S}{status}",
+        "entity": "audit_event",
+        "disruption_id": disruption_id,
+        "action": status,
+        "actor": ANALYSIS_ACTOR,
+        "at": at,
+    }
+    if record_only:
+        audit["reason"] = record_only[:MAX_STORED_REASON]
     try:
         table.meta.client.transact_write_items(
             TransactItems=[
@@ -362,28 +385,15 @@ def store_analysis(
                             "#analysed": "analysed_utc",
                         },
                         "ExpressionAttributeValues": {
-                            ":ready": STATUS_OPTIONS_READY,
+                            ":ready": status,
                             ":reported": STATUS_REPORTED,
-                            ":index": f"STATUS{S}{STATUS_OPTIONS_READY}",
+                            ":index": f"STATUS{S}{status}",
                             ":analysis": to_dynamo(analysis),
                             ":at": at,
                         },
                     }
                 },
-                {
-                    "Put": {
-                        "TableName": table.name,
-                        "Item": {
-                            schema.PK: disruption_pk(disruption_id),
-                            schema.SK: f"AUDIT{S}{at}{S}{STATUS_OPTIONS_READY}",
-                            "entity": "audit_event",
-                            "disruption_id": disruption_id,
-                            "action": STATUS_OPTIONS_READY,
-                            "actor": ANALYSIS_ACTOR,
-                            "at": at,
-                        },
-                    }
-                },
+                {"Put": {"TableName": table.name, "Item": audit}},
             ]
         )
     except ClientError as exc:

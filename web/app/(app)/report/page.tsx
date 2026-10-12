@@ -145,23 +145,36 @@ function CrewChips({
   );
 }
 
+/** Values a link from the Operations board fills in (``/report?type=…&crew_id=…``). */
+type Prefill = { crew_id?: string; from_date?: string; flight_id?: string };
+
 function Fields({
   kind,
   reference,
   crewIds,
   setCrewIds,
+  prefill = {},
 }: {
   kind: Kind;
   reference: Reference;
   crewIds: string[];
   setCrewIds: (v: string[]) => void;
+  prefill?: Prefill;
 }) {
   const first = reference.week[0] ?? "";
   const last = reference.week[reference.week.length - 1] ?? "";
   const dates = (
     <div className="grid grid-cols-2 gap-3">
       <Label text="From">
-        <input name="from_date" type="date" required min={first} max={last} defaultValue={first} className={input} />
+        <input
+          name="from_date"
+          type="date"
+          required
+          min={first}
+          max={last}
+          defaultValue={prefill.from_date ?? first}
+          className={input}
+        />
       </Label>
       <Label text="Until" hint="Optional: the same day if empty">
         <input name="to_date" type="date" min={first} max={last} className={input} />
@@ -212,7 +225,14 @@ function Fields({
       return (
         <>
           <Label text="Crew member">
-            <input name="crew_id" list="crew-list" required placeholder="C-1042" className={input} />
+            <input
+              name="crew_id"
+              list="crew-list"
+              required
+              placeholder="C-1042"
+              defaultValue={prefill.crew_id}
+              className={input}
+            />
           </Label>
           {dates}
           <Label
@@ -268,7 +288,14 @@ function Fields({
       return (
         <>
           <Label text="Flight" hint="Number and date, e.g. KS412-2026-10-13">
-            <input name="flight_id" list="flight-list" required placeholder="KS412-2026-10-13" className={input} />
+            <input
+              name="flight_id"
+              list="flight-list"
+              required
+              placeholder="KS412-2026-10-13"
+              defaultValue={prefill.flight_id}
+              className={input}
+            />
           </Label>
           <Label text="Delay (minutes)">
             <input name="delay_minutes" type="number" min={1} max={1440} required defaultValue={60} className={input} />
@@ -589,6 +616,21 @@ export default function ReportPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [scope, setScope] = useState<"mine" | "crew">("mine");
+  const [prefill, setPrefill] = useState<Prefill>({});
+  // Opened from the Operations board: the kind and the person or flight already chosen.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const q = new URLSearchParams(window.location.search);
+      const type = q.get("type");
+      if (type && KINDS.some((k) => k.kind === type)) setKind(type as Kind);
+      const pick = (name: string) => {
+        const v = q.get(name);
+        return v && /^[A-Za-z0-9-]{1,40}$/.test(v) ? v : undefined;
+      };
+      setPrefill({ crew_id: pick("crew_id"), from_date: pick("from_date"), flight_id: pick("flight_id") });
+    });
+    return () => clearTimeout(t);
+  }, []);
   const loadReports = useCallback(() => {
     tool<MyReport[]>("my_reports", { scope }).then(setReports, () => setReports([]));
   }, [scope]);
@@ -686,8 +728,8 @@ export default function ReportPage() {
                 ))}
               </div>
 
-              <div key={kind} className="animate-rise flex flex-col gap-3">
-                <Fields kind={kind} reference={reference} crewIds={crewIds} setCrewIds={setCrewIds} />
+              <div key={`${kind}:${JSON.stringify(prefill)}`} className="animate-rise flex flex-col gap-3">
+                <Fields kind={kind} reference={reference} crewIds={crewIds} setCrewIds={setCrewIds} prefill={prefill} />
                 <Label text="Anything crew controller should know" hint="Optional">
                   <input name="narrative" maxLength={500} className={input} />
                 </Label>

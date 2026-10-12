@@ -820,3 +820,63 @@ def test_welcome_back_says_what_came_while_away(api):
     assert "Reserve needed for tomorrow" in back["speech"]
     assert api.welcome_back(ROHIT)["alerts"] == []  # now seen
     assert api.welcome_back(IMRAN)["alerts"] == []  # reporters have no desk to come back to
+
+
+def test_the_reporting_desk_sees_the_week_with_crew_and_who_is_out(api):
+    imran = Caller("imran.sheikh", frozenset({Role.REPORTER}))
+    week = api.operations(imran)
+    assert week["week"][0] == "2026-10-12" and len(week["flights"]) > 100
+    on_2291 = [f for f in week["flights"] if f["pairing_id"] == "P-2291"]
+    assert on_2291 and all(f["captain"]["crew_id"] == "C-1042" for f in on_2291)
+    out = {f["date"]: f["captain"]["out"] for f in on_2291}
+    assert out["2026-10-13"] and out["2026-10-14"]  # reported sick those days
+    assert all(f["airline"] for f in week["flights"])
+    hit = [f for f in on_2291 if f["disruptions"]]
+    assert hit and hit[0]["disruptions"][0]["disruption_id"] == "r-sick1042"
+    assert hit[0]["disruptions"][0]["severity"] in ("low", "medium", "high")
+    (sick,) = [u for u in week["unavailable"] if u["crew_id"] == "C-1042"]
+    assert sick["from_date"] == "2026-10-13" and sick["rank"] == "Captain"
+    # A reporter sees who is out and when, never why or the record behind it.
+    assert "reason" not in sick and "disruption_id" not in sick
+    (full,) = [u for u in api.operations(ROHIT)["unavailable"] if u["crew_id"] == "C-1042"]
+    assert full["reason"] == "sick" and full["disruption_id"] == "r-sick1042"
+    with pytest.raises(ApiError):
+        api.operations(CREW)
+
+
+def test_reports_cover_today_to_two_months_and_leave_is_for_admins(api):
+    imran = Caller("imran.sheikh", frozenset({Role.REPORTER}))
+    priya = Caller("priya", frozenset({Role.ADMIN}))
+    sick = {"crew_id": "C-2087", "from_date": "2026-10-15", "reason": "sick"}
+    assert api.report(imran, "crew_unavailable", sick)["status"] == "queued"
+    for bad in ("2026-10-11", "2026-12-20"):  # yesterday; beyond two months
+        with pytest.raises(ApiError) as err:
+            api.report(imran, "crew_unavailable", {**sick, "from_date": bad})
+        assert err.value.code == "INVALID" and "outside" in err.value.message
+    with pytest.raises(ApiError) as err:
+        api.report(imran, "flight_delay", {"flight_id": "DX401-2026-10-11", "delay_minutes": 30})
+    assert err.value.code == "INVALID"
+    leave = {"crew_id": "C-2087", "from_date": "2026-10-17", "to_date": "2026-10-18"}
+    with pytest.raises(ApiError) as err:
+        api.report(imran, "planned_leave", {**leave, "reason": "annual_leave"})
+    assert err.value.code == "FORBIDDEN"
+    out = api.report(priya, "planned_leave", {**leave, "reason": "annual_leave"})
+    assert out["status"] == "queued"
+    with pytest.raises(ApiError):  # leave starts tomorrow at the earliest
+        api.report(
+            priya, "planned_leave", {**leave, "from_date": "2026-10-12", "reason": "medical"}
+        )
+    (booked,) = api.my_reports(priya, "leave")
+    assert booked["details"]["reason"] == "annual_leave"
+    with pytest.raises(ApiError):
+        api.my_reports(imran, "leave")
+
+
+def test_the_operations_board_moves_a_week_at_a_time_inside_the_window(api):
+    first = api.operations(ROHIT)
+    assert first["window"]["today"] == "2026-10-12" and first["week"][0] == "2026-10-12"
+    later = api.operations(ROHIT, "2026-10-14")
+    assert later["week"][0] == "2026-10-12"  # the seed week ends on the 18th: clamped
+    assert {f["date"] for f in later["flights"]} <= set(later["week"])
+    with pytest.raises(ApiError):
+        api.operations(ROHIT, "not-a-date")

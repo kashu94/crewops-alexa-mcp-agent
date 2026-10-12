@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AirlineBadge } from "@/components/airline";
 import { useLiveListener } from "@/components/live";
 import { useMe } from "@/components/me";
-import { clock, cx, day, Empty, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
+import { clock, cx, day, Empty, Mono, Notice, Panel, SeverityBadge, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
 import { describe, shownStatus, type FeedItem } from "@/lib/types";
 
@@ -15,7 +15,6 @@ type Scope = "mine" | "others" | "network";
 type State = "open" | "resolved" | "all";
 
 const RESOLVED = new Set(["COMMITTED", "CLOSED"]);
-
 
 const TYPE: Record<string, string> = {
   crew_unavailable: "Sick crew",
@@ -26,6 +25,7 @@ const TYPE: Record<string, string> = {
   station_disruption: "Station closure",
   gate_closure: "Gate closure",
   gate_change: "Gate change",
+  planned_leave: "Planned leave",
 };
 
 function Segmented<T extends string>({
@@ -90,11 +90,15 @@ export default function Disruptions() {
   const inState = (d: FeedItem, s: State) => s === "all" || (s === "resolved") === RESOLVED.has(d.status);
 
   const shown = useMemo(
-    () => (items ?? []).filter((d) => inScope(d, scope) && inState(d, state) && (type === "all" || d.report_type === type)),
+    () =>
+      (items ?? []).filter((d) => inScope(d, scope) && inState(d, state) && (type === "all" || d.report_type === type)),
     [items, scope, state, type, inScope],
   );
   const count = (s: Scope) => (items ?? []).filter((d) => inScope(d, s) && inState(d, state)).length;
-  const types = useMemo(() => [...new Set((items ?? []).map((d) => d.report_type ?? ""))].filter(Boolean).sort(), [items]);
+  const types = useMemo(
+    () => [...new Set((items ?? []).map((d) => d.report_type ?? ""))].filter(Boolean).sort(),
+    [items],
+  );
 
   if (error) return <Notice tone="error">{error}</Notice>;
 
@@ -102,7 +106,9 @@ export default function Disruptions() {
     <div className="flex flex-col gap-4">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Disruptions</h1>
-        <p className="text-sm text-muted">Every disruption reported, by desk and state. Open one for its full record.</p>
+        <p className="text-sm text-muted">
+          Every disruption reported, by desk and state. Open one for its full record.
+        </p>
       </header>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -118,7 +124,10 @@ export default function Disruptions() {
             ]}
           />
         ) : (
-          <span className="rounded-xl border border-line bg-sunken px-3 py-2 text-sm text-muted" title="Only controllers hold a desk">
+          <span
+            className="rounded-xl border border-line bg-sunken px-3 py-2 text-sm text-muted"
+            title="Only controllers hold a desk"
+          >
             Whole network <span className="font-mono text-xs">{count("network")}</span>
             <span className="ml-2 text-xs">· you work across every desk</span>
           </span>
@@ -135,7 +144,11 @@ export default function Disruptions() {
         />
         <label className="flex items-center gap-2 text-sm text-muted">
           <ListFilter size={14} />
-          <select value={type} onChange={(e) => setType(e.target.value)} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm">
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
+          >
             <option value="all">Every type</option>
             {types.map((t) => (
               <option key={t} value={t}>
@@ -188,6 +201,7 @@ export default function Disruptions() {
                         ))}
                       </span>
                     </span>
+                    <SeverityBadge severity={d.severity} />
                     <Status value={shownStatus(d.status, d.handling)} />
                     <ArrowUpRight size={15} className="text-muted transition group-hover:text-accent" />
                   </Link>

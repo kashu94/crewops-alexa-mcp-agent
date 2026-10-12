@@ -23,7 +23,7 @@ import { useLiveListener } from "@/components/live";
 import { useMe } from "@/components/me";
 import { SeatOptions } from "@/components/solutions";
 import { CANCEL, SeatWorkspace, SHORT, seatKey } from "@/components/workspace";
-import { clock, day, Empty, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
+import { clock, day, Empty, Mono, Notice, Panel, SeverityBadge, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
 import { describe, shownStatus, type Detail } from "@/lib/types";
 
@@ -145,6 +145,7 @@ export default function DisruptionPage() {
           <h1 className="text-2xl font-semibold tracking-tight">
             {describe({ report_type: detail.report_type, details: detail.details ?? {} })}
           </h1>
+          <SeverityBadge severity={detail.severity} />
           <Status value={shownStatus(detail.status, detail.handling?.kind)} />
           {(detail.airlines ?? []).map((a) => (
             <AirlineBadge key={a.code} code={a.code} />
@@ -157,6 +158,12 @@ export default function DisruptionPage() {
           </Mono>
           {detail.reported_by && <> by {detail.reported_by}</>}
         </p>
+        {detail.severity && detail.severity.level !== "low" && (
+          <p className="text-xs text-muted">
+            <span className="font-semibold text-slate-700">Why {detail.severity.level} severity:</span>{" "}
+            {detail.severity.reasons.join("; ")}.
+          </p>
+        )}
         <DeskBanner detail={detail} />
         <HandlingBanner handling={detail.handling} />
       </header>

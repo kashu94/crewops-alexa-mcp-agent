@@ -102,6 +102,7 @@ const STATUS: Record<string, string> = {
   SUBMITTED: "bg-pending-soft text-amber-800 ring-amber-200",
   COMMITTED: "bg-ok-soft text-emerald-800 ring-emerald-200",
   CLOSED: "bg-slate-100 text-slate-700 ring-slate-200",
+  RECORDED: "bg-violet-50 text-violet-800 ring-violet-200",
   REJECTED: "bg-critical-soft text-red-800 ring-red-200",
   QUEUED: "bg-slate-100 text-slate-700 ring-slate-200",
   WITHDRAWN: "bg-slate-100 text-slate-700 ring-slate-200",
@@ -117,6 +118,32 @@ export function Status({ value }: { value: string }) {
       )}
     >
       {value.replace(/_/g, " ")}
+    </span>
+  );
+}
+
+const SEVERITY = {
+  high: { label: "High", tone: "bg-red-600 text-white ring-red-600", dot: "bg-white" },
+  medium: { label: "Medium", tone: "bg-amber-100 text-amber-900 ring-amber-300", dot: "bg-amber-500" },
+  low: { label: "Low", tone: "bg-emerald-50 text-emerald-800 ring-emerald-200", dot: "bg-emerald-500" },
+} as const;
+
+/** How serious a disruption is (high, medium or low), with why on hover. */
+export function SeverityBadge({ severity }: { severity?: { level: string; reasons?: string[] } | null }) {
+  if (!severity) return null;
+  const s = SEVERITY[severity.level as keyof typeof SEVERITY];
+  if (!s) return null;
+  const why = (severity.reasons ?? []).join("; ");
+  return (
+    <span
+      title={why ? `${s.label} severity: ${why}` : `${s.label} severity`}
+      className={cx(
+        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset",
+        s.tone,
+      )}
+    >
+      <span className={cx("h-1.5 w-1.5 rounded-full", s.dot)} />
+      {s.label}
     </span>
   );
 }
@@ -139,7 +166,10 @@ export function Spinner({ className }: { className?: string }) {
   return (
     <span
       aria-label="Loading"
-      className={cx("inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent", className)}
+      className={cx(
+        "inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent",
+        className,
+      )}
     />
   );
 }

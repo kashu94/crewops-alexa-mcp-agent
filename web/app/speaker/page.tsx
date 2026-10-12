@@ -1,6 +1,18 @@
 "use client";
 
-import { Bell, BellRing, Check, Mic, Power, Volume2 } from "lucide-react";
+import {
+  Bell,
+  BellRing,
+  Check,
+  CheckCircle2,
+  ClipboardCheck,
+  Mic,
+  Power,
+  Radio,
+  Siren,
+  Undo2,
+  Volume2,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { makeRecognition } from "@/lib/speech";
@@ -19,7 +31,76 @@ type Alert = {
   text: string;
   speech: string;
   desk: { desk_id: string; controller: string } | null;
+  severity?: "high" | "medium" | "low" | null;
 };
+
+/** How each kind of alert looks: ops-room displays colour by urgency, with escalations
+ * the loudest, so the kind reads from across the room before the words do. */
+const LOOK: Record<string, { tag: string; rail: string; card: string; icon: typeof Bell; iconTone: string }> = {
+  ESCALATED: {
+    tag: "bg-red-500 text-white",
+    rail: "bg-red-500",
+    card: "bg-red-950/60 ring-red-500/70 shadow-[0_0_0_1px_rgba(239,68,68,0.35),0_10px_40px_-10px_rgba(239,68,68,0.55)]",
+    icon: Siren,
+    iconTone: "text-red-300",
+  },
+  NEW: {
+    tag: "bg-amber-400 text-slate-950",
+    rail: "bg-amber-400",
+    card: "bg-slate-900/80 ring-amber-400/50",
+    icon: BellRing,
+    iconTone: "text-amber-300",
+  },
+  APPROVAL: {
+    tag: "bg-violet-400 text-slate-950",
+    rail: "bg-violet-400",
+    card: "bg-slate-900/80 ring-violet-400/40",
+    icon: ClipboardCheck,
+    iconTone: "text-violet-300",
+  },
+  BACK: {
+    tag: "bg-orange-400 text-slate-950",
+    rail: "bg-orange-400",
+    card: "bg-slate-900/80 ring-orange-400/40",
+    icon: Undo2,
+    iconTone: "text-orange-300",
+  },
+  DONE: {
+    tag: "bg-emerald-500/20 text-emerald-200",
+    rail: "bg-emerald-500/60",
+    card: "bg-slate-900/50 ring-slate-700/60",
+    icon: CheckCircle2,
+    iconTone: "text-emerald-300",
+  },
+};
+
+function lookOf(event: string) {
+  if (event === "ESCALATED") return LOOK.ESCALATED;
+  if (event === "SUBMITTED") return LOOK.APPROVAL;
+  if (["REJECTED", "WITHDRAWN", "STALE"].includes(event)) return LOOK.BACK;
+  if (["APPROVED", "COMMITTED", "CLOSED"].includes(event)) return LOOK.DONE;
+  return LOOK.NEW;
+}
+
+const SEVERITY_TONE = {
+  high: "bg-red-500/20 text-red-200 ring-red-400/50",
+  medium: "bg-amber-400/15 text-amber-200 ring-amber-300/40",
+  low: "bg-emerald-400/10 text-emerald-200 ring-emerald-300/30",
+} as const;
+
+function useUtcClock() {
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    const tick = () => setNow(new Date());
+    const first = setTimeout(tick);
+    const t = setInterval(tick, 15_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(t);
+    };
+  }, []);
+  return now;
+}
 
 const SCOPES: { value: string; label: string }[] = [
   { value: "room", label: "Whole ops room" },
@@ -339,62 +420,106 @@ export default function Speaker() {
     else setError(d?.error ?? "Pairing failed.");
   }
 
-  const ring = !on ? "off" : speaking ? "speaking" : listening ? "listening" : unheard.length ? "notify" : "idle";
+  const escalated = unheard.some((a) => a.event === "ESCALATED");
+  const ring = !on
+    ? "off"
+    : speaking
+      ? "speaking"
+      : listening
+        ? "listening"
+        : escalated
+          ? "escalated"
+          : unheard.length
+            ? "notify"
+            : "idle";
   const scopeLabel = SCOPES.find((s) => s.value === scope)?.label ?? "";
+  const now = useUtcClock();
+  // Escalations first, then the newest.
+  const shown = [...alerts]
+    .sort(
+      (a, b) =>
+        Number(b.event === "ESCALATED" && !heard.has(b.id)) - Number(a.event === "ESCALATED" && !heard.has(a.id)),
+    )
+    .slice(0, 8);
 
   return (
-    <main className="flex min-h-screen flex-1 flex-col items-center justify-center gap-8 bg-[radial-gradient(ellipse_at_top,#e0f2fe,transparent_60%),linear-gradient(#f8fafc,#eef2f7)] px-4 py-10">
-      <header className="text-center">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-700/80">CrewOps desk speaker</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{scopeLabel || " "}</h1>
-        <p className="mt-1 text-xs text-slate-500">No sign-in: this speaker belongs to the desk, not to a person.</p>
+    <main className="flex min-h-[100dvh] flex-1 flex-col bg-[#060b16] text-slate-100 lg:h-[100dvh] lg:overflow-hidden">
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_20%_10%,rgba(56,189,248,0.10),transparent_55%),radial-gradient(ellipse_at_90%_90%,rgba(99,102,241,0.08),transparent_50%)]"
+      />
+      <header className="relative flex flex-wrap items-center gap-3 border-b border-white/5 px-5 py-3">
+        <span className="grid h-8 w-8 place-items-center rounded-lg bg-white/5 ring-1 ring-white/10">
+          <Radio size={15} className="text-sky-300" />
+        </span>
+        <div className="leading-tight">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-sky-300/80">CrewOps desk speaker</p>
+          <h1 className="text-base font-semibold tracking-tight">{scopeLabel || " "}</h1>
+        </div>
         {scope && (
           <select
             value={scope}
             onChange={(e) => choose(e.target.value)}
             aria-label="Which desk this speaker serves"
-            className="mt-3 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 shadow-sm"
+            className="ml-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-sky-400"
           >
             {SCOPES.map((s) => (
-              <option key={s.value} value={s.value}>
+              <option key={s.value} value={s.value} className="bg-slate-900">
                 Serves: {s.label}
               </option>
             ))}
           </select>
         )}
+        <div className="ml-auto flex items-center gap-4 text-xs text-slate-400">
+          {now && (
+            <span className="font-mono tabular-nums">
+              {now.toISOString().slice(11, 16)}Z{" "}
+              <span className="text-slate-500">
+                · {now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}{" "}
+                IST
+              </span>
+            </span>
+          )}
+          <span className="flex items-center gap-1.5">
+            <span
+              className={`h-2 w-2 rounded-full ${!on ? "bg-slate-600" : error ? "bg-red-500" : "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"}`}
+            />
+            {!on ? "Off" : error ? "Reconnecting" : "Live"}
+          </span>
+        </div>
       </header>
 
       {paired === false ? (
-        <section className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-xl ring-1 ring-slate-200">
+        <section className="relative m-auto w-full max-w-sm rounded-3xl bg-slate-900/80 p-6 text-center ring-1 ring-white/10">
           <p className="text-sm font-semibold">Pair this screen as a speaker</p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-400">
             Enter the pairing code the administrator set up, once per screen.
           </p>
           <input
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            className="mt-4 w-full rounded-xl border border-slate-200 px-3 py-2 text-center font-mono tracking-widest outline-none focus:border-sky-400"
+            className="mt-4 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-center font-mono tracking-widest outline-none focus:border-sky-400"
             placeholder="Pairing code"
             aria-label="Pairing code"
           />
           <button
             type="button"
             onClick={submitCode}
-            className="mt-3 w-full rounded-xl bg-slate-900 py-2 text-sm font-medium text-white hover:bg-slate-800"
+            className="mt-3 w-full rounded-xl bg-sky-500 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400"
           >
             Pair
           </button>
-          {error && <p className="mt-2 text-xs text-red-700">{error}</p>}
+          {error && <p className="mt-2 text-xs text-red-300">{error}</p>}
         </section>
       ) : (
-        <>
+        <div className="relative grid min-h-0 flex-1 gap-6 px-5 py-6 lg:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.3fr)] lg:gap-10 lg:px-10">
           {/* The device: an Echo seen from above, its light ring saying what it is doing. */}
-          <div className="relative grid place-items-center">
+          <section className="flex min-h-0 flex-col items-center justify-center gap-6">
             <div
-              className={`speaker-ring speaker-${ring} grid h-64 w-64 place-items-center rounded-full p-[10px]`}
+              className={`speaker-ring speaker-${ring} grid h-56 w-56 place-items-center rounded-full p-[10px] xl:h-64 xl:w-64`}
               aria-live="polite"
               aria-label={
-                ring === "notify"
+                ring === "notify" || ring === "escalated"
                   ? `${unheard.length} new notification${unheard.length === 1 ? "" : "s"}`
                   : `Speaker ${ring}`
               }
@@ -410,11 +535,22 @@ export default function Speaker() {
                       <Power size={34} />
                       <span className="text-xs">Turn on the speaker</span>
                     </button>
-                  ) : ring === "notify" ? (
-                    <div className="flex flex-col items-center gap-1 text-amber-200">
-                      <BellRing size={30} className="animate-pulse" />
+                  ) : ring === "notify" || ring === "escalated" ? (
+                    <div
+                      className={`flex flex-col items-center gap-1 ${escalated ? "text-red-200" : "text-amber-200"}`}
+                    >
+                      {escalated ? (
+                        <Siren size={30} className="animate-pulse" />
+                      ) : (
+                        <BellRing size={30} className="animate-pulse" />
+                      )}
                       <span className="font-mono text-3xl font-semibold">{unheard.length}</span>
                       <span className="text-[11px] uppercase tracking-widest">new</span>
+                      {escalated && (
+                        <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                          {unheard.filter((a) => a.event === "ESCALATED").length} escalated
+                        </span>
+                      )}
                     </div>
                   ) : ring === "speaking" ? (
                     <div className="flex items-end gap-1" aria-hidden>
@@ -432,86 +568,134 @@ export default function Speaker() {
                 </div>
               </div>
             </div>
-          </div>
 
-          {on && (
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => void read()}
-                disabled={speaking}
-                className="flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-slate-800 disabled:opacity-60"
-              >
-                <Volume2 size={16} /> What are my notifications?
-              </button>
-              <button
-                type="button"
-                onClick={listen}
-                disabled={speaking || listening}
-                className="flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-60"
-                title="Say: what are my notifications?"
-              >
-                <Mic size={16} className={listening ? "text-sky-600" : ""} /> {listening ? "Listening…" : "Ask"}
-              </button>
-              {unheard.length > 0 && (
+            {on && (
+              <div className="flex flex-wrap items-center justify-center gap-2">
                 <button
                   type="button"
-                  onClick={() => markHeard(unheard.map((a) => a.id))}
-                  className="flex items-center gap-2 rounded-full bg-amber-100 px-4 py-2.5 text-sm font-medium text-amber-900 shadow ring-1 ring-amber-300 hover:bg-amber-200"
-                  title="Acknowledge: stop announcing these"
+                  onClick={() => void read()}
+                  disabled={speaking}
+                  className="flex items-center gap-2 rounded-full bg-sky-500 px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-sky-500/20 hover:bg-sky-400 disabled:opacity-60"
                 >
-                  <Check size={16} /> Got it
+                  <Volume2 size={16} /> What are my notifications?
                 </button>
-              )}
-              <label className="flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-xs text-slate-600 shadow ring-1 ring-slate-200">
-                <input type="checkbox" checked={announce} onChange={(e) => setAnnounce(e.target.checked)} />
+                <button
+                  type="button"
+                  onClick={listen}
+                  disabled={speaking || listening}
+                  className="flex items-center gap-2 rounded-full bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-100 ring-1 ring-white/15 hover:bg-white/10 disabled:opacity-60"
+                  title="Say: what are my notifications?"
+                >
+                  <Mic size={16} className={listening ? "text-sky-300" : ""} /> {listening ? "Listening…" : "Ask"}
+                </button>
+                {unheard.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => markHeard(unheard.map((a) => a.id))}
+                    className="flex items-center gap-2 rounded-full bg-amber-400 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow hover:bg-amber-300"
+                    title="Acknowledge: stop announcing these"
+                  >
+                    <Check size={16} /> Got it
+                  </button>
+                )}
+              </div>
+            )}
+            {on && (
+              <label className="flex items-center gap-2 text-xs text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={announce}
+                  onChange={(e) => setAnnounce(e.target.checked)}
+                  className="accent-sky-400"
+                />
                 Announce new alerts (up to 3 times)
               </label>
+            )}
+            {error && <p className="text-xs text-red-300">{error}</p>}
+            <p className="max-w-sm text-center text-[11px] text-slate-500">
+              No sign-in: this speaker belongs to the desk, not a person. A real Echo, or the Alexa app, gets the same
+              alert from the CrewOps skill.
+            </p>
+          </section>
+
+          {/* The alert stream: the only part that scrolls, and only when it has to. */}
+          <section className="flex min-h-0 flex-col">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Alert stream</h2>
+              <span className="flex gap-3 text-[10px] text-slate-500">
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-red-500" /> Escalated
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-amber-400" /> New
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-violet-400" /> Approval
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" /> Done
+                </span>
+              </span>
             </div>
-          )}
-
-          {error && <p className="text-xs text-red-700">{error}</p>}
-
-          <section className="w-full max-w-xl">
-            <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Recent alerts</h2>
             {alerts.length === 0 ? (
-              <p className="rounded-2xl bg-white/70 px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
-                {on ? "Nothing yet. New alerts for this desk chime here." : "Turn the speaker on to hear alerts."}
+              <p className="rounded-2xl bg-white/[0.03] px-4 py-6 text-center text-sm text-slate-400 ring-1 ring-white/10">
+                {on ? "All quiet. New alerts for this desk chime here." : "Turn the speaker on to hear alerts."}
               </p>
             ) : (
-              <ol className="flex flex-col gap-2">
-                {alerts.slice(0, 6).map((a) => (
-                  <li
-                    key={a.id}
-                    className={`rounded-2xl bg-white px-4 py-3 text-sm shadow-sm ring-1 ${
-                      heard.has(a.id) ? "ring-slate-200" : "ring-amber-300"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-2 font-semibold text-slate-800">
-                        {a.title}
-                        {!heard.has(a.id) && counts[a.id] ? (
-                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                            Announced {counts[a.id]} of {MAX_ANNOUNCEMENTS}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="font-mono text-[11px] text-slate-400">
-                        {a.at.slice(5, 10)} {a.at.slice(11, 16)}Z
-                      </span>
-                    </div>
-                    <p className="mt-1 text-slate-600">{a.text}</p>
-                  </li>
-                ))}
+              <ol className="flex min-h-0 flex-col gap-2.5 overflow-y-auto pr-1 [scrollbar-width:thin]">
+                {shown.map((a) => {
+                  const look = lookOf(a.event);
+                  const fresh = !heard.has(a.id);
+                  const Icon = look.icon;
+                  return (
+                    <li
+                      key={a.id}
+                      className={`relative overflow-hidden rounded-2xl py-3 pl-5 pr-4 text-sm ring-1 transition ${look.card} ${
+                        fresh ? "" : "opacity-60"
+                      } ${fresh && a.event === "ESCALATED" ? "escalated-card" : ""}`}
+                    >
+                      <span className={`absolute inset-y-0 left-0 w-1.5 ${look.rail}`} aria-hidden />
+                      <div className="flex items-start gap-3">
+                        <Icon size={18} className={`mt-0.5 shrink-0 ${look.iconTone}`} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${look.tag}`}
+                            >
+                              {a.title}
+                            </span>
+                            {a.severity && (
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ring-1 ${SEVERITY_TONE[a.severity]}`}
+                              >
+                                {a.severity}
+                              </span>
+                            )}
+                            {fresh && counts[a.id] ? (
+                              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-slate-200">
+                                Announced {counts[a.id]} of {MAX_ANNOUNCEMENTS}
+                              </span>
+                            ) : null}
+                            <span className="ml-auto font-mono text-[11px] text-slate-400">
+                              {a.at.slice(5, 10)} {a.at.slice(11, 16)}Z
+                            </span>
+                          </div>
+                          <p
+                            className={`mt-1.5 leading-relaxed ${a.event === "ESCALATED" ? "text-red-50" : "text-slate-200"}`}
+                          >
+                            {/* The badge already says how serious; the words are for the voice. */}
+                            {a.text.replace(/^(High|Medium|Low) severity\. /, "")}
+                          </p>
+                          <p className="mt-1 font-mono text-[10px] text-slate-500">{a.disruption_id}</p>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
               </ol>
             )}
           </section>
-
-          <p className="max-w-xl text-center text-[11px] text-slate-400">
-            A simulated Echo for this demo. A real Echo, or the Alexa app, gets the same alert as an Alexa notification
-            from the CrewOps skill.
-          </p>
-        </>
+        </div>
       )}
     </main>
   );

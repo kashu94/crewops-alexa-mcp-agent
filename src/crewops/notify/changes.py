@@ -84,6 +84,8 @@ def team_alerts(record: dict[str, Any], change: Change, stage: str) -> list[Aler
     """One alert per operational team the analysis names, once, when it is analysed."""
     if not (change.before == STATUS_REPORTED and change.after == STATUS_OPTIONS_READY):
         return []
+    if change.report_type == "planned_leave":
+        return []  # its trips are re-crewed in advance; no team needs telling yet
     from boto3.dynamodb.types import TypeDeserializer
 
     image = (record.get("dynamodb") or {}).get("NewImage") or {}

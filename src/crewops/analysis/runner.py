@@ -7,6 +7,7 @@ were stored before analysis existed, or need analysing again after a failure).
 from __future__ import annotations
 
 import logging
+import os
 from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -15,7 +16,7 @@ from typing import Any
 from crewops.analysis.disruption import analyse
 from crewops.domain import DataError, GateSlot, Report, ReportType
 from crewops.domain.desks import assign_desk
-from crewops.domain.reports import crew_out_of
+from crewops.domain.reports import ABSENCE_TYPES, crew_out_of
 from crewops.engine import build_world
 from crewops.engine.world import World
 from crewops.ingestion.seed import SeedData
@@ -50,10 +51,7 @@ def absences_from(items: list[dict[str, Any]]) -> dict[tuple[str, date], datetim
             report = Report.from_dict(from_dynamo(item["report"]))
         except (DataError, KeyError, TypeError):
             continue
-        if report.report_type not in (
-            ReportType.CREW_UNAVAILABLE,
-            ReportType.MULTIPLE_CREW_UNAVAILABLE,
-        ):
+        if report.report_type not in ABSENCE_TYPES:
             continue
         d = report.details
         first = date.fromisoformat(d["from_date"])
@@ -95,10 +93,7 @@ def unavailable_crew(
             log.warning("skipping unreadable disruption %s", item.get("disruption_id"))
             continue
         d = report.details
-        if report.report_type in (
-            ReportType.CREW_UNAVAILABLE,
-            ReportType.MULTIPLE_CREW_UNAVAILABLE,
-        ):
+        if report.report_type in ABSENCE_TYPES:
             start, end = date.fromisoformat(d["from_date"]), date.fromisoformat(d["to_date"])
             dates = [start + timedelta(days=i) for i in range((end - start).days + 1)]
         elif report.report_type is ReportType.CERTIFICATION_LAPSE:
@@ -167,6 +162,13 @@ def open_disruptions(table: Any) -> list[dict[str, Any]]:
     return [item for status in OPEN_STATUSES for item in disruptions_with_status(table, status)]
 
 
+def operation_now() -> datetime | None:
+    """The real time in a deployed operation (``CREWOPS_REAL_TIME=1``, set by its stacks),
+    so flights before it have flown and reports look ahead from today. Unset (tests, the
+    evaluation, local runs) it is None: the seed's own moment, the same every run."""
+    return datetime.now(UTC) if os.environ.get("CREWOPS_REAL_TIME") == "1" else None
+
+
 @dataclass(frozen=True, slots=True)
 class Operation:
     """The operation loaded once and reused for every disruption in a batch."""
@@ -177,7 +179,7 @@ class Operation:
     """The records the world was built from, for tools that show them as they are."""
 
     @classmethod
-    def load(cls, table: Any) -> Operation:
+    def load(cls, table: Any, now: datetime | None = None) -> Operation:
         """The roster from the table, plus everyone open disruptions have taken out.
 
         A crew member reported sick in one disruption must not be offered as cover in
@@ -186,7 +188,7 @@ class Operation:
         plan cancelled are marked cancelled: nobody flies them, or positions on them.
         """
         seed = OpsStore(table).load_seed()
-        world = build_world(seed)
+        world = build_world(seed, now or operation_now())
         items = unavailable_items(table)
         return cls(
             world=replace(
@@ -208,6 +210,19 @@ class RunResult:
     summary: str = ""
 
 
+def _on_call_then(world: World, report: Report) -> bool:
+    """Whether anyone this report takes out is on call (reserve) in its period: then crew
+    control must know, since the reserve pool at that base is one smaller."""
+    d = report.details
+    start, end = date.fromisoformat(d["from_date"]), date.fromisoformat(d["to_date"])
+    return any(
+        start <= day <= end
+        for crew_id in crew_out_of(report.report_type, d)
+        for duty in world.reserves.get(crew_id, ())
+        for day in duty.dates
+    )
+
+
 def analyse_item(table: Any, item: dict[str, Any], operation: Operation) -> RunResult:
     """Analyse one disruption item (as stored, or as a stream image) and store the result."""
     disruption_id = item["disruption_id"]
@@ -217,15 +232,29 @@ def analyse_item(table: Any, item: dict[str, Any], operation: Operation) -> RunR
     contacts = operation.seed.contacts if operation.seed else ()
     analysis = analyse(operation.world, report, operation.gates, contacts)
     doc = analysis.to_dict()
-    owner, same = same_seat_owner(table, doc)
-    doc["desk"] = owner or next_desk(table)
-    if same:
-        doc["notes"] = [
-            *doc.get("notes", []),
-            f"The same seat is already open in {', '.join(same)}: one cover fills both, so "
-            "this goes to the same desk.",
-        ]
-    outcome = store_analysis(table, disruption_id, doc, datetime.now(UTC))
+    record_only = None
+    if (
+        report.report_type in ABSENCE_TYPES
+        and not (doc.get("seats") or doc.get("delays"))
+        and not _on_call_then(operation.world, report)
+    ):
+        # Out on days they fly nothing (a day off): kept on record, so they are not called
+        # out then, but there is nothing for a controller to plan, so no desk takes it.
+        record_only = "Recorded: no flights to cover on these dates."
+        doc["handling"] = {
+            "kind": "recorded",
+            "text": "Recorded: no flights to cover. Not called out on these days.",
+        }
+    else:
+        owner, same = same_seat_owner(table, doc)
+        doc["desk"] = owner or next_desk(table)
+        if same:
+            doc["notes"] = [
+                *doc.get("notes", []),
+                f"The same seat is already open in {', '.join(same)}: one cover fills both, "
+                "so this goes to the same desk.",
+            ]
+    outcome = store_analysis(table, disruption_id, doc, datetime.now(UTC), record_only)
     if outcome is AnalysisOutcome.STORED:
         log.info("analysed %s: %s", disruption_id, analysis.summary)
     return RunResult(disruption_id, str(outcome), analysis.summary)

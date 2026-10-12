@@ -5,6 +5,7 @@ import {
   AlertOctagon,
   ArrowUpRight,
   BadgeCheck,
+  CalendarRange,
   ClipboardCheck,
   Cpu,
   DoorClosed,
@@ -23,7 +24,7 @@ import { AirlineBadge } from "@/components/airline";
 import { HandlingBanner } from "@/components/handling";
 import { useMe } from "@/components/me";
 import { SeatOptions } from "@/components/solutions";
-import { clock, cx, day, Empty, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
+import { clock, cx, day, Empty, Mono, Notice, Panel, SeverityBadge, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
 import { describe, shownStatus, type Detail, type FeedItem, type QueueItem } from "@/lib/types";
 
@@ -36,6 +37,7 @@ const TYPE_ICON: Record<string, typeof Radio> = {
   gate_change: Plane,
   gate_closure: DoorClosed,
   multiple_crew_unavailable: Users,
+  planned_leave: CalendarRange,
 };
 
 function Kpi({
@@ -58,7 +60,12 @@ function Kpi({
   // A border, not a ring: a ring is drawn outside the box, and the workspace clips it at
   // the outer edges.
   return (
-    <div className={cx("animate-rise flex items-center gap-3 rounded-2xl border bg-gradient-to-br to-white p-4", tones[tone])}>
+    <div
+      className={cx(
+        "animate-rise flex items-center gap-3 rounded-2xl border bg-gradient-to-br to-white p-4",
+        tones[tone],
+      )}
+    >
       <span className="grid h-10 w-10 place-items-center rounded-xl bg-white shadow-sm">
         <Icon size={18} />
       </span>
@@ -81,7 +88,12 @@ function Feed({
   onDesk: Set<string>;
   onSelect: (id: string) => void;
 }) {
-  if (!items) return <div className="p-4 text-muted"><Spinner /></div>;
+  if (!items)
+    return (
+      <div className="p-4 text-muted">
+        <Spinner />
+      </div>
+    );
   if (items.length === 0) return <Empty icon={<Inbox size={22} />}>No disruptions reported.</Empty>;
   return (
     <ol className="relative flex flex-col">
@@ -101,7 +113,11 @@ function Feed({
               <span
                 className={cx(
                   "relative z-10 grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full ring-4 ring-white",
-                  critical ? "bg-critical text-white" : d.status === "SUBMITTED" ? "bg-pending text-white" : "bg-slate-300 text-white",
+                  critical
+                    ? "bg-critical text-white"
+                    : d.status === "SUBMITTED"
+                      ? "bg-pending text-white"
+                      : "bg-slate-300 text-white",
                 )}
               >
                 <Icon size={12} strokeWidth={2.5} />
@@ -111,7 +127,10 @@ function Feed({
                   <Mono className="text-[11px] text-muted">
                     {day(d.reported_utc)} {clock(d.reported_utc)}
                   </Mono>
-                  <Status value={shownStatus(d.status, d.handling)} />
+                  <span className="flex items-center gap-1">
+                    <SeverityBadge severity={d.severity} />
+                    <Status value={shownStatus(d.status, d.handling)} />
+                  </span>
                 </span>
                 <span className="mt-1 flex items-center gap-1.5 text-sm font-medium text-slate-800">
                   {(d.airlines ?? []).map((a) => (
@@ -152,12 +171,18 @@ function Solutions({ id, onChanged }: { id: string; onChanged: () => void }) {
   useLiveListener(useCallback((e) => e.disruption_id === id && load(), [id, load]));
 
   if (error) return <Notice tone="error">{error}</Notice>;
-  if (!detail) return <div className="text-muted"><Spinner /></div>;
+  if (!detail)
+    return (
+      <div className="text-muted">
+        <Spinner />
+      </div>
+    );
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <Mono className="text-base font-semibold">{detail.disruption_id}</Mono>
+        <SeverityBadge severity={detail.severity} />
         <Status value={shownStatus(detail.status, detail.handling?.kind)} />
         <Link
           href={`/console/${encodeURIComponent(id)}`}
@@ -170,7 +195,9 @@ function Solutions({ id, onChanged }: { id: string; onChanged: () => void }) {
       <HandlingBanner handling={detail.handling} />
       <CommittedPlan detail={detail} />
       {detail.seats.length === 0 ? (
-        <p className="text-sm leading-relaxed text-slate-700">{detail.summary || "No seats to cover for this disruption."}</p>
+        <p className="text-sm leading-relaxed text-slate-700">
+          {detail.summary || "No seats to cover for this disruption."}
+        </p>
       ) : (
         detail.seats.map((s) => (
           <div key={`${s.pairing_id}-${s.role}-${s.crew_out}`} className="flex flex-col gap-3">
@@ -209,7 +236,9 @@ export default function ControllerWorkspace() {
       (items) => {
         setFeed(items);
         setError(null);
-        setSelected((s) => s ?? items.find((d) => d.status === "OPTIONS_READY")?.disruption_id ?? items[0]?.disruption_id ?? null);
+        setSelected(
+          (s) => s ?? items.find((d) => d.status === "OPTIONS_READY")?.disruption_id ?? items[0]?.disruption_id ?? null,
+        );
       },
       (err: Error) => setError(err.message),
     );
@@ -230,14 +259,15 @@ export default function ControllerWorkspace() {
   const ready = queue.filter((q) => q.kind === "ready_for_plan" || q.kind === "to_resolve").length;
   const sentBack = queue.filter((q) => q.kind.startsWith("sent_back")).length;
 
-
   return (
     // On wide screens the workspace fits the window exactly; only the panels scroll.
     <div className="flex flex-col gap-4 xl:h-[calc(100vh-6.75rem)] xl:overflow-hidden">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Crew control</h1>
-          <p className="text-sm text-muted">Disruptions as they arrive and legal cover ranked by cost. Ask Alexa+ from the button in the corner.</p>
+          <p className="text-sm text-muted">
+            Disruptions as they arrive and legal cover ranked by cost. Ask Alexa+ from the button in the corner.
+          </p>
         </div>
         {isController && waiting > 0 && (
           <span className="flex items-center gap-1.5 rounded-full bg-pending-soft px-3 py-1 text-xs font-semibold text-amber-800">
@@ -262,10 +292,20 @@ export default function ControllerWorkspace() {
         <Kpi label="Resolved" value={feed ? resolved : "–"} tone="ok" icon={BadgeCheck} />
       </div>
       <div className="grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(320px,2fr)_minmax(460px,3fr)]">
-        <Panel title="Ingestion feed" icon={<Radio size={14} className="text-critical" />} className="xl:h-full xl:min-h-0" bodyClassName="overflow-y-auto p-2">
+        <Panel
+          title="Ingestion feed"
+          icon={<Radio size={14} className="text-critical" />}
+          className="xl:h-full xl:min-h-0"
+          bodyClassName="overflow-y-auto p-2"
+        >
           <Feed items={feed} selected={selected} onDesk={onDesk} onSelect={setSelected} />
         </Panel>
-        <Panel title="Solution engine" icon={<Cpu size={14} className="text-accent" />} className="xl:h-full xl:min-h-0" bodyClassName="overflow-y-auto">
+        <Panel
+          title="Solution engine"
+          icon={<Cpu size={14} className="text-accent" />}
+          className="xl:h-full xl:min-h-0"
+          bodyClassName="overflow-y-auto"
+        >
           {selected ? (
             <Solutions key={selected} id={selected} onChanged={load} />
           ) : (

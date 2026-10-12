@@ -181,7 +181,7 @@ class CrewOpsTools:
         if not self.week or not (self.week[0] <= day <= self.week[-1]):
             raise ToolError(
                 UNRESOLVED_ENTITY,
-                f"{name} {day} is outside the rostered week ({self.week[0]} to {self.week[-1]})",
+                f"{name} {day} is outside the rostered period ({self.week[0]} to {self.week[-1]})",
             )
         return day
 
@@ -1333,7 +1333,11 @@ class CrewOpsTools:
                 and start < g.end_utc
                 and g.flight_id in w.flights
             }
-        if kind in (ReportType.CREW_UNAVAILABLE, ReportType.MULTIPLE_CREW_UNAVAILABLE):
+        if kind in (
+            ReportType.CREW_UNAVAILABLE,
+            ReportType.MULTIPLE_CREW_UNAVAILABLE,
+            ReportType.PLANNED_LEAVE,
+        ):
             first, last = date.fromisoformat(d["from_date"]), date.fromisoformat(d["to_date"])
 
             def hit(day: date) -> bool:
@@ -1369,6 +1373,9 @@ def _what(report: Report) -> str:
         return f"{d['crew_id']} unavailable {span} ({d['reason']})"
     if kind is ReportType.MULTIPLE_CREW_UNAVAILABLE:
         return f"{', '.join(d['crew_ids'])} unavailable from {d['from_date']} ({d['reason']})"
+    if kind is ReportType.PLANNED_LEAVE:
+        reason = d["reason"].replace("_", " ")
+        return f"{d['crew_id']} on planned leave {d['from_date']} to {d['to_date']} ({reason})"
     if kind is ReportType.CERTIFICATION_LAPSE:
         return f"{d['crew_id']} {d['cert_type'].replace('_', ' ')} lapses {d['valid_to']}"
     if kind is ReportType.FLIGHT_DELAY:

@@ -849,9 +849,11 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Expected: The new rules on the next load.
 - Actual: The page had the elements but no ring; the served stylesheet held the earlier
   rules and none of the new ones, while a production build included them.
-- Workaround: Restart `npm run dev` after editing `globals.css`.
+- Workaround: Restart `npm run dev` after editing `globals.css`. On 2026-10-11 a restart was
+  not enough: Turbopack's on-disk cache (`.next/dev`) served the old stylesheet again, until
+  that folder was deleted and the server started afresh.
 - Suggestion: Rebuild the global stylesheet when it changes, or say in the dev log that it
-  was not.
+  was not; never reuse a cached stylesheet whose source has changed since.
 
 ## 4. Our own code (found by tests, reviews, reference data and live runs)
 
@@ -2096,6 +2098,26 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Cause: The loader only writes items; nothing removed records no longer in the seed.
 - Fix: `--replace` empties the table first, on the disposable dev and test stages only;
   any other stage refuses it.
+
+### FL-216: A sick report for a day off landed on a desk with nothing to plan
+
+- Date: 2026-10-11
+- Where: disruption analysis
+- Found by: walking through the crew flow (a captain reporting sick on a day off)
+- Severity: Medium
+- What went wrong: A crew member reported unavailable on days they fly nothing was analysed as
+  "nothing to cover" but still went to a controller's desk as ready for options: it was
+  counted in the desk's load, emailed and chimed the controller, and after ten minutes was
+  escalated to the duty supervisor, all for nothing to do.
+- Cause: Every analysed report moved to OPTIONS_READY, whatever the analysis found.
+- Fix: Such a report is stored as recorded (closed by the analysis, with the reason), so no
+  desk, alert or escalation follows, while the person stays out of cover options on those
+  days. The record notes their next duty, and the crew page says before sending that nothing
+  needs covering. Someone on call (reserve) in the period still goes to a desk, since the
+  reserve pool is one smaller; found in the independent review of this fix, with severity
+  counting two seats on one trip as twice the passengers, "flies today" measured from the
+  report rather than from today, and reporters seeing why colleagues were absent on the new
+  Operations board (they now see only who and when).
 
 #### MCP server, memory and notifications
 

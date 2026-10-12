@@ -203,3 +203,22 @@ def test_slow_push_services_cannot_hold_the_notifier_and_replaced_keys_are_forgo
     _, p256dh, auth = browser()
     sub = {"endpoint": "https://fcm.googleapis.com/x", "p256dh": p256dh, "auth": auth}
     assert Sender(pem, public, post=lambda u, b, h: 403).send(sub, {}) == "gone"
+
+
+def test_the_severity_is_said_first_on_alexa_and_in_desktop_alerts():
+    from test_alexa import stream_record
+
+    from crewops.alexa.notifier import announcement
+    from crewops.notify.push_alerts import message
+
+    record = stream_record("REPORTED", "OPTIONS_READY", "desk-2")
+    record["dynamodb"]["NewImage"]["analysis"] = {
+        "M": {
+            "desk": {"S": "desk-2"},
+            "seats": {
+                "L": [{"M": {"pairing_id": {"S": "P-2291"}, "status": {"S": "no_legal_cover"}}}]
+            },
+        }
+    }
+    assert announcement(record).startswith("CrewOps, high severity: new on your desk.")
+    assert message(record)["title"] == "CrewOps: High severity: new on your desk"

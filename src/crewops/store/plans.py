@@ -21,6 +21,7 @@ from typing import Any
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
+from crewops.plans.fingerprint import approval_seal
 from crewops.store import schema
 from crewops.store.items import from_dynamo, to_dynamo
 from crewops.store.reports import STATUS_OPTIONS_READY, disruption_pk
@@ -117,13 +118,22 @@ def _move_disruption(disruption_id: str, frm: str, to: str, plan_id: str | None)
     }
 
 
-def _move_plan(plan: dict[str, Any], to: str, extra: dict[str, Any]) -> dict[str, Any]:
+def _move_plan(
+    plan: dict[str, Any], to: str, extra: dict[str, Any], fingerprint: str | None = None
+) -> dict[str, Any]:
     names = {"#status": "status", "#gsi1pk": schema.GSI1_PK}
     values: dict[str, Any] = {
         ":to": to,
         ":from": PLAN_SUBMITTED,
         ":index": f"PLAN{S}{to}",
     }
+    condition = "#status = :from"
+    if fingerprint:
+        # The fingerprint checked is still the one stored (approval has already recomputed
+        # it from the plan and compared it with the audit trail's).
+        names["#fp"] = "fingerprint"
+        values[":fp"] = fingerprint
+        condition += " AND #fp = :fp"
     sets = ["#status = :to", "#gsi1pk = :index"]
     for i, (key, value) in enumerate(extra.items()):
         names[f"#f{i}"] = key
@@ -133,7 +143,7 @@ def _move_plan(plan: dict[str, Any], to: str, extra: dict[str, Any]) -> dict[str
         "Update": {
             "Key": plan_key(plan["disruption_id"], plan["plan_id"]),
             "UpdateExpression": "SET " + ", ".join(sets),
-            "ConditionExpression": "#status = :from",
+            "ConditionExpression": condition,
             "ExpressionAttributeNames": names,
             "ExpressionAttributeValues": values,
         }
@@ -179,6 +189,7 @@ def submit(table: Any, plan: dict[str, Any], at: datetime) -> None:
                 when,
                 plan_id=plan["plan_id"],
                 note=plan.get("note") or None,
+                fingerprint=plan.get("fingerprint") or None,
             ),
         ],
     )
@@ -258,12 +269,26 @@ def commit(
                 }
             }
         )
+    # Four-eyes evidence: the approval sealed to the plan's fingerprint, the approver and
+    # the time (crewops.plans.fingerprint).
+    seal = approval_seal(plan["fingerprint"], actor, when) if plan.get("fingerprint") else None
+    decided = {"decided_by": actor, "decided_utc": when}
+    if seal:
+        decided["approval_seal"] = seal
     actions += [
-        _move_plan(plan, PLAN_COMMITTED, {"decided_by": actor, "decided_utc": when}),
+        _move_plan(plan, PLAN_COMMITTED, decided, plan.get("fingerprint")),
         _move_disruption(
             plan["disruption_id"], STATUS_SUBMITTED, STATUS_COMMITTED, plan["plan_id"]
         ),
-        _audit(plan["disruption_id"], "APPROVED", actor, when, plan_id=plan["plan_id"]),
+        _audit(
+            plan["disruption_id"],
+            "APPROVED",
+            actor,
+            when,
+            plan_id=plan["plan_id"],
+            fingerprint=plan.get("fingerprint") or None,
+            approval_seal=seal,
+        ),
         _audit(plan["disruption_id"], "COMMITTED", actor, when, plan_id=plan["plan_id"]),
     ]
     _transact(table, actions)

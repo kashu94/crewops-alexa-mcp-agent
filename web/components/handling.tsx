@@ -40,6 +40,7 @@ const KIND: Record<Handling["kind"], { label: string; tone: string; icon: typeof
   },
   recrew: { label: "Re-crew needed", tone: "border-sky-200 bg-sky-50/70 text-sky-900", icon: Users },
   decision: { label: "Decision needed", tone: "border-amber-200 bg-amber-50/70 text-amber-900", icon: ShieldAlert },
+  recorded: { label: "Recorded", tone: "border-violet-200 bg-violet-50/70 text-violet-900", icon: CheckCircle2 },
 };
 
 /** How this disruption gets resolved, in one sentence, at the top of the record. */

@@ -92,10 +92,12 @@ def flight_rows(
     return out
 
 
-def reference(tools: Any) -> dict[str, Any]:
+def reference(tools: Any, first: Any = None, last: Any = None) -> dict[str, Any]:
     """What a reporter picks from when recording a disruption: crew, flights, aircraft,
-    gates and stations, each with what tells them apart."""
+    gates and stations, each with what tells them apart; flights and dates only from
+    ``first`` to ``last`` (the days a disruption may be reported for)."""
     world, seed = tools.world, tools.seed
+    days = [d for d in tools.week if (first is None or d >= first) and (last is None or d <= last)]
     gate = {g.flight_id: g.gate for g in tools.gates}
     return {
         "crew": [
@@ -123,12 +125,96 @@ def reference(tools: Any) -> dict[str, Any]:
                 "gate": gate.get(f.flight_id),
             }
             for f in sorted(world.flights.values(), key=lambda f: f.dep_utc)
+            if days and days[0] <= f.date <= days[-1]
         ],
         "aircraft": sorted({f.aircraft for f in world.flights.values()}),
         "gates": sorted({g.gate for g in tools.gates}, key=lambda g: (g.split("-")[0], len(g), g)),
         "stations": sorted({f.dep_station for f in world.flights.values()}),
         "cert_types": sorted({c.cert_type.value for c in seed.certifications}),
-        "week": [d.isoformat() for d in tools.week],
+        "week": [d.isoformat() for d in days],
+        "today": world.snapshot_utc.date().isoformat(),
+        # Leave, booked by an admin, may run to the end of the rostered period.
+        "leave_until": tools.week[-1].isoformat() if tools.week else None,
+    }
+
+
+def operations(
+    tools: Any,
+    open_on: Mapping[str, list[dict[str, Any]]],
+    out_days: Mapping[str, set[str]],
+    unavailable: list[dict[str, Any]],
+    partial: Mapping[tuple[str, str], str] | None = None,
+    week: list[str] | None = None,
+) -> dict[str, Any]:
+    """The week's flights with airline, aircraft and crew; each crew member marked when
+    reported unavailable that day (from a time, only on legs leaving after it), and each
+    flight with the open disruptions touching it."""
+    partial = partial or {}
+    from crewops.domain import Rank
+
+    world, seed = tools.world, tools.seed
+    by_flight: dict[str, Any] = {}
+    for pairing in world.pairings.values():
+        for day in pairing.days:
+            for fid in day.flight_ids:
+                by_flight[fid] = pairing
+
+    def person(crew_id: str, on: str, dep: str) -> dict[str, Any]:
+        crew = world.crew.get(crew_id)
+        since = partial.get((crew_id, on))
+        return {
+            "crew_id": crew_id,
+            "name": crew.name if crew else crew_id,
+            "out": on in out_days.get(crew_id, set()) and (since is None or dep >= since),
+        }
+
+    days = set(week) if week else None
+    flights = []
+    for f in sorted(world.flights.values(), key=lambda f: f.dep_utc):
+        if days is not None and f.date.isoformat() not in days:
+            continue
+        pairing = by_flight.get(f.flight_id)
+        on, dep = f.date.isoformat(), _iso(f.dep_utc)
+        crew = list(pairing.crew) if pairing else []
+        pilots = {
+            role: [person(s.crew_id, on, dep) for s in crew if s.role is role]
+            for role in (Rank.CAPTAIN, Rank.FIRST_OFFICER)
+        }
+        cabin = [
+            person(s.crew_id, on, dep)
+            for s in crew
+            if s.role in (Rank.SENIOR_CABIN_CREW, Rank.CABIN_CREW)
+        ]
+        flights.append(
+            {
+                "flight_id": f.flight_id,
+                "flight_no": f.flight_no,
+                "date": on,
+                "from": f.dep_station,
+                "to": f.arr_station,
+                "dep_utc": _iso(f.dep_utc),
+                "arr_utc": _iso(f.arr_utc),
+                "aircraft": f.aircraft,
+                "aircraft_type": f.aircraft_type.value,
+                "airline": world.airline_of_aircraft.get(f.aircraft),
+                "seats": f.seats,
+                "booked": f.booked,
+                "pairing_id": pairing.pairing_id if pairing else None,
+                "captain": (pilots[Rank.CAPTAIN] or [None])[0],
+                "first_officer": (pilots[Rank.FIRST_OFFICER] or [None])[0],
+                "cabin": cabin,
+                "cancelled": f.flight_id in world.cancelled,
+                "disruptions": open_on.get(f.flight_id, []),
+            }
+        )
+    return {
+        "week": week if week is not None else [d.isoformat() for d in tools.week],
+        "airlines": [
+            {"code": a.code, "name": a.name, "color": a.color}
+            for a in (seed.airlines if seed else ())
+        ],
+        "flights": flights,
+        "unavailable": unavailable,
     }
 
 

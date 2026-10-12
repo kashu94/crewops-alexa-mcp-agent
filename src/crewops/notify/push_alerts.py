@@ -37,6 +37,11 @@ def message(record: dict[str, Any]) -> dict[str, Any] | None:
         title, body = "Plan sent back", f"{change.disruption_id} ({what}) needs another plan."
     else:
         title, body = "New on your desk", f"{change.disruption_id} ({what}) is ready for a plan."
+    from crewops.alexa.notifier import rated
+
+    level = rated(record) if change.after == "OPTIONS_READY" else None
+    if level in ("high", "medium"):
+        title = f"{level.title()} severity: {title.lower()}"
     return {
         "title": f"CrewOps: {title}",
         "body": body,

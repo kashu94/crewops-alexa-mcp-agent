@@ -144,7 +144,7 @@ function SpecialWarning({ seat, kind, cost }: { seat: Seat; kind: string; cost: 
 /** Options listed before "Show all": enough to compare, few enough to read. */
 const MAX_SHOWN = 10;
 
-const ABSENCES = new Set(["crew_unavailable", "multiple_crew_unavailable", "certification_lapse"]);
+const ABSENCES = new Set(["crew_unavailable", "multiple_crew_unavailable", "certification_lapse", "planned_leave"]);
 
 /** Passengers booked on the flights this seat leaves uncrewed. */
 function passengersProtected(seat: Seat): number {

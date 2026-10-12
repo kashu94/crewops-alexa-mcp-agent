@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from crewops.agent.breaker import MODEL_BREAKER, GuardedClient
 from crewops.agent.entities import Vocabulary
 from crewops.agent.models import Guardrail, NovaAdvisor, NovaExplainer, NovaTriage, bedrock_runtime
 from crewops.agent.pipeline import Pipeline
@@ -65,8 +66,12 @@ def build(settings: Settings, table: Any, *, models: bool = True) -> LivePipelin
     # One attempt per call and two timeouts: short calls (triage, embeddings, guardrail
     # screening) get QUICK_CALL_SECONDS, the advisor and explainer at most the response
     # budget. A late answer is replaced by the template rather than waited for.
-    quick = bedrock_runtime(settings.aws_region, QUICK_CALL_SECONDS)
-    runtime = bedrock_runtime(settings.aws_region, settings.response_budget_seconds)
+    # Both behind the process's one circuit breaker: while Bedrock is failing, answers come
+    # straight from the roster instead of each waiting out a timeout (crewops.agent.breaker).
+    quick = GuardedClient(bedrock_runtime(settings.aws_region, QUICK_CALL_SECONDS), MODEL_BREAKER)
+    runtime = GuardedClient(
+        bedrock_runtime(settings.aws_region, settings.response_budget_seconds), MODEL_BREAKER
+    )
     embed = titan_embedder(quick, settings.embedding_model_id, settings.embedding_dimensions)
     search = VectorSearch(session.client("s3vectors"), settings.vector_bucket, embed)
     tools = CrewOpsTools.load(table, search)

@@ -43,6 +43,7 @@ from crewops.domain import Rank, Role
 from crewops.domain.desks import DESKS, Desk, owning_desks
 from crewops.engine import AlreadyStarted, World, assess, find_options
 from crewops.engine.options import cabin_minimum, cabin_present
+from crewops.plans.fingerprint import fingerprint
 from crewops.store import plans as store
 from crewops.store.items import from_dynamo
 from crewops.store.reports import STATUS_OPTIONS_READY, disruptions_with_status, get_disruption
@@ -186,6 +187,8 @@ class Plans:
             "total_cost_inr": sum(a["cost_inr"] for a in assignments),
             "rosters_before": rosters_before,
         }
+        # What the approver will see, and approval re-checks, byte for byte.
+        plan["fingerprint"] = fingerprint(plan)
         warnings = self.contention(plan, world)
         plan["warnings"] = list(warnings)
         try:
@@ -247,6 +250,23 @@ class Plans:
         """Re-check against the roster as it is now; commit if nothing changed, else STALE."""
         plan = self._submitted(disruption_id, plan_id)
         self._check_approver(caller, plan)
+        # What was submitted is also in the audit trail, written in the same transaction:
+        # a plan whose fingerprint was removed, or no longer matches, is never approved.
+        recorded = next(
+            (
+                e.get("fingerprint")
+                for e in store.audit_trail(self.table, disruption_id)
+                if e.get("action") == "SUBMITTED" and e.get("plan_id") == plan_id
+            ),
+            None,
+        )
+        expected = recorded or plan.get("fingerprint")
+        if expected and (plan.get("fingerprint") != expected or fingerprint(plan) != expected):
+            raise PlanError(
+                "TAMPERED",
+                "this plan changed after it was submitted (its fingerprint no longer "
+                "matches); it cannot be approved. Ask the controller to submit it again.",
+            )
         moved = {a["crew_id"] for a in plan["assignments"] if a["crew_id"]} | {
             a["replaces"] for a in plan["assignments"] if a.get("replaces")
         }
@@ -684,4 +704,7 @@ def summary(plan: Mapping[str, Any]) -> dict[str, Any]:
         "submitted_utc": plan.get("submitted_utc"),
         "decided_by": plan.get("decided_by"),
         "decided_utc": plan.get("decided_utc"),
+        # Four-eyes evidence (crewops.plans.fingerprint).
+        "fingerprint": plan.get("fingerprint"),
+        "approval_seal": plan.get("approval_seal"),
     }

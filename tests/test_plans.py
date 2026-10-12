@@ -518,10 +518,14 @@ def test_falling_ill_after_the_trip_still_counts_for_its_cabin_minimum(table):
     }
     store_report(table, Report.from_dict(report(report_id="r-late3988", details=details)), AT)
     assert analyse_by_id(table, "r-late3988", Operation.load(table)).outcome == "stored"
+    # Nothing left to cover: recorded, on no desk, and still counted as out that day.
+    assert get_disruption(table, "r-late3988")["status"] == "CLOSED"
     # C-1970 is then out for the day: four cabin crew still fly P-2202, its minimum.
     disruption(table, "r-sick1970", "C-1970", "2026-10-13")
+    desk = get_disruption(table, "r-sick1970")["analysis"]["desk"]
+    owner = {"desk-1": ANANYA, "desk-2": ROHIT}[desk]
     plans = Plans(table)
-    plan = plans.submit(ROHIT, "r-sick1970", {"P-2202/Cabin Crew": "SHORT"}, "4 remain").plan
+    plan = plans.submit(owner, "r-sick1970", {"P-2202/Cabin Crew": "SHORT"}, "4 remain").plan
     assert plans.approve(MEERA, "r-sick1970", plan["plan_id"]).status == "COMMITTED"
 
 

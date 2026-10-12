@@ -17,6 +17,8 @@ type Answer = {
   intent: string | null;
   notes: string[];
   model_calls: number;
+  /** The model service's circuit breaker: "open" while it is paused after failures. */
+  models?: { state: string; retry_in_seconds: number };
 };
 
 type Turn = { id: number; question: string; answer?: Answer; error?: string };
@@ -428,6 +430,17 @@ export function AlexaModule({
                       </span>
                     )}
                   </div>
+                  {t.answer.models && t.answer.models.state !== "closed" && (
+                    <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2 py-1 text-xs text-amber-900 ring-1 ring-amber-200">
+                      Models paused after repeated failures: answered straight from the roster
+                      {t.answer.models.retry_in_seconds > 0 && <> (retrying in {t.answer.models.retry_in_seconds}s)</>}.
+                    </p>
+                  )}
+                  {t.answer.source === "refused" && t.answer.notes.some((n) => n.startsWith("blocked:")) && (
+                    <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-800 ring-1 ring-red-200">
+                      Refused and logged for the administrator.
+                    </p>
+                  )}
                   {t.answer.notes.length > 0 && (
                     <details className="mt-1.5 text-xs text-muted">
                       <summary className="cursor-pointer">How this was answered</summary>

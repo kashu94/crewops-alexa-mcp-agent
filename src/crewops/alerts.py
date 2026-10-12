@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Mapping
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
-from crewops.domain import DataError, Report
+from crewops.analysis.severity import severity, spoken_level
+from crewops.domain import DataError, Report, ReportType
 from crewops.domain.desks import DESKS, owning_desks
 
 ROOM = "room"
@@ -126,6 +127,14 @@ def brief(
         text = f"{happened} was closed" + (f": {reason}." if reason else ".")
     else:
         title, text = action.replace("_", " ").title(), f"{happened}: {action.lower()}."
+    rated = (
+        severity(analysis, report.reported_utc.date().isoformat(), datetime.now(UTC).date())
+        if analysis
+        else None
+    )
+    if rated and action in ("OPTIONS_READY", "ESCALATED") and rated["level"] != "low":
+        # Said first, so a listener knows at once whether to drop what they are doing.
+        text = f"{spoken_level(rated['level'])}. {text}"
     at = str(latest.get("at") or "")
     return {
         "id": f"{item['disruption_id']}:{action}:{at}",
@@ -139,6 +148,7 @@ def brief(
         "desk": {"desk_id": desk.desk_id, "controller": desk.controller} if desk else None,
         # Every desk it belongs to: an older record touching two desks' aircraft has two.
         "desks": [d.desk_id for d in desks],
+        "severity": rated["level"] if rated else None,
     }
 
 
@@ -190,6 +200,8 @@ def alerts(
             report = Report.from_dict(from_dynamo(item["report"]))
         except (DataError, KeyError, TypeError):
             continue  # unreadable: the console shows it, the speaker skips it
+        if report.report_type is ReportType.PLANNED_LEAVE:
+            continue  # re-crewed weeks ahead: nothing for a speaker to announce
         trail = audit(str(item["disruption_id"]))
         latest = max(trail, key=_order) if trail else {}
         analysis = from_dynamo(item.get("analysis") or {})

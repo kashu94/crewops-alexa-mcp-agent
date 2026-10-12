@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowUpRight, CheckCheck, Fingerprint, ShieldCheck, User
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { FourEyes } from "@/components/four-eyes";
 import { useLiveListener } from "@/components/live";
 import { useMe } from "@/components/me";
 import { Button, Empty, Mono, Notice, Panel, rupees, Spinner } from "@/components/ui";
@@ -46,12 +47,17 @@ function Decision({ item, onDone }: { item: QueueItem; onDone: (text: string, ok
           <div className="flex flex-wrap items-center gap-2">
             <Mono className="text-sm font-semibold">{item.plan_id}</Mono>
             <span className="text-xs text-muted">for</span>
-            <Link href={`/console/${encodeURIComponent(item.disruption_id)}`} className="flex items-center gap-0.5 text-sm text-accent hover:underline">
+            <Link
+              href={`/console/${encodeURIComponent(item.disruption_id)}`}
+              className="flex items-center gap-0.5 text-sm text-accent hover:underline"
+            >
               <Mono>{item.disruption_id}</Mono> <ArrowUpRight size={12} />
             </Link>
           </div>
           <p className="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-muted">
-            <span className="flex items-center gap-1"><UserRound size={12} /> {item.submitted_by}</span>
+            <span className="flex items-center gap-1">
+              <UserRound size={12} /> {item.submitted_by}
+            </span>
             {item.desk && <Mono>{item.desk}</Mono>}
           </p>
         </div>
@@ -61,12 +67,23 @@ function Decision({ item, onDone }: { item: QueueItem; onDone: (text: string, ok
         </div>
       </div>
 
+      <FourEyes
+        className="mt-3"
+        fingerprint={item.fingerprint}
+        submittedBy={item.submitted_by}
+        submittedAt={item.submitted_utc}
+      />
+
       <ul className="mt-3 flex flex-col gap-1.5">
         {item.assignments?.map((a) => (
-          <li key={a} className="rounded-lg bg-sunken px-3 py-2 font-mono text-xs text-slate-700">{a}</li>
+          <li key={a} className="rounded-lg bg-sunken px-3 py-2 font-mono text-xs text-slate-700">
+            {a}
+          </li>
         ))}
         {item.uncovered?.map((u) => (
-          <li key={u} className="rounded-lg bg-critical-soft px-3 py-2 text-xs text-red-900">Uncovered: {u}</li>
+          <li key={u} className="rounded-lg bg-critical-soft px-3 py-2 text-xs text-red-900">
+            Uncovered: {u}
+          </li>
         ))}
       </ul>
       {item.warnings && item.warnings.length > 0 && (
@@ -93,17 +110,22 @@ function Decision({ item, onDone }: { item: QueueItem; onDone: (text: string, ok
               <Button type="button" tone="danger" disabled={busy || !reason.trim()} onClick={() => act("reject_plan")}>
                 Send back
               </Button>
-              <Button type="button" tone="ghost" onClick={() => setRejecting(false)}>Cancel</Button>
+              <Button type="button" tone="ghost" onClick={() => setRejecting(false)}>
+                Cancel
+              </Button>
             </div>
           ) : confirming ? (
             <div className="flex flex-wrap items-center gap-2">
               <span className="flex items-center gap-1.5 text-xs font-medium text-slate-700">
-                <ShieldCheck size={14} className="text-accent" /> Legality is re-checked and the roster changes in one step.
+                <ShieldCheck size={14} className="text-accent" /> Legality and the fingerprint are re-checked; the
+                roster changes and your approval is sealed to this plan in one step.
               </span>
               <Button type="button" tone="accent" disabled={busy} onClick={() => act("approve_plan")}>
                 {busy ? <Spinner /> : <CheckCheck size={14} />} Confirm and commit
               </Button>
-              <Button type="button" tone="ghost" onClick={() => setConfirming(false)}>Cancel</Button>
+              <Button type="button" tone="ghost" onClick={() => setConfirming(false)}>
+                Cancel
+              </Button>
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
@@ -154,7 +176,9 @@ export default function Approvals() {
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
       <Panel bodyClassName="p-3">
         {!items ? (
-          <div className="p-4 text-muted"><Spinner /></div>
+          <div className="p-4 text-muted">
+            <Spinner />
+          </div>
         ) : items.length === 0 ? (
           <Empty icon={<ShieldCheck size={24} className="text-emerald-500" />}>Nothing waits for a decision.</Empty>
         ) : (
