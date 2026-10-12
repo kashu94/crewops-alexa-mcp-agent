@@ -216,6 +216,29 @@ LIVE_OPTION_KEYS = (
 )
 
 
+def re_crewed(tools: Any, seat: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Whether this seat was filled since the analysis, by an approved plan for this or
+    another disruption (the same person out on another day of the same trip): the person
+    out no longer holds it. Then it needs no cover, and offering options would mislead.
+    Says who holds the seat now, or that the trip was cancelled. None while it is open."""
+    pairing = tools.world.pairings.get(seat.get("pairing_id"))
+    out, role = seat.get("crew_out"), seat.get("role")
+    if pairing is None or not out or not role:
+        return None
+    holders = [s.crew_id for s in pairing.crew if s.role.value == role]
+    if out in holders:
+        return None
+    if not pairing.crew:
+        return {"cancelled": True, "holders": []}
+    return {
+        "cancelled": False,
+        "holders": [
+            {"crew_id": c, "name": (tools.world.crew.get(c) and tools.world.crew[c].name)}
+            for c in holders
+        ],
+    }
+
+
 def live_options(tools: Any, seat: Mapping[str, Any]) -> dict[str, Any] | None:
     """The engine's option search for a seat as things stand now (current rules and
     roster): every legal option, the picks by policy, the best of each strategy, the
@@ -268,12 +291,18 @@ def reserve_capacity(tools: Any, role: str, dates: Iterable[str]) -> list[dict[s
 
 
 def contention(
-    tools: Any, table: Any, disruption_id: str, wants: list[tuple[set[str], set[str]]]
+    tools: Any,
+    table: Any,
+    disruption_id: str,
+    wants: list[tuple[set[str], set[str]]],
+    mine: set[tuple[str, str, str]] | frozenset[tuple[str, str, str]] = frozenset(),
 ) -> dict[str, list[dict[str, Any]]]:
     """For each crew id, the other open disruptions that rank them as an option, and the
     submitted plans that already use them, each with its desk. ``wants`` pairs each seat's
     option crew with that seat's dates, so a person is flagged only against trips on the
-    same or adjacent days as the seat they could cover."""
+    same or adjacent days as the seat they could cover. ``mine`` is this disruption's seats
+    (trip, role, crew member out): another disruption needing the very same seat does not
+    compete for its cover, it needs that same cover (see ``same_seat``)."""
     found: dict[str, list[dict[str, Any]]] = defaultdict(list)
     wants = [(ids, dates) for ids, dates in wants if ids and dates]
     if not wants:
@@ -300,6 +329,8 @@ def contention(
             seats = other_analysis.get("seats", [])
             desks = desks_of_disruption(tools, other_analysis)
             for s in seats:
+                if (s.get("pairing_id"), s.get("role"), s.get("crew_out")) in mine:
+                    continue  # the same seat, not a rival for its cover
                 their_dates = (s.get("impact") or {}).get("affected_dates") or []
                 for o in s.get("options", []):
                     if o.get("crew_id") and clashes(o["crew_id"], their_dates):
@@ -321,6 +352,8 @@ def contention(
         if plan["disruption_id"] == disruption_id:
             continue
         for a in plan.get("assignments", []):
+            if (a.get("pairing_id"), a.get("role"), a.get("replaces")) in mine:
+                continue  # a plan already covering this very seat
             pairing = next(iter(_rows(tools, "pairings", {"pairing_id": a["pairing_id"]})), None)
             if a.get("crew_id") and pairing and clashes(a["crew_id"], pairing["dates"]):
                 add(
@@ -342,3 +375,33 @@ def contention(
                     },
                 )
     return dict(found)
+
+
+def same_seat(
+    tools: Any, table: Any, disruption_id: str, mine: set[tuple[str, str, str]]
+) -> list[dict[str, Any]]:
+    """Other open disruptions needing one of these very seats (the same person out on
+    another day of the same trip): one cover fills them all."""
+    if not mine:
+        return []
+    out = []
+    for status in OPEN:
+        for item in disruptions_with_status(table, status):
+            if item["disruption_id"] == disruption_id:
+                continue
+            analysis = from_dynamo(item.get("analysis") or {})
+            shared = sorted(
+                f"{s['pairing_id']} {s['role']}"
+                for s in analysis.get("seats", [])
+                if (s.get("pairing_id"), s.get("role"), s.get("crew_out")) in mine
+            )
+            if shared:
+                out.append(
+                    {
+                        "disruption_id": item["disruption_id"],
+                        "status": item["status"],
+                        "seats": shared,
+                        "desks": desks_of_disruption(tools, analysis),
+                    }
+                )
+    return out

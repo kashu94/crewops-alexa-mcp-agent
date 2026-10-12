@@ -215,11 +215,74 @@ the records whose status changed. Each change goes to two places:
   [Who is told](#who-is-told)). An admin subscribes addresses to a team exactly as to a
   role: the SNS filter is the team's name.
 
+- **Escalation.** When a change leaves a disruption waiting on a desk (REPORTED or SUBMITTED
+  to OPTIONS_READY), the notifier creates a one-time EventBridge Scheduler schedule
+  (`at(...)`, deleted after it runs) for `CREWOPS_ESCALATE_AFTER_MINUTES` later (10). The
+  escalation Lambda it runs looks again: still OPTIONS_READY with no audit event since the
+  clock started means untouched, so it emails the `duty_supervisor` audience and writes an
+  ESCALATED audit event, which the speakers announce. Anything else (a plan submitted, the
+  disruption closed, an earlier escalation) means handled, and it does nothing. No timer
+  exists while nothing happens. The scheduler's role may only invoke that one function, and
+  the notifier may only create schedules named `<prefix>-esc-*`.
+- **Desktop alerts (web push).** Controllers and approvers can turn them on per browser. The
+  service worker's push subscription (endpoint and keys) is stored at `PUSH /
+  <endpoint hash>`, owned by whoever last turned alerts on in that browser (so a shared desk
+  computer never gets the previous person's alerts), five browsers per person, and only endpoints of the browser
+  push services are accepted, so the notifier never posts to an address a user made up. The
+  notifier sends to the same people as the Alexa chime (the desk's controller, or every
+  approver), each message encrypted for that browser (RFC 8291, aes128gcm) and signed with the
+  app's VAPID key (RFC 8292, ES256), whose private half is a SecureString in Parameter Store.
+  The message names the disruption and links to it, never a crew member. A browser the push
+  service reports gone, or refuses because the keys were replaced, is forgotten; signing out
+  unsubscribes the browser. The notifier sends side by side and gives up after 20 s, so a slow
+  push service cannot run it out of time. Encryption needs
+  the cryptography library, so the notifier runs the MCP server's package when it is built;
+  without it, the notifier runs the plain source and desktop alerts stay off.
+
 Events and alerts carry the disruption id, its report type and the statuses; team alerts
 also carry the flights, gates, stations and times the team acts on. None carries a crew
 member's name or id. Accounts still hold no email address: an alert address belongs to a
 role or a team, not to a person's login. A crew member is told in CrewOps itself: a lapsing
 certificate shows as a notice on their own page.
+
+### Spoken alerts: the desk speaker, "welcome back" and Alexa
+
+An alert is a disruption's latest audit event (reported, analysed, submitted, sent back,
+approved, closed) in one or two sentences built from the stored analysis, with ids, dates
+and amounts written for a voice (`crewops.alerts`). Three listeners use the same alerts:
+
+- **The desk speaker** (`/speaker`), a device rather than a person: its own Cognito account,
+  with a random password of its own, holds the speaker role. Of the data tools it can call
+  only `speaker_feed`; it cannot read records, ask questions or change anything. The web
+  app's server keeps that sign-in, so no user's sign-in or sign-out touches it. A speaker
+  serves one desk, approvals, or the whole room. A hosted (production) app hears alerts only
+  on screens paired once with a code, through a cookie signed with a server-side secret;
+  request headers are never trusted for this. The feed reads every open disruption and only
+  the latest resolved ones, and one read serves all screens for a few seconds. It chimes and
+  turns amber for an unheard alert, announces it, and repeats it up to three times in all,
+  15 s after each announcement ends, until the disruption leaves the desk's list or someone
+  acknowledges it; alerts take turns, oldest first. A report the analysis could not handle has no desk yet, so only the
+  whole-room speaker announces it.
+- **"Welcome back"**: fetched once per sign-in, it lists, and can read, what reached a
+  controller's desk or approvals since they last had CrewOps open (`USER#name / LAST_SEEN`,
+  refreshed every few minutes by an open, visible console).
+- **The Alexa skill**: linked through Cognito account linking (a second app client, the
+  authorization-code flow, Alexa's redirect URLs), so the skill acts as the person with their
+  role's access. Its HTTPS endpoint verifies every request as Alexa's; a certificate URL
+  with a query is refused and only a few chains are cached, so the public URL cannot be used
+  to make it fetch at will. When a disruption is
+  analysed or sent back to a desk, or a plan waits for approval, the notifier sends an
+  `AMAZON.MessageAlert.Activated` event to each linked person who allowed notifications, at
+  their account's Alexa API endpoint, with the skill's Login with Amazon credentials from
+  Parameter Store. Whose Echo chimes follows each person's current profile (role and desk),
+  not what they were when they last spoke to the skill. A notification cannot carry words,
+  so the notifier also sends the skill a message (Skill Messaging API, LWA scope
+  `alexa:skill_messaging`) with the alert in words; the skill, woken by that verified
+  request, sets an Alexa reminder five seconds ahead with them (the Reminders API, with the
+  request's own access token), and the Echo reads it out. Without the reminders permission
+  Alexa refuses the reminder and only the chime remains. A failed notification is logged, not retried: the console and email carry
+  the same news. The notifier sends these itself because a stream should have no more than
+  two readers, and the analysis and the notifier already read it.
 
 ## Disruption analysis
 

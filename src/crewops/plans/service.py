@@ -480,7 +480,13 @@ class Plans:
         if pid not in world.pairings or {"crew_id": out, "role": seat["role"]} not in _roster(
             world, pid
         ):
-            return f"{out} is no longer rostered there: the analysis is out of date"
+            now = (
+                [s["crew_id"] for s in _roster(world, pid) if s["role"] == seat["role"]]
+                if pid in world.pairings
+                else []
+            )
+            held = f" ({', '.join(now)} holds it now)" if now else ""
+            return f"already re-crewed: {out} is no longer on {pid} as {seat['role']}{held}"
         return None
 
     @staticmethod

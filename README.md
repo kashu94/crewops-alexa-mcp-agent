@@ -34,6 +34,10 @@ anyone hears it.
   hours later: a plan to review for a controller, a plan to sign off for an approver. Within
   a conversation, a reply such as "Captain" or "is she legal?" is read with the question
   before it.
+- **Tells the desk, even when nobody is signed in.** A desk speaker chimes and glows amber
+  when a disruption reaches its desk and reads the brief on request, under its own device
+  account. A controller signing in hears what came while they were away, and a linked Echo
+  (or the Alexa app) gets an Alexa notification from the CrewOps skill.
 - **Four-eyes on every crew change.** One person reports, a controller picks a plan, a different
   person approves it, and only then is it committed in one transaction. Role checks live in
   code, never in a prompt.
@@ -49,6 +53,7 @@ anyone hears it.
 | **Auditor** | Read-only access to every disruption, decision and audit record |
 | **Admin** | Tighten rule thresholds, read the system activity log, manage alert addresses |
 | **Super admin** | Everything an admin does, and relax a rule threshold back towards regulation (an admin may only tighten one) |
+| **Speaker** | A device, not a person: hears the alert briefs for the desk or area its screen is set to; cannot read records, ask questions or change anything |
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#roles-and-approvals).
 
@@ -91,6 +96,8 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why each piece was ch
 | Amazon S3 Vectors | Hybrid search over rules, example questions and past scenarios |
 | Amazon SQS + AWS Lambda | Real-time disruption ingestion and background agents |
 | Amazon SNS | Optional email alerts, assigned to roles by the admin |
+| Amazon EventBridge Scheduler | One-time escalation checks for untouched disruptions |
+| AWS Systems Manager Parameter Store | The Alexa skill's credentials and the web push keys |
 | AWS AppSync Events | Live updates to the console |
 | Amazon Cognito | Sign-in, with one group per role |
 | Amazon Polly | Spoken answers in the simulator |
@@ -116,14 +123,19 @@ src/crewops/
   auth/                 Sign-in: the team, token checks, claims to caller, account sync
   plans/                Plans and approvals, with the four-eyes rules
   mcp/                  The MCP server for AgentCore, its package builder and a client
-  notify/               Live console events and admin-managed email alerts
-web/                    The web app (Next.js): Alexa+ simulator, console, crew view, admin
+  notify/               Live console events, admin-managed email alerts, escalation and
+                        desktop alerts (web push)
+  alerts.py             Spoken alerts for the desk speaker, "welcome back" and Alexa
+  alexa/                The Alexa skill's endpoint, request checks and notifications
+alexa/                  The Alexa skill package (manifest, interaction models) and the
+                        account-linking template
+web/                    The web app (Next.js): Alexa+ simulator, console, desk speaker,
+                        crew view, admin
 infra/                  AWS CDK app: one stack per part of the system
 tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
 ```
 
-The Alexa skill arrives at the top level in a later step.
 
 ## Getting started
 
@@ -277,9 +289,9 @@ stage keeps its table, with point-in-time recovery and deletion protection.
 Sign-in uses a Cognito user pool with one group per role (the `CrewOps-<stage>-Auth` stack).
 Nobody signs themselves up, and no email or phone is stored. The team is defined in
 `data/team/demo_team.json`: three controllers (one per desk), three approvers, two
-reporters, four crew members, an auditor, an admin and a super admin. Usernames are first
-name and surname (`ananya.iyer`); a crew member's starts with their crew number
-(`c1042.nair`). To create or update the accounts after deploying the stack:
+reporters, four crew members, an auditor, an admin, a super admin, and the ops-room speaker
+device (`ops.speaker`). Usernames are first name and surname (`ananya.iyer`); a crew
+member's starts with their crew number (`c1042.nair`). To create or update the accounts after deploying the stack:
 
 ```bash
 uv run python -m crewops.auth.provision            # what would change
@@ -372,6 +384,27 @@ uv run python -m crewops.mcp.client --as priya.desai add_alert_address \
 uv run python -m crewops.mcp.client --as priya.desai alert_addresses
 ```
 
+**Escalation.** When a disruption reaches a desk (analysed, or its plan sent back), the
+notifier creates a one-time EventBridge Scheduler schedule for 10 minutes later
+(`CREWOPS_ESCALATE_AFTER_MINUTES`), which deletes itself after it runs. If by then nobody has
+submitted a plan or closed it, the addresses subscribed to the **duty supervisor** audience
+get an email, and the desk and room speakers announce "Escalated". If anything was done, nothing
+happens. Subscribe an address the same way, with `"role": "duty_supervisor"`.
+
+**Desktop alerts (web push).** A controller or approver can click the bell in the web app's
+header to get a notification from the browser when something reaches their desk or waits for
+approval, even with CrewOps closed. Clicking the notification opens the disruption. The
+browser's push service (Google, Microsoft or Mozilla) delivers it free of charge; each message
+is encrypted for that one browser and signed with the app's key. Set up once, after the MCP
+package is built and the Notify stack deployed:
+
+```bash
+uv run python -m crewops.notify.webpush keys   # the app's key pair, kept in Parameter Store
+uv run python -m crewops.web_env               # writes the public key for the web app
+```
+
+Signing out turns desktop alerts off in that browser. Without the keys the bell does not show.
+
 Alerts and events name the disruption, its status, and for a team the flights, gates and
 times it acts on, never a crew member. A crew member whose certificate lapses is told on
 their own CrewOps page.
@@ -405,6 +438,91 @@ The browser calls no AWS API except the live-events socket: the app's server for
 every action to the MCP server as the signed-in user, so every role rule is the server's. Voice input uses the browser's
 speech recognition (Chrome or Edge); elsewhere, type. Hosting on AWS comes in the next
 step.
+
+### The desk speaker and "welcome back"
+
+`/speaker` is a desk or ops-room speaker. It belongs to a place, not a person: nobody signs
+in on it, and no one's sign-in or sign-out affects it. The app's server signs in as the
+speaker device (the speaker role, which hears only alert briefs) and the page polls its
+feed. Set it to a desk (`/speaker?for=desk-2`), `approvals` or the whole `room`, and tap "Turn
+on the speaker" once (browsers allow sound only after a tap). A new alert chimes, turns the
+ring amber and is announced in the Polly voice, then repeated as a reminder 15 seconds after
+each announcement ends, three times at most. It stops as soon as the disruption is dealt with
+(a plan submitted, resolved or closed takes it off the desk's list) or someone taps "Got it"
+or asks "What are my notifications?". Several alerts take turns, oldest first. After the
+third announcement the ring stays amber until someone listens. Each alert is built from the disruption's latest event and its analysis, never from
+a model.
+
+```bash
+uv run python -m crewops.web_env --speaker   # after provisioning the team
+```
+
+It gives `ops.speaker` a new random password of its own, set on the account (never the
+team's), and a random pairing code it prints; both go into `web/.env.local`. Run with
+`npm run dev`, a speaker needs no pairing. A hosted app (a production build) hears alerts
+only on screens paired once with that code; the pairing cookie is signed with a server-side
+secret, so it cannot be guessed. Re-running the command without `--speaker` keeps both;
+with it, both are replaced.
+
+When a controller or approver signs in, they see, and can hear, what came to their desk or
+to approvals since they last had CrewOps open (an open console says so every few minutes);
+nothing on a first sign-in, and a second tab replays nothing.
+
+### The Alexa skill
+
+The CrewOps skill (`alexa/skill-package`) answers "Alexa, ask crew ops what's waiting" and
+any crew-control question ("ask crew ops tell me who covers P 2291") as the linked person,
+with their role's access. When a disruption reaches a linked controller's desk, or a plan
+waits for approval, their Echo chimes and the Alexa app shows a notification
+(`AMAZON.MessageAlert.Activated`). A few seconds later the Echo says what happened: a
+notification cannot carry words, so the notifier also wakes the skill (Skill Messaging API)
+and the skill sets an Alexa reminder with the alert's words, which the Echo reads out when it
+goes off. Asking "what's waiting" gives the latest updates at any time.
+
+Alexa cannot trigger Lambda in ap-southeast-2, so the skill uses an HTTPS endpoint (a Lambda
+function URL) that checks every request's Alexa signature, certificate, timestamp and skill
+id. Notifications go out from the existing notifier on the table's stream, to the Alexa API
+endpoint each person's account belongs to.
+
+Setting it up, once:
+
+1. In the [Alexa developer console](https://developer.amazon.com/alexa/console/ask), signed in
+   with the Amazon account your Alexa app uses, create a custom skill named CrewOps (English
+   (India), plus English (US) and (Australia) if wanted) with your own hosting. Note the
+   skill id, and on Build > Account Linking the three redirect URLs.
+2. In `.env`: `CREWOPS_ALEXA_SKILL_ID=amzn1.ask.skill...` and
+   `CREWOPS_ALEXA_REDIRECT_URLS=` the redirect URLs, comma-separated. Build the package and
+   deploy:
+
+   ```bash
+   uv run python -m crewops.mcp.package
+   npx --yes aws-cdk@2.1144.0 deploy CrewOps-dev-Auth CrewOps-dev-Notify CrewOps-dev-Alexa --profile crewops
+   ```
+
+3. Copy `alexa/account-linking.template.json` to `alexa/account-linking.json` (git-ignored)
+   and fill it from the Auth stack's outputs `AlexaAuthorizeUri`, `AlexaAccessTokenUri` and
+   `AlexaClientId`, and the Alexa client's secret
+   (`aws cognito-idp describe-user-pool-client --user-pool-id <pool> --client-id <id>`). Enter
+   the same values on the console's Account Linking page (authorization code grant, HTTP
+   Basic, scopes `openid` and `profile`).
+4. Put the Alexa stack's `SkillEndpointUrl` in `alexa/skill-package/skill.json` (both
+   `REPLACE_WITH_SkillEndpointUrl`), and import the manifest and the interaction models in
+   the console (or deploy them with the ASK CLI). The endpoint uses the "wildcard
+   certificate" option.
+5. On the skill's Permissions page, switch on **Alexa Notifications** and **Reminders**, note
+   the Login with Amazon client id and secret (Alexa Skill Messaging), and store them where
+   the notifier reads them, never in a file:
+
+   ```bash
+   aws ssm put-parameter --name /crewops-dev/alexa/client-id --type String --value <id> --profile crewops
+   aws ssm put-parameter --name /crewops-dev/alexa/client-secret --type SecureString --value <secret> --profile crewops
+   ```
+
+6. In the Alexa app: Skills > Your Skills > Dev > CrewOps: enable it, link your CrewOps
+   account (sign in as a controller, for example `rohit.malhotra`), and allow notifications
+   and reminders (without reminders the Echo only chimes).
+   Then "Alexa, open crew ops". Notifications are sent to the development stage
+   (`CREWOPS_ALEXA_EVENTS_STAGE=development`), which reaches the developer's own devices.
 
 ### Asking a question
 

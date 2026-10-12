@@ -47,6 +47,8 @@ class Role(StrEnum):
     AUDITOR = "auditor"
     ADMIN = "admin"
     SUPER_ADMIN = "super_admin"
+    SPEAKER = "speaker"
+    """A desk or ops-room speaker: a device, not a person. It only hears alert briefs."""
 
 
 class ReportType(StrEnum):

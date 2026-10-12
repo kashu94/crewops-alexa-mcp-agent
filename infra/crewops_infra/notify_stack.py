@@ -20,6 +20,7 @@ from pathlib import Path
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_appsync as appsync
 from aws_cdk import aws_dynamodb as dynamodb
+from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_lambda_event_sources as sources
 from aws_cdk import aws_logs as logs
@@ -47,6 +48,7 @@ class NotifyStack(Stack):
         settings: Settings,
         table: dynamodb.ITableV2,
         auth: AuthStack,
+        package: Path | None = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -60,7 +62,7 @@ class NotifyStack(Stack):
         )
 
         user_pool = appsync.AppSyncAuthorizationType.USER_POOL
-        iam = appsync.AppSyncAuthorizationType.IAM
+        iam_auth = appsync.AppSyncAuthorizationType.IAM
         self.events = appsync.EventApi(
             self,
             "ConsoleEvents",
@@ -74,10 +76,10 @@ class NotifyStack(Stack):
                             app_id_client_regex=auth.client.user_pool_client_id,
                         ),
                     ),
-                    appsync.AppSyncAuthProvider(authorization_type=iam),
+                    appsync.AppSyncAuthProvider(authorization_type=iam_auth),
                 ],
-                connection_auth_mode_types=[user_pool, iam],
-                default_publish_auth_mode_types=[iam],
+                connection_auth_mode_types=[user_pool, iam_auth],
+                default_publish_auth_mode_types=[iam_auth],
                 default_subscribe_auth_mode_types=[user_pool],
             ),
         )
@@ -102,13 +104,17 @@ class NotifyStack(Stack):
             runtime=lambda_.Runtime.PYTHON_3_12,
             architecture=lambda_.Architecture.ARM_64,
             handler="crewops.notify.stream_handler.handler",
-            code=_code(),
+            # With the MCP package built, the notifier runs it (its cryptography library
+            # encrypts desktop alerts); without it, the plain source, and no desktop alerts.
+            code=lambda_.Code.from_asset(str(package)) if package else _code(),
             memory_size=256,
-            timeout=Duration.seconds(30),
+            # Room for email, Alexa and desktop alerts; each stops sending well before this.
+            timeout=Duration.seconds(60),
             environment={
                 "CREWOPS_STAGE": settings.stage,
                 "CREWOPS_ALERTS_TOPIC_ARN": self.topic.topic_arn,
                 "CREWOPS_EVENTS_HTTP_DOMAIN": self.events.http_dns,
+                **({"CREWOPS_PUSH_ENABLED": "1"} if package else {}),
             },
             log_group=logs.LogGroup(
                 self,
@@ -119,6 +125,92 @@ class NotifyStack(Stack):
         )
         self.topic.grant_publish(self.notifier)
         self.events.grant_publish(self.notifier)
+
+        # Escalation (crewops.notify.escalation): when a disruption reaches a desk the
+        # notifier creates a one-time schedule; when it fires, this checks whether the
+        # disruption is still untouched and, if so, emails the duty supervisor.
+        self.escalation = lambda_.Function(
+            self,
+            "Escalation",
+            description="Escalates a disruption left untouched on a desk.",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            architecture=lambda_.Architecture.ARM_64,
+            handler="crewops.notify.escalation.handler",
+            code=_code(),
+            memory_size=256,
+            timeout=Duration.seconds(30),
+            environment={
+                "CREWOPS_STAGE": settings.stage,
+                "CREWOPS_ALERTS_TOPIC_ARN": self.topic.topic_arn,
+                "CREWOPS_ESCALATE_AFTER_MINUTES": str(settings.escalate_after_minutes),
+            },
+            log_group=logs.LogGroup(
+                self,
+                "EscalationLogs",
+                retention=logs.RetentionDays.ONE_MONTH,
+                removal_policy=RemovalPolicy.DESTROY,
+            ),
+        )
+        table.grant(self.escalation, "dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem")
+        self.topic.grant_publish(self.escalation)
+        scheduler_role = iam.Role(
+            self,
+            "EscalationSchedulerRole",
+            assumed_by=iam.ServicePrincipal(
+                "scheduler.amazonaws.com",
+                conditions={"StringEquals": {"aws:SourceAccount": self.account}},
+            ),
+            description="Lets EventBridge Scheduler run the escalation check, and nothing else.",
+        )
+        self.escalation.grant_invoke(scheduler_role)
+        self.notifier.add_environment(
+            "CREWOPS_ESCALATION_FUNCTION_ARN", self.escalation.function_arn
+        )
+        self.notifier.add_environment("CREWOPS_ESCALATION_ROLE_ARN", scheduler_role.role_arn)
+        self.notifier.add_environment(
+            "CREWOPS_ESCALATE_AFTER_MINUTES", str(settings.escalate_after_minutes)
+        )
+        self.notifier.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["scheduler:CreateSchedule"],
+                resources=[
+                    f"arn:aws:scheduler:{self.region}:{self.account}:schedule/default/"
+                    f"{settings.prefix}-esc-*"
+                ],
+            )
+        )
+        self.notifier.add_to_role_policy(
+            iam.PolicyStatement(actions=["iam:PassRole"], resources=[scheduler_role.role_arn])
+        )
+        if settings.alexa_skill_id:
+            # Linked Echos chime for their desk (crewops.alexa.notifier): read who is linked,
+            # and the skill's Login with Amazon credentials, nothing else.
+            self.notifier.add_environment("CREWOPS_ALEXA_SKILL_ID", settings.alexa_skill_id)
+            self.notifier.add_environment("CREWOPS_ALEXA_EVENTS_STAGE", settings.alexa_events_stage)
+            # GetItem: each person's current role and desk (their profile).
+            table.grant(self.notifier, "dynamodb:Query", "dynamodb:GetItem")
+            self.notifier.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=["ssm:GetParameter"],
+                    resources=[
+                        f"arn:aws:ssm:{self.region}:{self.account}:parameter"
+                        f"{settings.alexa_parameter_prefix}/*"
+                    ],
+                )
+            )
+        if package:
+            # Desktop alerts (crewops.notify.push_alerts): read the browsers subscribed and
+            # forget the ones gone, and read the app's push keys.
+            table.grant(self.notifier, "dynamodb:Query", "dynamodb:GetItem", "dynamodb:DeleteItem")
+            self.notifier.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=["ssm:GetParameter"],
+                    resources=[
+                        f"arn:aws:ssm:{self.region}:{self.account}:parameter"
+                        f"{settings.push_parameter_prefix}/*"
+                    ],
+                )
+            )
         self.notifier.add_event_source(
             sources.DynamoEventSource(
                 table,

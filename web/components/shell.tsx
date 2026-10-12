@@ -8,10 +8,12 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { signOut } from "@/lib/client";
 import { homeFor, viewsFor } from "@/lib/roles";
 
+import { DesktopAlerts, forgetDesktopAlerts } from "./desktop-alerts";
 import { GuideButton } from "./guide";
 import { LiveProvider, useLive } from "./live";
 import { useMe } from "./me";
 import { cx, Mono, Status } from "./ui";
+import { WelcomeBack } from "./welcome";
 
 const STAFF = ["controller", "approver", "auditor", "admin", "super_admin"];
 
@@ -24,6 +26,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <Banner />
         <main className="mx-auto w-full max-w-[1500px] flex-1 px-4 py-5 sm:px-6">{children}</main>
         <AlexaButton />
+        <WelcomeBack />
       </div>
     </LiveProvider>
   );
@@ -76,9 +79,7 @@ function TopBar() {
             <ChevronDown size={14} className={cx("transition", open && "rotate-180")} />
           </button>
           {open && (
-            <ul
-              className="animate-rise absolute left-0 top-full z-40 mt-2 w-72 overflow-hidden rounded-xl border border-line bg-surface p-1 shadow-xl"
-            >
+            <ul className="animate-rise absolute left-0 top-full z-40 mt-2 w-72 overflow-hidden rounded-xl border border-line bg-surface p-1 shadow-xl">
               {views.map((v) => (
                 <li key={v.href}>
                   <button
@@ -112,24 +113,38 @@ function TopBar() {
             >
               <span className="relative flex h-2 w-2">
                 {state === "live" && <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400" />}
-                <span className={cx("relative h-2 w-2 rounded-full", state === "live" ? "bg-emerald-500" : "bg-slate-400")} />
+                <span
+                  className={cx("relative h-2 w-2 rounded-full", state === "live" ? "bg-emerald-500" : "bg-slate-400")}
+                />
               </span>
               {state === "live" ? "Live" : state === "connecting" ? "Connecting" : "Reconnecting"}
             </span>
           )}
           <GuideButton />
+          {(me.roles.includes("controller") || me.roles.includes("approver")) && <DesktopAlerts />}
           <span className="hidden flex-col items-end leading-tight md:flex">
             <span className="font-medium">{me.user_id}</span>
             <span className="text-[11px] text-muted">
               {me.roles.join(", ").replace(/_/g, " ")}
-              {me.desk && <> · <Mono>{me.desk}</Mono></>}
-              {me.crew_id && <> · <Mono>{me.crew_id}</Mono></>}
+              {me.desk && (
+                <>
+                  {" "}
+                  · <Mono>{me.desk}</Mono>
+                </>
+              )}
+              {me.crew_id && (
+                <>
+                  {" "}
+                  · <Mono>{me.crew_id}</Mono>
+                </>
+              )}
             </span>
           </span>
           <button
             className="rounded-lg p-2 text-muted transition hover:bg-sunken hover:text-foreground"
             title="Sign out"
             onClick={async () => {
+              await forgetDesktopAlerts().catch(() => undefined);
               await signOut().catch(() => undefined);
               router.replace("/login");
             }}
@@ -185,14 +200,16 @@ function Banner() {
       className={cx(
         // Floats over the page, so it never pushes the workspace into scrolling.
         "animate-drop fixed inset-x-0 top-[57px] z-20 border-b shadow-sm",
-        critical ? "border-red-200 bg-critical-soft" : waiting ? "border-amber-200 bg-pending-soft" : "border-sky-200 bg-accent-soft",
+        critical
+          ? "border-red-200 bg-critical-soft"
+          : waiting
+            ? "border-amber-200 bg-pending-soft"
+            : "border-sky-200 bg-accent-soft",
       )}
     >
       <div className="mx-auto flex max-w-[1500px] items-center gap-3 px-4 py-2 text-sm sm:px-6">
         {critical ? <Radio size={16} className="text-critical" /> : <Activity size={16} className="text-accent" />}
-        <span className="font-medium">
-          {critical ? "New disruption" : "Status change"}:
-        </span>
+        <span className="font-medium">{critical ? "New disruption" : "Status change"}:</span>
         <Link href={`/console/${encodeURIComponent(shown.disruption_id)}`} className="hover:underline">
           <Mono>{shown.disruption_id}</Mono>
         </Link>

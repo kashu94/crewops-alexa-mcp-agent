@@ -19,6 +19,7 @@ import { tool } from "@/lib/client";
 import { byRule, type Legality, type Option, type Rival, type Seat, type Unavailable } from "@/lib/types";
 
 import { Info } from "./info";
+import { ReCrewed } from "./re-crewed";
 import { clock, cx, day, Mono, rupees, Spinner } from "./ui";
 
 const STRATEGY: Record<string, string> = {
@@ -318,7 +319,9 @@ export function SeatOptions({
           ))}
         </p>
       )}
-      {seat.status === "options" ? (
+      {seat.re_crewed ? (
+        <ReCrewed seat={seat} />
+      ) : seat.status === "options" ? (
         <ol className="flex flex-col gap-2">
           {options.map((o) => (
             <OptionCard

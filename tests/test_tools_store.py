@@ -92,3 +92,26 @@ def test_crew_out_in_an_open_disruption_is_not_offered(table):
     r = dispatch(CrewOpsTools.load(table), CONTROLLER, "find_options", {"crew_id": "C-1042"})
     assert r.ok and r.result["recommended"]["crew_id"] != "C-3310"
     assert "C-3310" not in [o["crew_id"] for o in r.result["options"]]
+
+
+def test_the_same_seat_reported_for_another_day_goes_to_the_same_desk(table):
+    from crewops.store.items import from_dynamo
+    from crewops.store.reports import get_disruption
+
+    # Something else first, so least-loaded alone would send the second report elsewhere.
+    file(table, "r-gate0001", "gate_closure", VALID_DETAILS["gate_closure"])
+    analysed(table, "r-gate0001")  # desk-1
+    for report_id, on in (("r-c104213", "2026-10-13"), ("r-c104214", "2026-10-14")):
+        file(
+            table,
+            report_id,
+            "crew_unavailable",
+            {"crew_id": "C-1042", "from_date": on, "reason": "sick"},
+        )
+        analysed(table, report_id)
+    first, second = (
+        from_dynamo(get_disruption(table, r)["analysis"]) for r in ("r-c104213", "r-c104214")
+    )
+    # Both days are P-2291's one captain seat: the second joins the desk already on it.
+    assert first["desk"] == "desk-2" and second["desk"] == "desk-2"
+    assert "The same seat is already open in r-c104213" in second["notes"][-1]

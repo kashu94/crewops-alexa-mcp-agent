@@ -48,14 +48,34 @@ function Mark({ code, size }: { code: string; size: number }) {
   );
 }
 
-/** An airline's mark, with its name unless `compact`. */
-export function AirlineBadge({ code, compact = false, className }: { code: string | null | undefined; compact?: boolean; className?: string }) {
+/** An airline's mark, with its name unless `compact`. The compact mark names the airline
+ * the moment it is hovered or focused, not after the browser's tooltip delay. */
+export function AirlineBadge({
+  code,
+  compact = false,
+  className,
+}: {
+  code: string | null | undefined;
+  compact?: boolean;
+  className?: string;
+}) {
   if (!code || !AIRLINES[code]) return null;
   const a = AIRLINES[code];
   return (
-    <span className={cx("inline-flex shrink-0 items-center gap-1.5 align-middle", className)} title={a.name}>
+    <span
+      className={cx("group/airline relative inline-flex shrink-0 items-center gap-1.5 align-middle", className)}
+      aria-label={a.name}
+      tabIndex={compact ? 0 : undefined}
+    >
       <Mark code={code} size={compact ? 16 : 18} />
-      {!compact && (
+      {compact ? (
+        <span
+          role="tooltip"
+          className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-lg transition-opacity duration-100 group-hover/airline:opacity-100 group-focus/airline:opacity-100"
+        >
+          {a.name} · {code}
+        </span>
+      ) : (
         <span className="text-xs font-semibold" style={{ color: a.color }}>
           {a.name}
         </span>

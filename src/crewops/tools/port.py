@@ -906,9 +906,12 @@ class CrewOpsTools:
         }
 
     def joint_plan(self, events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-        """Cheapest cover for several seats at once; nobody gets two seats."""
+        """Cheapest cover for several seats at once; nobody gets two seats. The same person
+        named out of the same seat twice (one person reported for two days of one trip) is
+        one seat: whoever covers flies the whole trip."""
         seats: list[Seat] = []
         out_crew: list[str] = []
+        held_seats: set[tuple[str, str, Rank]] = set()
         for i, raw in enumerate(events):
             e = dict(raw)
             if e.get("crew_id") and not (
@@ -917,8 +920,11 @@ class CrewOpsTools:
                 cid = self.require("crew", e["crew_id"])
                 day = self._date(e.get("date"))
                 pid, role = self._crew_pairing(cid, self._in_week(day) if day else None)
-                out_crew.append(cid)
                 self._same_role(i, cid, pid, role, e.get("role"))
+                if (cid, pid, role) in held_seats:
+                    continue  # the same seat again
+                held_seats.add((cid, pid, role))
+                out_crew.append(cid)
             else:
                 pid, _ = self._pairing_from(
                     e.get("pairing_id"), e.get("flight_id"), e.get("flight_no"), e.get("date")
@@ -929,8 +935,11 @@ class CrewOpsTools:
                     if not held:
                         raise ToolError(UNRESOLVED_ENTITY, f"event {i + 1}: {cid} is not on {pid}")
                     role = held[0]
-                    out_crew.append(cid)
                     self._same_role(i, cid, pid, role, e.get("role"))
+                    if (cid, pid, role) in held_seats:
+                        continue  # the same seat again
+                    held_seats.add((cid, pid, role))
+                    out_crew.append(cid)
                 elif e.get("role"):
                     role = Rank(e["role"])
                 else:
@@ -939,9 +948,6 @@ class CrewOpsTools:
                     )
             seats.append(Seat(pid, role))
 
-        repeated = sorted({c for c in out_crew if out_crew.count(c) > 1})
-        if repeated:
-            raise ToolError(INVALID_ARGUMENT, f"{', '.join(repeated)} named as out more than once")
         for seat in dict.fromkeys(seats):
             holders = len(self.world.pairings[seat.pairing_id].holder(seat.role))
             asked = seats.count(seat)
@@ -1344,6 +1350,11 @@ class CrewOpsTools:
             for pid, _ in self.crew_pairings.get(crew_id, [])
             if any(hit(day.date) for day in w.pairings[pid].days)
         }
+
+
+def describe_report(report: Report) -> str:
+    """One line on what a report says happened (public: alerts and the feed use it)."""
+    return _what(report)
 
 
 def _what(report: Report) -> str:

@@ -1,12 +1,22 @@
 """Write the web app's settings from the deployed stacks' outputs.
 
-    uv run python -m crewops.web_env          # writes web/.env.local
+    uv run python -m crewops.web_env             # writes web/.env.local
+    uv run python -m crewops.web_env --speaker   # ...and the desk speaker's device sign-in
 
 The web app needs the Cognito app client, the MCP runtime and the live-events API. They
 are read from the ``CrewOps-<stage>-Auth``, ``-Mcp`` and ``-Notify`` stack outputs, so
 nothing is copied by hand. The file holds no secret (the app client has none) and is
 ignored by git. The AWS profile named in ``.env`` is passed on for the spoken answers
 (Amazon Polly), which the app's server calls with your credentials when run locally.
+
+``--speaker`` gives the desk speaker's device account (``ops.speaker``, the speaker role) a
+new random password of its own, set on the account here (never the team's), and a random
+pairing code that screens of a hosted app enter once; both go into the file so the app's
+server can sign in as the device. Those two are secrets: the file stays ignored by git.
+Running the command again without ``--speaker`` keeps them; with it, they are replaced.
+
+Desktop alerts: once the push keys exist (``python -m crewops.notify.webpush keys``), the
+public one, which browsers need to subscribe, is written too. It is not a secret.
 """
 
 from __future__ import annotations
@@ -16,6 +26,50 @@ import sys
 from pathlib import Path
 
 WEB_DIR = Path(__file__).resolve().parents[2] / "web"
+SPEAKER_KEYS = (
+    "CREWOPS_SPEAKER_USERNAME",
+    "CREWOPS_SPEAKER_PASSWORD",
+    "CREWOPS_SPEAKER_PAIRING_CODE",
+)
+
+
+def kept_speaker_lines(path: Path) -> list[str]:
+    """The speaker settings already in the file, so a plain re-run does not drop them."""
+    if not path.exists():
+        return []
+    return [line for line in path.read_text().splitlines() if line.split("=", 1)[0] in SPEAKER_KEYS]
+
+
+SAFE = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+"""Characters a .env value keeps exactly, unquoted (no "#", "$" or quotes)."""
+
+
+def new_secret(length: int, symbol: bool) -> str:
+    """A random value of ``length`` safe characters; with ``symbol``, it also meets the
+    pool's password rules (an upper and lower case letter, a digit and a symbol)."""
+    import secrets
+
+    while True:
+        value = "".join(secrets.choice(SAFE) for _ in range(length))
+        if symbol:
+            value = f"{value[:8]}-{value[8:]}"  # "-" is a symbol Cognito counts
+        if not symbol or (
+            any(c.isupper() for c in value)
+            and any(c.islower() for c in value)
+            and any(c.isdigit() for c in value)
+        ):
+            return value
+
+
+def speaker_lines(password: str, pairing_code: str) -> list[str]:
+    for name, value in (("password", password), ("pairing code", pairing_code)):
+        if not value or any(c not in SAFE + "-" for c in value):
+            raise ValueError(f"the speaker's {name} must be letters, digits and '-' only")
+    return [
+        "CREWOPS_SPEAKER_USERNAME=ops.speaker",
+        f"CREWOPS_SPEAKER_PASSWORD={password}",
+        f"CREWOPS_SPEAKER_PAIRING_CODE={pairing_code}",
+    ]
 
 
 def lines(region: str, auth: dict, mcp: dict, notify: dict, profile: str | None) -> list[str]:
@@ -32,11 +86,29 @@ def lines(region: str, auth: dict, mcp: dict, notify: dict, profile: str | None)
     return out
 
 
+def push_key_line(ssm, prefix: str) -> list[str]:
+    """The public push key, if the keys were made; none means desktop alerts stay off."""
+    from botocore.exceptions import ClientError
+
+    try:
+        value = ssm.get_parameter(Name=f"{prefix}/vapid-public")["Parameter"]["Value"]
+    except ClientError:
+        return []
+    return (
+        [f"CREWOPS_PUSH_PUBLIC_KEY={value}"]
+        if value.replace("-", "").replace("_", "").isalnum()
+        else []
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=WEB_DIR / ".env.local")
+    parser.add_argument(
+        "--speaker", action="store_true", help="also write the desk speaker's device sign-in"
+    )
     args = parser.parse_args(argv)
 
     import boto3
@@ -55,14 +127,39 @@ def main(argv: list[str] | None = None) -> int:
         cloudformation = boto3.Session(region_name=settings.aws_region).client("cloudformation")
         stack = f"CrewOps-{settings.stage}"
         found = [outputs(cloudformation, f"{stack}-{part}") for part in ("Auth", "Mcp", "Notify")]
-        text = "\n".join(lines(settings.aws_region, *found, profile)) + "\n"
+        body = lines(settings.aws_region, *found, profile)
+        ssm = boto3.Session(region_name=settings.aws_region).client("ssm")
+        body += push_key_line(ssm, settings.push_parameter_prefix)
     except (ClientError, BotoCoreError) as exc:
         print(f"AWS error: {exc}", file=sys.stderr)
         return 1
     except KeyError as exc:
         print(f"A stack output is missing: {exc}. Deploy the stacks first.", file=sys.stderr)
         return 1
-    args.out.write_text(text)
+    if args.speaker:
+        # The speaker gets its own random password, set on its account here, so it never
+        # holds the team's password; and a random pairing code for a hosted app.
+        password, code = new_secret(24, symbol=True), new_secret(10, symbol=False)
+        try:
+            boto3.Session(region_name=settings.aws_region).client(
+                "cognito-idp"
+            ).admin_set_user_password(
+                UserPoolId=found[0]["UserPoolId"],
+                Username="ops.speaker",
+                Password=password,
+                Permanent=True,
+            )
+        except (ClientError, BotoCoreError) as exc:
+            print(
+                f"Could not set the speaker's password (provision the team first): {exc}",
+                file=sys.stderr,
+            )
+            return 1
+        body += speaker_lines(password, code)
+        print(f"Speaker pairing code, for screens of a hosted app: {code}")
+    else:
+        body += kept_speaker_lines(args.out)
+    args.out.write_text("\n".join(body) + "\n")
     print(f"Wrote {args.out}")
     return 0
 

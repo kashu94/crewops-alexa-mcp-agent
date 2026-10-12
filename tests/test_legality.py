@@ -129,3 +129,12 @@ def test_unknown_ids_raise(world):
 def test_negative_delay_rejected(world):
     with pytest.raises(ValueError):
         assess(world, "C-3310", "P-2291", delay_hours=-1)
+
+
+def test_a_clash_is_named_before_the_rest_around_it(world):
+    # C-1042 flies P-2291 on 13-14 Oct; P-2217 reports at 02:30Z on the 14th, inside
+    # P-2291's second day (04:00-14:45Z) and also only 11h after its first day ends.
+    assert (
+        details(assess(world, "C-1042", "P-2217"))[0]
+        == "double-booked: P-2291 overlaps on 2026-10-14"
+    )

@@ -131,6 +131,9 @@ export type Option = {
 };
 
 export type Seat = {
+  /** Filled since the analysis by an approved plan (say for the same seat on another day):
+   * who flies it now, or that the trip was cancelled. No cover is needed. */
+  re_crewed?: { cancelled: boolean; holders: { crew_id: string; name: string | null }[] } | null;
   pairing_id: string;
   role: string;
   crew_out: string | null;
@@ -238,6 +241,13 @@ export type Detail = {
   yours?: boolean;
   joint_plan?: { assignments?: Record<string, unknown>[]; total_cost_inr?: number } | null;
   contention?: Record<string, Rival[]>;
+  /** Other open disruptions needing this very seat (the same person out on another day). */
+  same_seat?: {
+    disruption_id: string;
+    status: string;
+    seats: string[];
+    desks: { desk_id: string; controller: string }[];
+  }[];
   unavailable_now?: Record<string, Unavailable>;
   suggestions?: Suggestion[];
   airlines?: { code: string; name: string; color: string }[];

@@ -595,3 +595,29 @@ def test_the_least_loaded_desk_gets_the_next_disruption():
     assert assign_desk({"desk-1": 1, "desk-2": 1}, {"desk-1": 1, "desk-2": 1}).desk_id == "desk-3"
     # Equal open load: the one given fewest overall takes it, so ties take turns.
     assert assign_desk({}, {"desk-1": 4, "desk-2": 2, "desk-3": 3}).desk_id == "desk-2"
+
+
+def test_a_choice_for_one_trip_is_re_judged_for_the_next_days_trip(table):
+    # Two different seats on adjacent days: C-1042's P-2291 (13-14 Oct) and C-5820's P-2218
+    # (15 Oct), both Konkan captains, both ranking C-3983. Planned separately.
+    disruption(table, "r-sick1042", "C-1042", "2026-10-13", "2026-10-14")  # desk-1
+    disruption(table, "r-sick5820", "C-5820", "2026-10-15")  # desk-2
+    plans = Plans(table)
+    world = Operation.load(table).world
+    assert "C-3983" in [o.crew_id for o in find_options(world, "P-2218", Rank.CAPTAIN).crew_options]
+    first = plans.submit(ANANYA, "r-sick1042", {"P-2291/Captain": "C-3983"}, "closest").plan
+    # The other desk also picks C-3983 before the first plan is decided.
+    second = plans.submit(ROHIT, "r-sick5820", {"P-2218/Captain": "C-3983"}, "rested").plan
+    assert plans.approve(MEERA, "r-sick1042", first["plan_id"]).status == "COMMITTED"
+    # C-3983 now flies P-2291 until 14:45Z on the 14th: re-judged for the 15th with that
+    # trip included, the rest falls short, so the second approval writes nothing.
+    out = plans.approve(KARAN, "r-sick5820", second["plan_id"])
+    assert out.status == "STALE"
+    assert out.reasons == (
+        "C-3983 is no longer legal for P-2218: only 11.75h rest after P-2291 on 2026-10-14",
+    )
+    # And they are no longer offered for P-2218, with the reason, when it is planned again.
+    result = find_options(Operation.load(table).world, "P-2218", Rank.CAPTAIN)
+    assert "C-3983" not in [o.crew_id for o in result.crew_options]
+    (gone,) = [e for e in result.excluded if e.crew_id == "C-3983"]
+    assert "only 11.75h rest after P-2291 on 2026-10-14" in gone.reasons

@@ -17,8 +17,12 @@ let client: CognitoIdentityProviderClient | null = null;
 
 function cognito(): CognitoIdentityProviderClient {
   // Sign-in and refresh are public Cognito calls made with the app client id: the SDK
-  // sends them unsigned, so no AWS credentials are needed or used.
-  client ??= new CognitoIdentityProviderClient({ region: settings.region() });
+  // sends them unsigned, so no AWS credentials are needed or used. Bounded, so a network
+  // that cannot reach Cognito fails sign-in with a message instead of spinning forever.
+  client ??= new CognitoIdentityProviderClient({
+    region: settings.region(),
+    requestHandler: { connectionTimeout: 5_000, requestTimeout: 15_000 },
+  });
   return client;
 }
 

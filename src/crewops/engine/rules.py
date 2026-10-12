@@ -294,9 +294,16 @@ def check_rest(
             date=day.date,
         )
 
-    for duty in crew.duties:
-        if duty.pairing_id == exclude_pairing:
-            continue
+    duties = [d for d in crew.duties if d.pairing_id != exclude_pairing]
+    # A clash is the decisive fact, so it is named before any short rest around it: flying
+    # two trips at once is impossible however the rest falls.
+    for duty in duties:
+        if duty.report_utc < day.release_utc and day.report_utc < duty.release_utc:
+            return fail(
+                REST, f"double-booked: {duty.pairing_id} overlaps on {day.date}", date=day.date
+            )
+
+    for duty in duties:
         if duty.report_utc >= day.release_utc:
             rest = hours_between(day.release_utc, duty.report_utc)
             if rest < minimum:
@@ -319,10 +326,6 @@ def check_rest(
                     headroom=round(rest - minimum, 2),
                     date=day.date,
                 )
-        else:
-            return fail(
-                REST, f"double-booked: {duty.pairing_id} overlaps on {day.date}", date=day.date
-            )
 
     return ok(REST, f"at least {minimum:g}h rest either side", limit=minimum, date=day.date)
 

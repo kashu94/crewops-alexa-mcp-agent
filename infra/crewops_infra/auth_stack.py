@@ -12,6 +12,12 @@ by default, something users can edit about themselves. The app client can read t
 name and write only the user's locale.
 
 The Lite feature plan has no monthly charge for this number of users.
+
+Alexa account linking, when ``CREWOPS_ALEXA_REDIRECT_URLS`` is set: a hosted sign-in page
+and a second app client, for Alexa only, using the authorization-code flow with Alexa's
+redirect URLs. A person links once in the Alexa app by signing in to CrewOps; the skill then
+receives their access token and they have exactly their role's access. The web client stays
+as it is, with no hosted page.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ GROUP_ORDER = (
     Role.AUDITOR,
     Role.REPORTER,
     Role.CREW,
+    Role.SPEAKER,
 )
 """Cognito group precedence, highest first. Roles add up in the application; the order only
 decides which group's IAM role Cognito would hand out, and none is set."""
@@ -91,6 +98,38 @@ class AuthStack(Stack):
             # harmless attribute instead: users cannot store a name, email or phone number.
             write_attributes=cognito.ClientAttributes().with_standard_attributes(locale=True),
         )
+
+        self.alexa_client: cognito.UserPoolClient | None = None
+        if settings.alexa_redirect_urls:
+            domain = self.user_pool.add_domain(
+                "AlexaSignIn",
+                cognito_domain=cognito.CognitoDomainOptions(
+                    # Unique worldwide, so the account id is part of it.
+                    domain_prefix=f"{settings.prefix}-{self.account}"
+                ),
+            )
+            self.alexa_client = self.user_pool.add_client(
+                "AlexaClient",
+                user_pool_client_name=f"{settings.prefix}-alexa",
+                generate_secret=True,  # Alexa keeps it, entered once on the skill's linking page
+                o_auth=cognito.OAuthSettings(
+                    flows=cognito.OAuthFlows(authorization_code_grant=True),
+                    scopes=[cognito.OAuthScope.OPENID, cognito.OAuthScope.PROFILE],
+                    callback_urls=list(settings.alexa_redirect_urls),
+                ),
+                supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],
+                prevent_user_existence_errors=True,
+                enable_token_revocation=True,
+                access_token_validity=Duration.hours(1),
+                id_token_validity=Duration.hours(1),
+                # Alexa renews the access token with this, so a link lasts a month of use.
+                refresh_token_validity=Duration.days(30),
+                read_attributes=cognito.ClientAttributes().with_standard_attributes(fullname=True),
+                write_attributes=cognito.ClientAttributes().with_standard_attributes(locale=True),
+            )
+            CfnOutput(self, "AlexaClientId", value=self.alexa_client.user_pool_client_id)
+            CfnOutput(self, "AlexaAuthorizeUri", value=f"{domain.base_url()}/oauth2/authorize")
+            CfnOutput(self, "AlexaAccessTokenUri", value=f"{domain.base_url()}/oauth2/token")
 
         CfnOutput(self, "UserPoolId", value=self.user_pool.user_pool_id)
         CfnOutput(self, "UserPoolClientId", value=self.client.user_pool_client_id)

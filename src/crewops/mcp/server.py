@@ -116,6 +116,36 @@ def build_server(
         return await run(ctx, lambda c: api.queue(c))
 
     @mcp.tool(annotations=READ)
+    async def speaker_feed(ctx: Context, scope: str = "room", limit: int = 20) -> dict:
+        """Speaker devices only: the spoken alerts for a desk speaker (scope desk-1, desk-2,
+        desk-3), the approvals corner ("approvals") or the whole ops room ("room"): the
+        latest event of each disruption, newest first, each with an id to remember it by."""
+        return await run(ctx, lambda c: api.speaker_feed(c, scope, limit))
+
+    @mcp.tool(annotations=WRITE)
+    async def welcome_back(ctx: Context) -> dict:
+        """Controllers and approvers: what came to your desk (or to approvals) since you last
+        signed in, with a spoken summary. Records this sign-in."""
+        return await run(ctx, lambda c: api.welcome_back(c))
+
+    @mcp.tool(annotations=WRITE)
+    async def push_subscribe(ctx: Context, endpoint: str, p256dh: str, auth: str) -> dict:
+        """Controllers and approvers: turn on desktop alerts in this browser with the push
+        subscription its service worker made (endpoint and keys)."""
+        return await run(ctx, lambda c: api.push_subscribe(c, endpoint, p256dh, auth))
+
+    @mcp.tool(annotations=WRITE)
+    async def push_unsubscribe(ctx: Context, endpoint: str) -> dict:
+        """Turn desktop alerts off for one browser."""
+        return await run(ctx, lambda c: api.push_unsubscribe(c, endpoint))
+
+    @mcp.tool(annotations=WRITE)
+    async def still_here(ctx: Context) -> dict:
+        """Controllers and approvers: record that your console is open now, so the next
+        "welcome back" covers only what came after."""
+        return await run(ctx, lambda c: api.still_here(c))
+
+    @mcp.tool(annotations=READ)
     async def disruptions(ctx: Context, limit: int = 40) -> list:
         """Recent disruptions in every status, newest report first, with their analysis
         summary: the desk's chronological feed."""

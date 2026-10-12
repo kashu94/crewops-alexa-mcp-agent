@@ -60,7 +60,7 @@ export default function DisruptionPage() {
     }
     const out: Record<string, { crewId: string; name: string } | null> = {};
     for (const s of detail?.seats ?? []) {
-      if (s.status !== "options") continue;
+      if (s.status !== "options" || s.re_crewed) continue;
       const j = joint[`${s.pairing_id}/${s.role}`]?.shift();
       const top = s.live?.options[0];
       const name = (id: string) => s.live?.options.find((o) => o.crew_id === id)?.name ?? j?.name ?? id;

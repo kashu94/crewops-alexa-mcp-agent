@@ -49,6 +49,17 @@ def test_console_events_publish_by_iam_and_subscribe_by_sign_in(template):
     assert "onSubscribe" in namespace["Properties"]["CodeHandlers"]
 
 
+def actions_of(template, function_prefix):
+    """The IAM actions of one function's role policy (by its logical id)."""
+    actions = set()
+    for key, policy in template.find_resources("AWS::IAM::Policy").items():
+        if not key.startswith(f"{function_prefix}ServiceRole"):
+            continue
+        for s in policy["Properties"]["PolicyDocument"]["Statement"]:
+            actions |= set(s["Action"] if isinstance(s["Action"], list) else [s["Action"]])
+    return actions
+
+
 def test_notifier_reads_only_disruption_changes_and_may_only_publish(template):
     (mapping,) = template.find_resources("AWS::Lambda::EventSourceMapping").values()
     (pattern,) = mapping["Properties"]["FilterCriteria"]["Filters"]
@@ -56,10 +67,7 @@ def test_notifier_reads_only_disruption_changes_and_may_only_publish(template):
         "dynamodb": {"NewImage": {"entity": {"S": ["disruption"]}}}
     }
     assert mapping["Properties"]["FunctionResponseTypes"] == ["ReportBatchItemFailures"]
-    actions = set()
-    for policy in template.find_resources("AWS::IAM::Policy").values():
-        for s in policy["Properties"]["PolicyDocument"]["Statement"]:
-            actions |= set(s["Action"] if isinstance(s["Action"], list) else [s["Action"]])
+    actions = actions_of(template, "Notifier")
     assert {"sns:Publish", "appsync:EventPublish"} <= actions
     assert not any(a.startswith("dynamodb:Put") or a.startswith("dynamodb:Update") for a in actions)
     (fn,) = [
@@ -116,3 +124,56 @@ def test_only_staff_who_read_disruptions_may_subscribe():
         "no groups": False,
         "no identity": False,
     }
+
+
+def test_escalation_checks_are_scheduled_and_run_with_least_privilege(template):
+    notifier = actions_of(template, "Notifier")
+    assert {"scheduler:CreateSchedule", "iam:PassRole"} <= notifier
+    policy = json.dumps(template.find_resources("AWS::IAM::Policy"))
+    assert "schedule/default/crewops-dev-esc-*" in policy  # only its own schedules
+    escalation = actions_of(template, "Escalation")
+    assert {"dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem", "sns:Publish"} <= escalation
+    assert not any(a in escalation for a in ("dynamodb:DeleteItem", "dynamodb:UpdateItem"))
+    roles = template.find_resources("AWS::IAM::Role")
+    (scheduler_role,) = [r for k, r in roles.items() if k.startswith("EscalationSchedulerRole")]
+    principal = scheduler_role["Properties"]["AssumeRolePolicyDocument"]["Statement"][0][
+        "Principal"
+    ]
+    assert principal == {"Service": "scheduler.amazonaws.com"}
+    (fn,) = [
+        f
+        for f in template.find_resources("AWS::Lambda::Function").values()
+        if f["Properties"].get("Handler") == "crewops.notify.stream_handler.handler"
+    ]
+    env = fn["Properties"]["Environment"]["Variables"]
+    assert env["CREWOPS_ESCALATE_AFTER_MINUTES"] == "10"
+    assert "CREWOPS_ESCALATION_FUNCTION_ARN" in env and "CREWOPS_ESCALATION_ROLE_ARN" in env
+
+
+def test_with_the_package_the_notifier_sends_desktop_alerts(tmp_path):
+    (tmp_path / "main.py").write_text("print('stand-in')\n")
+    settings = Settings.from_env({"CREWOPS_STAGE": "dev"})
+    app = App()
+    data = DataStack(app, "Data", settings=settings, env=ENV)
+    auth = AuthStack(app, "Auth", settings=settings, env=ENV)
+    stack = NotifyStack(
+        app, "Notify", settings=settings, table=data.table, auth=auth, package=tmp_path, env=ENV
+    )
+    t = Template.from_stack(stack)
+    actions = actions_of(t, "Notifier")
+    # GetItem: the profile that says who is on which desk now.
+    assert {
+        "dynamodb:Query",
+        "dynamodb:GetItem",
+        "dynamodb:DeleteItem",
+        "ssm:GetParameter",
+    } <= actions
+    assert not any(a.startswith("dynamodb:Put") or a.startswith("dynamodb:Update") for a in actions)
+    policy = json.dumps(t.find_resources("AWS::IAM::Policy"))
+    assert "parameter/crewops-dev/push/*" in policy
+    (fn,) = [
+        f["Properties"]
+        for f in t.find_resources("AWS::Lambda::Function").values()
+        if f["Properties"].get("Handler") == "crewops.notify.stream_handler.handler"
+    ]
+    assert fn["Environment"]["Variables"]["CREWOPS_PUSH_ENABLED"] == "1"

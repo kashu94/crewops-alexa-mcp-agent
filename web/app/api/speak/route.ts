@@ -1,14 +1,10 @@
-import { PollyClient, SynthesizeSpeechCommand, type Engine, type VoiceId } from "@aws-sdk/client-polly";
-
-import { settings } from "@/lib/config";
 import { declaredTooLarge, RateLimit } from "@/lib/limits";
 import { currentTokens } from "@/lib/session";
+import { synthesize } from "@/lib/polly";
 import { claimsOf } from "@/lib/tokens";
 import { sameOrigin } from "@/lib/tools";
 
-const MAX_CHARS = 1500;
 const perUser = new RateLimit(30, 10 * 60 * 1000); // 30 answers spoken per 10 minutes
-let polly: PollyClient | null = null;
 
 /** Speaks an answer with Amazon Polly, for signed-in users only. Run locally, the server uses
  * the AWS profile in .env.local. */
@@ -25,30 +21,16 @@ export async function POST(request: Request) {
   }
   const user = claimsOf(tokens.id)?.["cognito:username"] ?? "unknown";
   if (!perUser.allow(user)) {
-    return Response.json(
-      { error: "Speech is paused for a few minutes; the answers stay on screen." },
-      { status: 429 },
-    );
+    return Response.json({ error: "Speech is paused for a few minutes; the answers stay on screen." }, { status: 429 });
   }
   const body = (await request.json().catch(() => null)) as { text?: unknown } | null;
   const text = typeof body?.text === "string" ? body.text.trim() : "";
   if (!text) {
     return Response.json({ error: "Nothing to say." }, { status: 400 });
   }
-  polly ??= new PollyClient({ region: settings.region() });
   try {
-    const out = await polly.send(
-      new SynthesizeSpeechCommand({
-        Text: text.slice(0, MAX_CHARS),
-        OutputFormat: "mp3",
-        VoiceId: settings.pollyVoice() as VoiceId,
-        Engine: settings.pollyEngine() as Engine,
-        LanguageCode: "en-IN",
-      }),
-    );
-    const audio = await out.AudioStream?.transformToByteArray();
-    if (!audio) throw new Error("no audio");
-    return new Response(Buffer.from(audio), {
+    const audio = await synthesize(text);
+    return new Response(audio, {
       headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" },
     });
   } catch (err) {

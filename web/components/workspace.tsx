@@ -21,6 +21,7 @@ import type { LiveOption, Rival, Seat, Suggestion, Unavailable } from "@/lib/typ
 
 import { useMe } from "./me";
 import { Info } from "./info";
+import { ReCrewed } from "./re-crewed";
 import { LegalityCheck } from "./solutions";
 import { Button, clock, cx, day, Mono, rupees, Spinner } from "./ui";
 
@@ -526,6 +527,7 @@ export function SeatWorkspace({
   const [showAll, setShowAll] = useState(false);
   const live = seat.live;
   const coverable = seat.status === "options";
+  if (seat.re_crewed) return <ReCrewed seat={seat} />;
   if (!live || live.options.length === 0) {
     const special = chosen === CANCEL || chosen === SHORT;
     return (

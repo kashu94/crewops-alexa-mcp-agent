@@ -209,6 +209,23 @@ def record_filed(table: Any, report: Report) -> None:
     )
 
 
+def last_seen(table: Any, user_id: str) -> str | None:
+    """When this person last signed in to a console, as an ISO time, or None."""
+    item = table.get_item(Key={schema.PK: f"USER{S}{user_id}", schema.SK: "LAST_SEEN"}).get("Item")
+    return str(item["at"]) if item else None
+
+
+def mark_seen(table: Any, user_id: str, at: datetime) -> None:
+    table.put_item(
+        Item={
+            schema.PK: f"USER{S}{user_id}",
+            schema.SK: "LAST_SEEN",
+            "entity": "last_seen",
+            "at": _iso(at),
+        }
+    )
+
+
 def filed_by(table: Any, user_id: str, limit: int = 30) -> list[dict[str, Any]]:
     """The reports a person filed, newest first."""
     return table.query(

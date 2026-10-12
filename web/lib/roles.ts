@@ -1,14 +1,7 @@
 // Which views a signed-in person sees. The MCP server enforces every rule; this only
 // decides what to show.
 
-export type Role =
-  | "crew"
-  | "reporter"
-  | "controller"
-  | "approver"
-  | "auditor"
-  | "admin"
-  | "super_admin";
+export type Role = "crew" | "reporter" | "controller" | "approver" | "auditor" | "admin" | "super_admin" | "speaker";
 
 export type Me = { user_id: string; roles: Role[]; crew_id: string | null; desk: string | null };
 

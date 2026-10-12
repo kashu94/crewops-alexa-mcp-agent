@@ -28,9 +28,25 @@ log = logging.getLogger()
 log.setLevel(logging.INFO)
 
 
-def process(records: list[dict[str, Any]], events: Any, alerts: Any, stage: str) -> dict[str, Any]:
-    """``events`` publishes to the console (or is None); ``alerts`` sends alerts (or None)."""
+def process(
+    records: list[dict[str, Any]],
+    events: Any,
+    alerts: Any,
+    stage: str,
+    escalate: Any = None,
+) -> dict[str, Any]:
+    """``events`` publishes to the console (or is None); ``alerts`` sends alerts (or None);
+    ``escalate(change)`` schedules the untouched-disruption check (or None)."""
     changes = [(r, change_of(r)) for r in records]
+    if escalate is not None:
+        for _, change in changes:
+            if change is None:
+                continue
+            try:
+                escalate(change)
+            except Exception:
+                # Best effort: the desk still has its alerts; only the escalation is missed.
+                log.exception("escalation check for %s not scheduled", change.disruption_id)
     if events is not None:
         payload = [console_event(c) for _, c in changes if c is not None]
         if payload:
@@ -72,4 +88,40 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         if settings.alerts_topic_arn
         else None
     )
-    return process(event.get("Records", []), events, alerts, settings.stage)
+    escalate = None
+    if settings.escalation_function_arn and settings.escalation_role_arn:
+        from datetime import UTC, datetime
+
+        from crewops.notify.escalation import schedule_check
+
+        scheduler = session.client("scheduler")
+
+        def escalate(change: Any) -> None:
+            schedule_check(
+                scheduler,
+                change,
+                prefix=settings.prefix,
+                function_arn=settings.escalation_function_arn,
+                role_arn=settings.escalation_role_arn,
+                minutes=settings.escalate_after_minutes,
+                now=datetime.now(UTC),
+            )
+
+    result = process(event.get("Records", []), events, alerts, settings.stage, escalate)
+    if settings.alexa_skill_id:
+        # Linked Echos chime for their desk; never fails the batch (see crewops.alexa.notifier).
+        try:
+            from crewops.alexa.notifier import notify
+
+            notify(event.get("Records", []), settings)
+        except Exception:
+            log.exception("Alexa notifications failed")
+    if settings.push_enabled:
+        # Desktop alerts in the browsers controllers and approvers turned them on in.
+        try:
+            from crewops.notify.push_alerts import notify as push_notify
+
+            push_notify(event.get("Records", []), settings)
+        except Exception:
+            log.exception("desktop alerts failed")
+    return result

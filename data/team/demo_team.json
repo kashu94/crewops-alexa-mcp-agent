@@ -15,6 +15,7 @@
     {"username": "c1042.nair", "name": "A. Nair", "roles": ["crew"], "crew_id": "C-1042"},
     {"username": "c3310.reddy", "name": "D. Reddy", "roles": ["crew"], "crew_id": "C-3310"},
     {"username": "c5417.krishnan", "name": "S. Krishnan", "roles": ["crew"], "crew_id": "C-5417"},
-    {"username": "c2087.iyer", "name": "R. Iyer", "roles": ["crew"], "crew_id": "C-2087"}
+    {"username": "c2087.iyer", "name": "R. Iyer", "roles": ["crew"], "crew_id": "C-2087"},
+    {"username": "ops.speaker", "name": "Ops Room Speaker", "roles": ["speaker"]}
   ]
 }

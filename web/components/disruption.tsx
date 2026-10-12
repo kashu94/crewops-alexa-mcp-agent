@@ -6,6 +6,7 @@ import {
   CalendarDays,
   CheckCheck,
   CheckCircle2,
+  Link2,
   Lock,
   MapPin,
   Plane,
@@ -15,6 +16,7 @@ import {
   Swords,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { tool } from "@/lib/client";
@@ -35,8 +37,45 @@ const STRATEGY: Record<string, string> = {
   short_crew: "operate one short",
 };
 
-/** Whose disruption this is, said plainly for each role. */
+/** Other open disruptions needing this very seat: the same person out on another day of
+ * the same trip. One cover fills them all, so they are planned as one, not competed for. */
+function SameSeat({ detail }: { detail: Detail }) {
+  const same = detail.same_seat ?? [];
+  if (same.length === 0) return null;
+  return (
+    <p className="flex items-start gap-2 rounded-xl border border-indigo-200 bg-indigo-50/70 px-3 py-2 text-sm text-indigo-950">
+      <Link2 size={15} className="mt-0.5 shrink-0" />
+      <span>
+        <b>The same seat is also reported in </b>
+        {same.map((s, i) => (
+          <span key={s.disruption_id}>
+            {i > 0 && ", "}
+            <Link href={`/console/${encodeURIComponent(s.disruption_id)}`} className="font-mono underline">
+              {s.disruption_id}
+            </Link>{" "}
+            ({s.seats.join(", ")}
+            {s.desks.length > 0 && ` · ${s.desks.map((d) => d.controller).join(", ")}`})
+          </span>
+        ))}
+        . It is one person out on more days of one trip, so whoever covers flies the whole trip: one cover fills both.
+        Plan it once; once that plan is approved, close the other saying it is covered.
+      </span>
+    </p>
+  );
+}
+
+/** Whose disruption this is, said plainly for each role, and any other disruption needing
+ * the very same seat. */
 export function DeskBanner({ detail }: { detail: Detail }) {
+  return (
+    <>
+      <OwnerBanner detail={detail} />
+      <SameSeat detail={detail} />
+    </>
+  );
+}
+
+function OwnerBanner({ detail }: { detail: Detail }) {
   const me = useMe();
   const desks = detail.desks ?? [];
   if (desks.length === 0) return null;
@@ -112,7 +151,7 @@ export function Coverage({ detail }: { detail: Detail }) {
 /** The engine's recommendation for a seat, in one readable card. */
 export function Recommendation({ seat }: { seat: Seat }) {
   const [best, next] = seat.options;
-  if (!best) return null;
+  if (!best || seat.re_crewed) return null;
   return (
     <div className="animate-rise relative overflow-hidden rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-white p-4">
       <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-700">
@@ -385,7 +424,7 @@ export function Actions({
   // cover: the only way out is to close it, as the server requires.
   // A seat with no legal crew counts as handled once it is chosen to be cancelled or flown short.
   const decided = new Set(choices.filter((c) => c.crewId === "CANCEL" || c.crewId === "SHORT").map((c) => c.seat));
-  const open = (s: Seat) => s.status !== "options" && !decided.has(seatKey(s));
+  const open = (s: Seat) => (s.status !== "options" || Boolean(s.re_crewed)) && !decided.has(seatKey(s));
   const someUncovered = detail.seats.some(open);
   const overriding = choices.some((c) => c.overrides);
   const cancelling = choices.some((c) => c.crewId === "CANCEL");

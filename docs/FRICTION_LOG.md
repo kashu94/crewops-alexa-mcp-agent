@@ -255,6 +255,68 @@ Entries in section 4 are about our own code, so they use a shorter form:
   kept.
 - Suggestion: Retain replaced guardrail versions by default, or warn in the deploy output.
 
+### FL-201: A skill cannot make an Echo speak an alert unprompted
+
+- Date: 2026-10-10
+- Service / tool: Alexa Skills Kit, Proactive Events API
+- Severity: Medium (shaped the whole alerting design)
+- Task attempted: Have a controller's Echo announce a new disruption on their desk as it
+  happens, even with no screen signed in.
+- Steps taken: Read the Proactive Events documentation and the Alexa+ developer
+  announcements of July 2026.
+- Expected: A way for a skill to speak a short alert on a person's device.
+- Actual: A skill can only send a notification from a fixed set of event types: the device
+  chimes and shows a yellow ring, and the person asks "what are my notifications?" to hear
+  it. Nothing lets a third-party skill speak unprompted, and the Alexa+ pages describe no
+  push from an MCP server.
+- Workaround: The skill sends `AMAZON.MessageAlert.Activated` ("a new message from CrewOps")
+  and answers "what's waiting" with the details. To have the Echo say the alert, the notifier
+  also wakes the skill through the Skill Messaging API, and the skill sets an Alexa reminder
+  five seconds ahead whose text is the alert; the Echo reads a reminder out when it goes off.
+  This takes a second permission (reminders) and three APIs for one spoken sentence, and the
+  Reminders reference says a reminder cannot be created with an out-of-session token, without
+  saying whether a Skill Messaging request counts as in session. The web desk speaker
+  announces alerts itself.
+- Suggestion: An opt-in "announce" event for business skills, or a notification type whose
+  spoken text the skill supplies.
+
+### FL-202: The Proactive Events reference does not say which endpoint serves an India account
+
+- Date: 2026-10-10
+- Service / tool: Alexa Proactive Events REST API reference
+- Severity: Low
+- Task attempted: Send notifications to an Alexa account registered in India, from a
+  backend in Sydney.
+- Steps taken: Read the API reference's endpoint list.
+- Expected: Which countries each of the North America, Europe and Far East endpoints
+  serves.
+- Actual: The three development and production URLs are listed, with no mapping to
+  countries or marketplaces. The mapping is on other pages (the smart home "Send Events"
+  guide puts English and Hindi (India) on the Europe endpoint, `api.eu.amazonalexa.com`),
+  which a review found after this entry was first written.
+- Workaround: Every request Alexa sends carries `context.System.apiEndpoint`; the skill
+  records it with the linked person, and each notification goes to that endpoint, so no
+  table is needed.
+- Suggestion: The same country-to-endpoint table on the Proactive Events reference.
+
+### FL-203: The Alexa+ MCP path is in Preview with requirements a voice agent struggles to meet
+
+- Date: 2026-10-10
+- Service / tool: Alexa+ MCP Toolkit (Preview)
+- Severity: Low (not adopted for the hackathon)
+- Task attempted: Connect the CrewOps MCP server, already a Streamable HTTP server, to
+  Alexa+ directly.
+- Steps taken: Read the Alexa+ MCP QuickStart and the July 2026 announcement.
+- Expected: Bring an existing MCP server as it is.
+- Actual: The integration is in Preview; it needs OAuth 2.1 with PKCE and a protected-
+  resource metadata document (CrewOps' server accepts Cognito access tokens through
+  AgentCore's JWT authorizer), and round trips under 500 ms, which a question answered with
+  a model call does not meet. Alexa+ is also not offered in India.
+- Workaround: A classic custom skill in front of the same pipeline, with Cognito account
+  linking; the MCP server stays as it is for MCP clients.
+- Suggestion: State the latency limit per tool type (deterministic lookups versus model
+  calls), and accept an authorizer-protected server.
+
 ## 2. AWS backend infrastructure (accounts, CDK, Cognito, DynamoDB, SQS, SNS, AppSync, Lambda, SDK)
 
 ### FL-001: Project account denies CDK outside its home region, with no hint why
@@ -615,6 +677,39 @@ Entries in section 4 are about our own code, so they use a shorter form:
   LoggingConfig.LogGroup`, then filter that group.
 - Suggestion: Have the CLI error say when a function logs to a custom group.
 
+### FL-204: A third reader on the table's stream would have risked throttling
+
+- Date: 2026-10-10
+- Service / tool: Amazon DynamoDB Streams with AWS Lambda event sources
+- Severity: Low (caught in design)
+- Task attempted: Send Alexa notifications from a Lambda on the table's change stream.
+- Steps taken: Planned a new Lambda event source on the stream, next to the analysis and the
+  notifier.
+- Expected: Any number of consumers.
+- Actual: DynamoDB Streams guidance is no more than two processes reading a shard at once,
+  or reads are throttled; the stream already has two Lambda readers.
+- Workaround: The existing notifier sends the Alexa notifications too, best effort and
+  after the console and email alerts, so the stream keeps two readers.
+- Suggestion: Warn in the CDK construct when a third event source is added to one stream.
+
+### FL-213: The Lambda Python runtime has no crypto library for web push
+
+- Date: 2026-10-11
+- Service / tool: AWS Lambda (Python 3.12 runtime)
+- Severity: Low
+- Task attempted: Send desktop alerts (web push) from the notifier Lambda, which runs the
+  plain source with the runtime's boto3.
+- Steps taken: Checked what the runtime ships for the ECDH, HKDF and AES-GCM that web push
+  encryption and its signed (VAPID) header need.
+- Expected: Some standard cryptography available, as boto3 is.
+- Actual: Only boto3 and botocore ship; there is no cryptography library, and the Python
+  standard library has no elliptic curves or AES.
+- Workaround: When the MCP server's package (ARM64 wheels, cryptography included) is built,
+  the notifier runs it; without it, the notifier runs the plain source and desktop alerts
+  stay off. No layer to maintain.
+- Suggestion: A managed Lambda layer with the cryptography library, or a KMS operation for
+  web push signing and encryption.
+
 ## 3. Core software stack and local tooling (Python, uv, Node, test tooling)
 
 ### FL-010: Every CDK synth and test run prints a Node end-of-life banner
@@ -723,6 +818,40 @@ Entries in section 4 are about our own code, so they use a shorter form:
   enables but these pages do not use.
 - Suggestion: Do not report client-only pages as dropped segments, or say in the scaffold
   which kinds of app need these flags.
+
+### FL-197: Sign-in spun forever on a network with broken IPv6
+
+- Date: 2026-10-10
+- Service / tool: Node.js 20 DNS and the AWS SDK for JavaScript v3, in the Next.js server
+- Severity: Medium (sign-in impossible on that network; about 30 minutes)
+- Task attempted: Sign in to the local web app as divya.rao.
+- Steps taken: Entered the username and password; the button spun with no error. The MCP
+  server's log showed no request at all. From the same laptop, `curl -6` to the Cognito
+  endpoint never connected, `curl -4` answered in 1.2 s, and `curl -4` to Google in 0.4 s.
+- Expected: Sign-in, or an error.
+- Actual: The Wi-Fi network gave out IPv6 addresses but did not route IPv6. AWS endpoints
+  resolve to IPv6 first, so the server's call to Cognito waited on a connection that never
+  opened, and the call had no timeout. `npx prettier` hung the same way.
+- Workaround: The web server prefers IPv4 addresses (`dns.setDefaultResultOrder
+  ("ipv4first")` at start-up), and the Cognito calls have a 5 s connection and 15 s request
+  timeout, so a network fault shows "Sign-in is unavailable right now".
+- Suggestion: A default request timeout in the SDK, or a log line when a connection is
+  still pending after several seconds.
+
+### FL-205: The Next.js dev server kept serving an old stylesheet
+
+- Date: 2026-10-10
+- Service / tool: Next.js 16 dev server (Turbopack), Tailwind CSS 4
+- Severity: Low
+- Task attempted: Check the desk speaker's light ring in the browser.
+- Steps taken: Appended the ring's CSS to `app/globals.css` while the dev server ran, then
+  opened `/speaker`.
+- Expected: The new rules on the next load.
+- Actual: The page had the elements but no ring; the served stylesheet held the earlier
+  rules and none of the new ones, while a production build included them.
+- Workaround: Restart `npm run dev` after editing `globals.css`.
+- Suggestion: Rebuild the global stylesheet when it changes, or say in the dev log that it
+  was not.
 
 ## 4. Our own code (found by tests, reviews, reference data and live runs)
 
@@ -923,6 +1052,23 @@ Entries in section 4 are about our own code, so they use a shorter form:
   captain current in the right seat for a first officer's (never one pilot), and
   operating one cabin crew short while one per 50 seats is kept. Each comes after the
   seat's own rank, and cancelling is always last.
+
+### FL-200: A clash with another trip was reported as short rest
+
+- Date: 2026-10-10
+- Where: legality engine (rest rule)
+- Found by: checking the two-trip case the project owner described
+- Severity: Low
+- What went wrong: Once C-3983 covered P-2291 (13-14 Oct), checking them for P-2217 said
+  "only 11.0h rest after P-2291 on 2026-10-13", although P-2217 (02:30-12:15Z on the 14th)
+  overlaps P-2291's second day (04:00-14:45Z) outright. The verdict was right; the reason
+  hid the decisive fact.
+- Cause: The rule walked the crew member's duties in date order and reported the first
+  problem, so a short rest after day one came before the clash with day two.
+- Fix: Any overlapping trip is named first ("double-booked: P-2291 overlaps on
+  2026-10-14"), then rest either side. Tests pin this, and the separate-plans case: a
+  choice for one trip is re-judged for the next day's trip, and the second approval goes
+  stale with "only 11.75h rest after P-2291".
 
 #### Question pipeline, verifier and models
 
@@ -1591,6 +1737,39 @@ Entries in section 4 are about our own code, so they use a shorter form:
   against the stored value, and the admin page says so. Accounts are still created by the
   provisioning command; the role table now says only what is built.
 
+### FL-198: One captain out on both days of a trip became two competing disruptions
+
+- Date: 2026-10-10
+- Where: desk assignment, joint plan, contention
+- Found by: live run (the project owner)
+- Severity: Medium
+- What went wrong: C-1042 was reported out for 13 Oct and, separately, for 14 Oct: both
+  days of P-2291's one captain seat. The reports went to two desks (Rohit and Divya), each
+  showed the other as "competing for the same crew", and "Build a joint plan" failed with
+  `C-1042 named as out more than once`.
+- Cause: Each report was handled as its own seat. A trip is crewed as a whole, so whoever
+  covers flies both days and one cover fills both reports.
+- Fix: A report needing a seat already open in another disruption goes to that desk, with
+  a note. The two are no longer flagged as rivals; each record says "the same seat is also
+  reported in ...", and the joint plan treats the same person out of the same seat as one
+  seat. Once a plan for either is approved (every rule re-checked for the whole trip), the
+  other's plan goes stale, and its record shows the seat already re-crewed, with who flies
+  it, instead of options, ready to close.
+
+### FL-208: The speaker device held the whole team's password
+
+- Date: 2026-10-10
+- Where: speaker setup, provisioning
+- Found by: independent review
+- Severity: High
+- What went wrong: `web_env --speaker` wrote the demo team's shared password into the web app's settings as
+  the speaker's, so anyone reading the hosted app's environment could sign in as any
+  controller, approver or the super admin.
+- Cause: Every demo account is provisioned with one password, and the speaker reused it.
+- Fix: `web_env --speaker` gives `ops.speaker` a new random password, sets it on the account,
+  and writes only that; it uses characters a .env file keeps exactly (an unquoted `#` or
+  `$` had cut the value short).
+
 #### Ingestion, analysis, search and configuration
 
 ### FL-089: The report worker trusted the sender written in the message
@@ -2055,6 +2234,67 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - What went wrong: Two reports of the same sick days sent before the worker stored the first both passed.
 - Cause: The check read only stored disruptions.
 - Fix: It also reads reports filed but not yet stored or refused.
+
+### FL-206: Two events in the same second made the wrong one "latest"
+
+- Date: 2026-10-10
+- Where: spoken alerts
+- Found by: test, while building "welcome back"
+- Severity: Low
+- What went wrong: A plan submitted and rejected within one second was announced as
+  "waiting for approval", not "sent back".
+- Cause: Audit times have one-second resolution, and ties were broken by the action's name.
+- Fix: Ties are broken by where the action falls in a disruption's life, so the later stage
+  wins.
+
+### FL-209: The public skill URL fetched any certificate URL and crashed on bad ones
+
+- Date: 2026-10-10
+- Where: Alexa skill endpoint
+- Found by: independent review
+- Severity: Medium
+- What went wrong: Before any signature check, a certificate URL with a new query string (`...cert.pem?n=1`)
+  made the endpoint fetch it again and cache another chain, without limit; an unreachable
+  or non-certificate URL raised an error instead of a refusal.
+- Cause: The URL check allowed queries, the cache was keyed on the raw URL and never trimmed, and
+  fetch and parse errors were not turned into refusals.
+- Fix: Queries are refused, the cache is keyed on the normalised URL and holds a few chains, and
+  any fetch or parse failure is a 400 refusal.
+
+### FL-210: Speaker and alert defects found in review
+
+- Date: 2026-10-10
+- Where: spoken alerts, speaker feed, Alexa links
+- Found by: independent review
+- Severity: Low
+- What went wrong: A speaker could still run the question pipeline; a desk speaker could never hear "needs a
+  look"; an older disruption on two desks reached only one; every poll read every disruption
+  ever resolved; linked Echos kept the desk a person had at their last request.
+- Cause: Each was a gap in the first version's rules.
+- Fix: Speakers may not ask; failures go to the whole-room speaker, as documented; alerts reach
+  every owning desk; the feed reads the latest resolved disruptions only, and one read
+  serves all screens for a few seconds; notifications follow each person's current
+  profile.
+
+### FL-214: The notifier could not read profiles, so Alexa chimes never went out
+
+- Date: 2026-10-11
+- Where: notifier Lambda permissions (Alexa and desktop alerts), escalation
+- Found by: independent review
+- Severity: High
+- What went wrong: Each notification first reads the person's current role and desk from
+  their profile, but the notifier was granted only Query, not GetItem. Every Alexa chime
+  (and every desktop alert) failed with AccessDenied, and the failure was only logged. The
+  same review found that desktop alerts were sent one after another inside a 30 s Lambda, so
+  a few slow push services could time it out and retry the whole batch, emails included; that
+  escalation emailed before recording the escalation, so a retry could email twice; and that
+  a long stage name could cut the time off an escalation schedule's name, so a second check
+  for the same disruption collided and was lost.
+- Cause: The infra test checked the notifier could Query and not write, not every call the
+  code makes; the sending loop had no time limit; the email came before the record.
+- Fix: GetItem is granted (the infra tests assert it); desktop alerts are sent side by side
+  and given up after 20 s, in a 60 s Lambda; the escalation is recorded first; schedule names
+  keep the time and a hash of the id whatever the lengths.
 
 #### Rule settings
 
@@ -2532,6 +2772,71 @@ Entries in section 4 are about our own code, so they use a shorter form:
     other disruption was named by their name instead of "your desk"; the sign-in map's
     labels overlapped and a plane waited at its corner (since replaced by a new backdrop).
 
+### FL-199: The guide did not explain what the console shows
+
+- Date: 2026-10-10
+- Where: web guide and airline logos
+- Found by: the project owner
+- Severity: Low
+- What went wrong: It was unclear which logo is which airline, what "on your desk" means,
+  what a disruption without it is, or what each label and figure counts. An airline's name
+  showed only after the browser's slow tooltip, and a longer guide step was cut off at the
+  top of the screen.
+- Cause: The guide was a few lines of text per role. Its dialog was drawn inside the top
+  bar, whose blur makes a fixed overlay sit relative to the bar, not the screen.
+- Fix: Each role's guide walks through its screen with real examples drawn by the app's own
+  components: the figures, a card on and off your desk, the three airlines and their
+  aircraft, every status label, the options, competing crew and the same seat. The logo
+  names its airline at once on hover or focus, and the guide is drawn on the page body.
+
+### FL-207: The speaker's pairing could be skipped with a header
+
+- Date: 2026-10-10
+- Where: web desk speaker
+- Found by: independent review
+- Severity: High
+- What went wrong: Sending `X-Forwarded-Host: localhost` (or `Host`) made a hosted app treat the caller as
+  the local machine and serve the room's alerts and speech; the pairing cookie was a plain
+  hash of the code, so it could be computed and tried without the rate limit.
+- Cause: The local-machine check trusted request headers, and the cookie had no server secret.
+- Fix: Pairing is skipped only under `npm run dev`; a production build always needs a paired
+  screen, whose cookie is an HMAC under a server-side secret. Pairing attempts are limited
+  per client, not across all screens.
+
+### FL-211: "Welcome back" counted from the last new tab
+
+- Date: 2026-10-10
+- Where: web console
+- Found by: independent review
+- Severity: Low
+- What went wrong: Each new tab reset the time it counted from, and a day of live work reappeared the next
+  morning as "while you were away"; a blocked browser storage silenced the speaker, and an
+  alert was marked heard even when the browser refused to play it.
+- Cause: It ran once per tab and measured from the last sign-in; the speaker treated blocked
+  storage as a fresh start; playback failures were not reported.
+- Fix: It runs once per sign-in and counts from when CrewOps was last open (an open console says
+  so every five minutes); the speaker keeps what it heard in memory when storage is blocked,
+  and an alert stays new until it was actually spoken.
+
+### FL-215: Desktop alert defects found in review
+
+- Date: 2026-10-11
+- Where: web app (sign-in, desktop alerts)
+- Found by: independent review
+- Severity: Medium
+- What went wrong: Sign-in's return-to-page (`?next=`) accepted "/<tab>/evil.com", which a
+  browser reads as another site; a browser left signed in by one controller kept receiving
+  their alerts after a colleague signed in; a click on an alert only focused a tab opened
+  before the service worker; and after the push keys were replaced, browsers stayed "on" but
+  received nothing.
+- Cause: The path was checked as text rather than parsed; subscriptions were stored per
+  person and browser rather than per browser; the worker never took charge of open tabs; a
+  subscription made with old keys was never noticed.
+- Fix: The path is parsed and must stay on this site; each browser has one owner, the person
+  who last turned alerts on (or opened CrewOps with them on) in it, and only the owner can
+  remove it; the worker claims open tabs and opens a new one if needed; a subscription with
+  old keys is dropped by the browser and by the notifier (the push service refuses it).
+
 #### Evaluation and tests
 
 ### FL-019: Two evaluation checks could never fail
@@ -2613,6 +2918,19 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Cause: Their fixed times now fell after the real clock, which the store compares against.
 - Fix: Times that must order against the real clock come from it (an hour ago); the gold
   costs were recomputed by an independent formula, not from the engine.
+
+### FL-212: A test assumed the order of two changes made in the same second
+
+- Date: 2026-10-10
+- Where: tests (rule thresholds)
+- Found by: full test run
+- Severity: Low
+- What went wrong: The super-admin test expected the newest activity to be the super
+  admin's change; it failed once in a full run, when the admin's change sorted first.
+- Cause: Both changes were stamped in the same second, and the audit key breaks such ties
+  with a random id.
+- Fix: The test finds the super admin's change by its content (13h back to 12h rest), not
+  by position.
 
 #### Documentation
 

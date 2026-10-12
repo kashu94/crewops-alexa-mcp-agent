@@ -129,6 +129,33 @@ def next_desk(table: Any) -> str:
     return assign_desk(open_counts, totals).desk_id
 
 
+def seat_keys(analysis: dict[str, Any]) -> set[tuple[str, str, str]]:
+    """The seats an analysis needs covered: trip, role and the crew member who is out."""
+    return {
+        (s["pairing_id"], s["role"], s["crew_out"])
+        for s in analysis.get("seats") or []
+        if s.get("crew_out") and s.get("pairing_id") and s.get("role")
+    }
+
+
+def same_seat_owner(table: Any, analysis: dict[str, Any]) -> tuple[str | None, list[str]]:
+    """An open disruption already needing one of these seats, and its desk. One person out
+    on two days of one trip, reported twice, is one seat: whoever covers flies the whole
+    trip, so the second report goes to the desk already handling it, as crew control would
+    add it to the open case."""
+    mine = seat_keys(analysis)
+    if not mine:
+        return None, []
+    desk, ids = None, []
+    for status in OPEN_STATUSES:
+        for item in disruptions_with_status(table, status):
+            theirs = from_dynamo(item.get("analysis") or {})
+            if mine & seat_keys(theirs):
+                ids.append(str(item["disruption_id"]))
+                desk = desk or theirs.get("desk")
+    return desk, sorted(ids)
+
+
 def unavailable_items(table: Any) -> list[dict[str, Any]]:
     return [
         item for status in UNAVAILABLE_STATUSES for item in disruptions_with_status(table, status)
@@ -190,7 +217,14 @@ def analyse_item(table: Any, item: dict[str, Any], operation: Operation) -> RunR
     contacts = operation.seed.contacts if operation.seed else ()
     analysis = analyse(operation.world, report, operation.gates, contacts)
     doc = analysis.to_dict()
-    doc["desk"] = next_desk(table)
+    owner, same = same_seat_owner(table, doc)
+    doc["desk"] = owner or next_desk(table)
+    if same:
+        doc["notes"] = [
+            *doc.get("notes", []),
+            f"The same seat is already open in {', '.join(same)}: one cover fills both, so "
+            "this goes to the same desk.",
+        ]
     outcome = store_analysis(table, disruption_id, doc, datetime.now(UTC))
     if outcome is AnalysisOutcome.STORED:
         log.info("analysed %s: %s", disruption_id, analysis.summary)

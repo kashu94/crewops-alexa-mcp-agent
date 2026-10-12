@@ -27,6 +27,9 @@ Audit event                     DISRUPTION#id / AUDIT#ts#action
 Suggestion from another desk    DISRUPTION#id / SUGGEST#ts#user
 Rejected report                 REPORT#id / REJECTED
 User profile                    USER#username / PROFILE
+Last console sign-in            USER#username / LAST_SEEN
+Linked Alexa account            ALEXA / USER#alexa-user-id
+Desktop alerts (web push)       PUSH / endpoint-hash
 Report as filed by its sender   USER#username / FILED#at#id  FILED / at#id
 Roster version                  CREW#id / ROSTER_VERSION
 Alert address                   ALERTS / SUB#id

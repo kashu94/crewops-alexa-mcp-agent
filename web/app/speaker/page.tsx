@@ -1,0 +1,518 @@
+"use client";
+
+import { Bell, BellRing, Check, Mic, Power, Volume2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { makeRecognition } from "@/lib/speech";
+
+// A desk or ops-room speaker. It belongs to a place, not a person: nobody signs in here,
+// and no one's sign-in or sign-out affects it. Its server signs in as the speaker device
+// and hears only alert briefs. It behaves as an Echo does with an Alexa notification: a
+// chime and an amber ring, then "what are my notifications?" reads them.
+
+type Alert = {
+  id: string;
+  disruption_id: string;
+  event: string;
+  at: string;
+  title: string;
+  text: string;
+  speech: string;
+  desk: { desk_id: string; controller: string } | null;
+};
+
+const SCOPES: { value: string; label: string }[] = [
+  { value: "room", label: "Whole ops room" },
+  { value: "desk-1", label: "Desk 1 · Ananya Iyer" },
+  { value: "desk-2", label: "Desk 2 · Rohit Malhotra" },
+  { value: "desk-3", label: "Desk 3 · Divya Rao" },
+  { value: "approvals", label: "Approvals" },
+];
+const POLL_MS = 5_000;
+const MAX_ANNOUNCEMENTS = 3; // an alert is spoken unprompted once, then twice more as a reminder
+const GAP_MS = 15_000;
+// After an announcement *ends*: a brief takes about 10 s to say, so 15 s between keeps all
+// three within about a minute without talking over the room.
+const FIRST_DELAY_MS = 1_200; // after the chime
+const heardKey = (scope: string) => `crewops-speaker-heard:${scope}`;
+
+// What this screen has heard, per scope. Kept in localStorage across reloads; where the
+// browser blocks storage (some private windows), in memory for as long as the page is open.
+const inMemory = new Map<string, Set<string>>();
+
+function loadHeard(scope: string): Set<string> | null {
+  try {
+    const raw = localStorage.getItem(heardKey(scope));
+    return raw ? new Set(JSON.parse(raw) as string[]) : null;
+  } catch {
+    return inMemory.get(scope) ?? null;
+  }
+}
+
+function saveHeard(scope: string, heard: Set<string>) {
+  inMemory.set(scope, new Set(heard));
+  try {
+    localStorage.setItem(heardKey(scope), JSON.stringify([...heard].slice(-200)));
+  } catch {
+    // kept in memory instead: announced again only after a reload, which is harmless
+  }
+}
+
+/** Two soft notes, as a notification chime; made here, so no sound file is needed. */
+function chime(ctx: AudioContext) {
+  [880, 1318.5].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    const start = ctx.currentTime + i * 0.18;
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(0.18, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.6);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + 0.65);
+  });
+}
+
+function browserVoice(text: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!("speechSynthesis" in window)) return resolve(false);
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "en-IN";
+    u.onend = () => resolve(true);
+    u.onerror = () => resolve(false);
+    window.speechSynthesis.speak(u);
+  });
+}
+
+/** Speaks ``text`` in the CrewOps voice, or the browser's own when that is unavailable or
+ * the audio was refused. Says whether it was heard. */
+async function say(text: string): Promise<boolean> {
+  const r = await fetch("/api/speaker/speak", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => null);
+  if (r?.ok) {
+    const url = URL.createObjectURL(await r.blob());
+    try {
+      const played = await new Promise<boolean>((resolve) => {
+        const audio = new Audio(url);
+        audio.onended = () => resolve(true);
+        audio.onerror = () => resolve(false);
+        audio.play().catch(() => resolve(false));
+      });
+      if (played) return true;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  return browserVoice(text);
+}
+
+export default function Speaker() {
+  const [scope, setScope] = useState<string | null>(null);
+  const [paired, setPaired] = useState<boolean | null>(null);
+  const [on, setOn] = useState(false);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [heard, setHeard] = useState<Set<string>>(new Set());
+  const [speaking, setSpeaking] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [announce, setAnnounce] = useState(true);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const audio = useRef<AudioContext | null>(null);
+  const announced = useRef<Set<string>>(new Set());
+  // Each unheard alert's announcements so far and when the next is due.
+  const schedule = useRef(new Map<string, { count: number; nextAt: number }>());
+  const busy = useRef(false);
+  const unheardNow = useRef<Alert[]>([]);
+  const recognition = useRef<ReturnType<typeof makeRecognition>>(null);
+
+  // Which desk this speaker serves: from the address (?for=desk-2), else as last set up.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const fromUrl = new URLSearchParams(window.location.search).get("for");
+      let saved: string | null = null;
+      try {
+        saved = localStorage.getItem("crewops-speaker-for");
+      } catch {
+        saved = null;
+      }
+      const pick = [fromUrl, saved, "room"].find((s) => s && SCOPES.some((o) => o.value === s)) ?? "room";
+      setScope(pick);
+    });
+    fetch("/api/speaker/pair")
+      .then((r) => r.json())
+      .then((d: { paired?: boolean }) => setPaired(Boolean(d.paired)))
+      .catch(() => setPaired(false));
+    return () => clearTimeout(t);
+  }, []);
+
+  const unheard = alerts.filter((a) => !heard.has(a.id));
+  useEffect(() => {
+    unheardNow.current = unheard;
+  });
+
+  const markHeard = useCallback(
+    (ids: string[]) => {
+      if (!scope) return;
+      ids.forEach((id) => schedule.current.delete(id)); // heard: no more announcements
+      setHeard((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.add(id));
+        saveHeard(scope, next);
+        return next;
+      });
+    },
+    [scope],
+  );
+
+  /** "What are my notifications?": each new alert, oldest first, then it is heard. */
+  const read = useCallback(async () => {
+    if (busy.current) return;
+    busy.current = true;
+    setSpeaking(true);
+    try {
+      const queue = [...unheardNow.current].reverse();
+      if (queue.length === 0) {
+        await say("You have no new CrewOps notifications.");
+      } else {
+        await say(`You have ${queue.length} new CrewOps notification${queue.length === 1 ? "" : "s"}.`);
+        for (const a of queue) {
+          // Heard only if it was actually spoken; otherwise it stays new.
+          if (await say(a.speech)) markHeard([a.id]);
+        }
+      }
+    } finally {
+      busy.current = false;
+      setSpeaking(false);
+    }
+  }, [markHeard]);
+
+  // Poll the alert feed while the speaker is on.
+  useEffect(() => {
+    if (!on || !paired || !scope) return;
+    let stop = false;
+    let inFlight = false;
+    const tick = async () => {
+      if (inFlight) return; // a slow answer is never overtaken by, or overwrites, a newer one
+      inFlight = true;
+      const r = await fetch(`/api/speaker/feed?for=${encodeURIComponent(scope)}`, {
+        signal: AbortSignal.timeout(8_000),
+      })
+        .catch(() => null)
+        .finally(() => {
+          inFlight = false;
+        });
+      if (stop) return;
+      const data = (await r?.json().catch(() => null)) as { result?: { alerts?: Alert[] }; error?: string } | null;
+      if (!r?.ok || !data?.result) {
+        setError(data?.error ?? "CrewOps is unreachable; trying again.");
+        return;
+      }
+      setError(null);
+      const list = data.result.alerts ?? [];
+      setAlerts(list);
+      const known = loadHeard(scope);
+      if (known === null) {
+        // A speaker just set up announces what happens from now on, as a new Echo would.
+        const baseline = new Set(list.map((a) => a.id));
+        saveHeard(scope, baseline);
+        setHeard(baseline);
+        list.forEach((a) => announced.current.add(a.id));
+        return;
+      }
+      setHeard(known);
+      // An alert stops being announced once it is dealt with: its disruption moved on (a plan
+      // submitted, resolved, closed) and left this desk's list, or someone heard it.
+      const pending = new Set(list.filter((a) => !known.has(a.id)).map((a) => a.id));
+      for (const id of [...schedule.current.keys()]) if (!pending.has(id)) schedule.current.delete(id);
+      const fresh = list.filter((a) => !known.has(a.id) && !announced.current.has(a.id));
+      if (fresh.length > 0 && audio.current) {
+        fresh.forEach((a) => {
+          announced.current.add(a.id);
+          schedule.current.set(a.id, { count: 0, nextAt: Date.now() + FIRST_DELAY_MS });
+        });
+        chime(audio.current);
+      }
+    };
+    tick();
+    const timer = setInterval(tick, POLL_MS);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, [on, paired, scope]);
+
+  // Announcements: each new alert is spoken up to three times, 15 s after the last one ends,
+  // oldest first and one at a time, until it is dealt with or someone acknowledges it.
+  useEffect(() => {
+    if (!on || !announce || !scope) return;
+    const forWhom =
+      scope === "room" ? "" : scope === "approvals" ? " for approvals" : ` for ${scope.replace("-", " ")}`;
+    const timer = setInterval(async () => {
+      if (busy.current) return;
+      const now = Date.now();
+      const due = [...unheardNow.current].reverse().find((a) => {
+        const s = schedule.current.get(a.id);
+        return s && s.count < MAX_ANNOUNCEMENTS && s.nextAt <= now;
+      });
+      if (!due) return;
+      const entry = schedule.current.get(due.id)!;
+      busy.current = true;
+      setSpeaking(true);
+      try {
+        const lead = entry.count === 0 ? `New CrewOps alert${forWhom}.` : "Reminder:";
+        await say(`${lead} ${due.speech}`);
+        entry.count += 1;
+        entry.nextAt = Date.now() + GAP_MS;
+        setCounts((c) => ({ ...c, [due.id]: entry.count }));
+      } finally {
+        busy.current = false;
+        setSpeaking(false);
+      }
+    }, 1_000);
+    return () => clearInterval(timer);
+  }, [on, announce, scope]);
+
+  useEffect(
+    () => () => {
+      recognition.current?.stop();
+      void audio.current?.close().catch(() => undefined);
+    },
+    [],
+  );
+
+  function switchOn() {
+    audio.current ??= new AudioContext();
+    void audio.current.resume();
+    setOn(true);
+  }
+
+  function listen() {
+    const r = makeRecognition();
+    if (!r) {
+      void read();
+      return;
+    }
+    recognition.current = r;
+    setListening(true);
+    r.onresult = (e) => {
+      const last = e.results[e.results.length - 1];
+      if (!last?.isFinal) return;
+      const said = last[0].transcript.toLowerCase();
+      if (/notification|what('s| is) new|anything|messages?/.test(said)) void read();
+      else if (/clear|dismiss/.test(said)) markHeard(unheard.map((a) => a.id));
+      else void say("Ask: what are my notifications?");
+    };
+    r.onerror = () => setListening(false);
+    r.onend = () => setListening(false);
+    r.start();
+  }
+
+  function choose(value: string) {
+    setScope(value);
+    setAlerts([]);
+    announced.current = new Set();
+    try {
+      localStorage.setItem("crewops-speaker-for", value);
+    } catch {
+      // not remembered across reloads
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set("for", value);
+    window.history.replaceState(null, "", url);
+  }
+
+  async function submitCode() {
+    const r = await fetch("/api/speaker/pair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    }).catch(() => null);
+    const d = (await r?.json().catch(() => null)) as { error?: string } | null;
+    if (r?.ok) setPaired(true);
+    else setError(d?.error ?? "Pairing failed.");
+  }
+
+  const ring = !on ? "off" : speaking ? "speaking" : listening ? "listening" : unheard.length ? "notify" : "idle";
+  const scopeLabel = SCOPES.find((s) => s.value === scope)?.label ?? "";
+
+  return (
+    <main className="flex min-h-screen flex-1 flex-col items-center justify-center gap-8 bg-[radial-gradient(ellipse_at_top,#e0f2fe,transparent_60%),linear-gradient(#f8fafc,#eef2f7)] px-4 py-10">
+      <header className="text-center">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-700/80">CrewOps desk speaker</p>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{scopeLabel || " "}</h1>
+        <p className="mt-1 text-xs text-slate-500">No sign-in: this speaker belongs to the desk, not to a person.</p>
+        {scope && (
+          <select
+            value={scope}
+            onChange={(e) => choose(e.target.value)}
+            aria-label="Which desk this speaker serves"
+            className="mt-3 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 shadow-sm"
+          >
+            {SCOPES.map((s) => (
+              <option key={s.value} value={s.value}>
+                Serves: {s.label}
+              </option>
+            ))}
+          </select>
+        )}
+      </header>
+
+      {paired === false ? (
+        <section className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-xl ring-1 ring-slate-200">
+          <p className="text-sm font-semibold">Pair this screen as a speaker</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Enter the pairing code the administrator set up, once per screen.
+          </p>
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            className="mt-4 w-full rounded-xl border border-slate-200 px-3 py-2 text-center font-mono tracking-widest outline-none focus:border-sky-400"
+            placeholder="Pairing code"
+            aria-label="Pairing code"
+          />
+          <button
+            type="button"
+            onClick={submitCode}
+            className="mt-3 w-full rounded-xl bg-slate-900 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          >
+            Pair
+          </button>
+          {error && <p className="mt-2 text-xs text-red-700">{error}</p>}
+        </section>
+      ) : (
+        <>
+          {/* The device: an Echo seen from above, its light ring saying what it is doing. */}
+          <div className="relative grid place-items-center">
+            <div
+              className={`speaker-ring speaker-${ring} grid h-64 w-64 place-items-center rounded-full p-[10px]`}
+              aria-live="polite"
+              aria-label={
+                ring === "notify"
+                  ? `${unheard.length} new notification${unheard.length === 1 ? "" : "s"}`
+                  : `Speaker ${ring}`
+              }
+            >
+              <div className="grid h-full w-full place-items-center rounded-full bg-gradient-to-b from-slate-800 to-slate-950 shadow-[inset_0_6px_24px_rgba(0,0,0,0.6)]">
+                <div className="grid h-[86%] w-[86%] place-items-center rounded-full bg-[radial-gradient(circle,#1e293b_1px,transparent_1.4px)] bg-[length:9px_9px]">
+                  {!on ? (
+                    <button
+                      type="button"
+                      onClick={switchOn}
+                      className="flex flex-col items-center gap-2 rounded-full px-6 py-4 text-slate-200 hover:text-white"
+                    >
+                      <Power size={34} />
+                      <span className="text-xs">Turn on the speaker</span>
+                    </button>
+                  ) : ring === "notify" ? (
+                    <div className="flex flex-col items-center gap-1 text-amber-200">
+                      <BellRing size={30} className="animate-pulse" />
+                      <span className="font-mono text-3xl font-semibold">{unheard.length}</span>
+                      <span className="text-[11px] uppercase tracking-widest">new</span>
+                    </div>
+                  ) : ring === "speaking" ? (
+                    <div className="flex items-end gap-1" aria-hidden>
+                      {[0, 1, 2, 3, 4].map((i) => (
+                        <span
+                          key={i}
+                          className="wave-bar h-10 w-1.5 rounded-full bg-cyan-300"
+                          style={{ animationDelay: `${i * 0.12}s` }}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <Bell size={28} className="text-slate-500" />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {on && (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => void read()}
+                disabled={speaking}
+                className="flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-slate-800 disabled:opacity-60"
+              >
+                <Volume2 size={16} /> What are my notifications?
+              </button>
+              <button
+                type="button"
+                onClick={listen}
+                disabled={speaking || listening}
+                className="flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-60"
+                title="Say: what are my notifications?"
+              >
+                <Mic size={16} className={listening ? "text-sky-600" : ""} /> {listening ? "Listening…" : "Ask"}
+              </button>
+              {unheard.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => markHeard(unheard.map((a) => a.id))}
+                  className="flex items-center gap-2 rounded-full bg-amber-100 px-4 py-2.5 text-sm font-medium text-amber-900 shadow ring-1 ring-amber-300 hover:bg-amber-200"
+                  title="Acknowledge: stop announcing these"
+                >
+                  <Check size={16} /> Got it
+                </button>
+              )}
+              <label className="flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-xs text-slate-600 shadow ring-1 ring-slate-200">
+                <input type="checkbox" checked={announce} onChange={(e) => setAnnounce(e.target.checked)} />
+                Announce new alerts (up to 3 times)
+              </label>
+            </div>
+          )}
+
+          {error && <p className="text-xs text-red-700">{error}</p>}
+
+          <section className="w-full max-w-xl">
+            <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Recent alerts</h2>
+            {alerts.length === 0 ? (
+              <p className="rounded-2xl bg-white/70 px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
+                {on ? "Nothing yet. New alerts for this desk chime here." : "Turn the speaker on to hear alerts."}
+              </p>
+            ) : (
+              <ol className="flex flex-col gap-2">
+                {alerts.slice(0, 6).map((a) => (
+                  <li
+                    key={a.id}
+                    className={`rounded-2xl bg-white px-4 py-3 text-sm shadow-sm ring-1 ${
+                      heard.has(a.id) ? "ring-slate-200" : "ring-amber-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 font-semibold text-slate-800">
+                        {a.title}
+                        {!heard.has(a.id) && counts[a.id] ? (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                            Announced {counts[a.id]} of {MAX_ANNOUNCEMENTS}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="font-mono text-[11px] text-slate-400">
+                        {a.at.slice(5, 10)} {a.at.slice(11, 16)}Z
+                      </span>
+                    </div>
+                    <p className="mt-1 text-slate-600">{a.text}</p>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+
+          <p className="max-w-xl text-center text-[11px] text-slate-400">
+            A simulated Echo for this demo. A real Echo, or the Alexa app, gets the same alert as an Alexa notification
+            from the CrewOps skill.
+          </p>
+        </>
+      )}
+    </main>
+  );
+}

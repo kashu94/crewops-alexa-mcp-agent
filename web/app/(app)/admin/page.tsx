@@ -307,6 +307,7 @@ export default function Admin() {
               <optgroup label="Crew control">
                 <option value="controller">Controller</option>
                 <option value="approver">Approver</option>
+                <option value="duty_supervisor">Duty supervisor (untouched disruptions)</option>
               </optgroup>
               <optgroup label="Operational teams">
                 {ALERT_TEAMS.map(([value, label]) => (

@@ -21,9 +21,12 @@ async function post(path: string, body: unknown): Promise<unknown> {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     if (response.status === 401 && typeof window !== "undefined" && path !== "/api/auth/login") {
-      // A full load on purpose: it drops every piece of signed-in state in the page.
+      // A full load on purpose: it drops every piece of signed-in state in the page. The
+      // page asked for comes back after sign-in (a desktop alert opens a disruption).
+      const here = window.location.pathname + window.location.search;
+      const next = here.startsWith("/login") || here === "/" ? "" : `?next=${encodeURIComponent(here)}`;
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign("/login");
+      window.location.assign(`/login${next}`);
     }
     throw new ApiError(response.status, data.code, data.error ?? "Something went wrong.");
   }
@@ -35,8 +38,7 @@ export async function tool<T = unknown>(name: string, args: Record<string, unkno
   return data.result;
 }
 
-export const signIn = (username: string, password: string) =>
-  post("/api/auth/login", { username, password });
+export const signIn = (username: string, password: string) => post("/api/auth/login", { username, password });
 
 export const signOut = () => post("/api/auth/logout", {});
 

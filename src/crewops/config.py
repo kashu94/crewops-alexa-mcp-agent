@@ -150,6 +150,25 @@ def _senders(env: Mapping[str, str]) -> tuple[str, ...]:
     return senders
 
 
+def _redirects(env: Mapping[str, str]) -> tuple[str, ...]:
+    raw = _get(env, "CREWOPS_ALEXA_REDIRECT_URLS") or ""
+    urls = tuple(u.strip() for u in raw.split(",") if u.strip())
+    pattern = r"^https://[a-z0-9.-]+\.amazon\.(com|co\.jp)/api/skill/link/[A-Z0-9]+$"
+    for url in urls:
+        if not re.match(pattern, url):
+            raise ConfigError(
+                f"CREWOPS_ALEXA_REDIRECT_URLS: {url!r} is not an Alexa account-linking redirect URL"
+            )
+    return urls
+
+
+def _events_stage(env: Mapping[str, str]) -> str:
+    stage = _get(env, "CREWOPS_ALEXA_EVENTS_STAGE", "development")
+    if stage not in ("development", "live"):
+        raise ConfigError(f"CREWOPS_ALEXA_EVENTS_STAGE must be development or live, got {stage!r}")
+    return stage
+
+
 def _fraction(env: Mapping[str, str], key: str, default: float) -> float:
     value = _float(env, key, default)
     if value >= 1:
@@ -196,6 +215,27 @@ class Settings:
     """The AppSync Events API's HTTP domain, where live console updates are published."""
     response_budget_seconds: float
     """Time the voice path has to answer. Alexa allows 8 s; the rest is margin."""
+    alexa_skill_id: str | None = None
+    """The CrewOps Alexa skill's id (amzn1.ask.skill...): requests for any other skill are
+    refused. Unset: no Alexa skill is deployed."""
+    alexa_redirect_urls: tuple[str, ...] = ()
+    """Alexa's account-linking redirect URLs, from the skill's Account Linking page. Set:
+    the auth stack adds a hosted sign-in page and an app client for Alexa."""
+    alexa_client_id: str | None = None
+    """The Cognito app client Alexa signs controllers in with; set on the skill by its stack."""
+    alexa_events_stage: str = "development"
+    """Where Alexa notifications go: "development" (a skill in development, to its
+    developer's own devices) or "live" (a certified skill)."""
+    escalate_after_minutes: int = 10
+    """How long a disruption may wait untouched on a desk before the duty supervisor is
+    emailed and the speakers announce it."""
+    escalation_function_arn: str | None = None
+    escalation_role_arn: str | None = None
+    """The escalation check and the role EventBridge Scheduler runs it with; set on the
+    notifier by its stack. Unset: no escalations are scheduled."""
+    push_enabled: bool = False
+    """Desktop alerts (web push) from the notifier; its stack sets it when the notifier runs
+    the MCP package, which carries the cryptography library push needs."""
 
     # -- Derived resource names ---------------------------------------------
 
@@ -278,6 +318,18 @@ class Settings:
         return f"{self.prefix}-guardrail"
 
     @property
+    def alexa_parameter_prefix(self) -> str:
+        """Parameter Store path of the skill's Login with Amazon client id and secret, which
+        send Alexa notifications. Created by hand (a SecureString), never in a file."""
+        return f"/{self.prefix}/alexa"
+
+    @property
+    def push_parameter_prefix(self) -> str:
+        """Parameter Store path of the web push (VAPID) keys: the private key a SecureString,
+        the public key a plain parameter the web app reads."""
+        return f"/{self.prefix}/push"
+
+    @property
     def guardrails_enabled(self) -> bool:
         return self.guardrail_id is not None
 
@@ -318,6 +370,14 @@ class Settings:
             alerts_topic_arn=_get(env, "CREWOPS_ALERTS_TOPIC_ARN"),
             events_http_domain=_get(env, "CREWOPS_EVENTS_HTTP_DOMAIN"),
             response_budget_seconds=_float(env, "CREWOPS_RESPONSE_BUDGET_SECONDS", 6.0),
+            alexa_skill_id=_get(env, "CREWOPS_ALEXA_SKILL_ID"),
+            alexa_redirect_urls=_redirects(env),
+            alexa_client_id=_get(env, "CREWOPS_ALEXA_CLIENT_ID"),
+            alexa_events_stage=_events_stage(env),
+            escalate_after_minutes=_int(env, "CREWOPS_ESCALATE_AFTER_MINUTES", 10),
+            escalation_function_arn=_get(env, "CREWOPS_ESCALATION_FUNCTION_ARN"),
+            escalation_role_arn=_get(env, "CREWOPS_ESCALATION_ROLE_ARN"),
+            push_enabled=_get(env, "CREWOPS_PUSH_ENABLED") == "1",
         )
 
 

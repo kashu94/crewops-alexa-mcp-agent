@@ -11,6 +11,7 @@ import os
 import sys
 
 from aws_cdk import App, Environment, Tags
+from crewops_infra.alexa_stack import AlexaStack
 from crewops_infra.analysis_stack import AnalysisStack
 from crewops_infra.auth_stack import AuthStack
 from crewops_infra.data_stack import DataStack
@@ -55,6 +56,7 @@ def main() -> None:
         settings=settings,
         table=data.table,
         auth=auth,
+        package=PACKAGE if (PACKAGE / "main.py").exists() else None,
         env=env,
     )
     if (PACKAGE / "main.py").exists():
@@ -69,6 +71,16 @@ def main() -> None:
             notify=notify,
             env=env,
         )
+        if settings.alexa_skill_id and auth.alexa_client is not None:
+            AlexaStack(
+                app,
+                f"CrewOps-{settings.stage}-Alexa",
+                settings=settings,
+                table=data.table,
+                auth=auth,
+                guardrail=guardrail,
+                env=env,
+            )
     else:
         print(
             "Note: the MCP stack is left out until its package is built "

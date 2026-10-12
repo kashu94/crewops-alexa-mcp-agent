@@ -30,7 +30,9 @@ from crewops.store import schema
 from crewops.store.schema import SEPARATOR as S
 from crewops.tools import Caller
 
-ALERT_ROLES = ("controller", "approver", *(t.value for t in Team))
+ALERT_ROLES = ("controller", "approver", "duty_supervisor", *(t.value for t in Team))
+"""Who an alert address may follow: a crew-control role, the duty supervisor (disruptions
+left untouched on a desk), or an operational team."""
 """Crew control's two roles, then the operational teams told about disruptions
 (``crewops.domain.contacts``): gate control, station duty managers, flight information,
 operations monitoring, maintenance control, training and crew records, customer care."""

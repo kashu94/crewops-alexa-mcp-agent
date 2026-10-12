@@ -26,6 +26,7 @@ CREW_NAME_RE = re.compile(r"^[A-Z]\.\s*[A-Z]|\b[A-Z]\.?$")
 EXCLUSIVE = (
     (frozenset({Role.CREW}), "a crew login holds no other role"),
     (frozenset({Role.CONTROLLER, Role.APPROVER}), "nobody both submits and approves plans"),
+    (frozenset({Role.SPEAKER}), "a speaker is a device: it holds no other role"),
 )
 
 
@@ -90,6 +91,8 @@ def validate_team(members: list[TeamMember], seed: SeedData) -> list[str]:
             errors.append(f"{who}: {EXCLUSIVE[0][1]}")
         if EXCLUSIVE[1][0] <= m.roles:
             errors.append(f"{who}: {EXCLUSIVE[1][1]}")
+        if Role.SPEAKER in m.roles and len(m.roles) > 1:
+            errors.append(f"{who}: {EXCLUSIVE[2][1]}")
         if Role.CREW in m.roles:
             record = crew.get(m.crew_id or "")
             if record is None:

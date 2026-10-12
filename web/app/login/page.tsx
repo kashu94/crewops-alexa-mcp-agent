@@ -5,7 +5,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { NightApproach } from "@/components/login-art";
 import { Button, Field, Notice, Spinner } from "@/components/ui";
-import { signIn, signOut } from "@/lib/client";
+import { signIn, signOut, tool } from "@/lib/client";
 import { homeFor, type Me } from "@/lib/roles";
 
 /** Who is signed in in this browser, without the client's sign-in redirect (this is the
@@ -19,6 +19,22 @@ async function signedIn(): Promise<Me | null> {
   if (!r?.ok) return null;
   const data = (await r.json().catch(() => null)) as { result?: Me } | null;
   return data?.result ?? null;
+}
+
+/** Where to go after sign-in when a page sent the browser here (``?next=``): a page of
+ * this site only. Parsed as a URL, so tricks such as "//host" or "/<tab>/host" that a
+ * browser reads as another site are refused. */
+function nextPage(): string | null {
+  const next = new URLSearchParams(window.location.search).get("next");
+  if (!next || !next.startsWith("/")) return null;
+  let url: URL;
+  try {
+    url = new URL(next, window.location.origin);
+  } catch {
+    return null;
+  }
+  if (url.origin !== window.location.origin || url.pathname.startsWith("/login")) return null;
+  return url.pathname + url.search + url.hash;
 }
 
 const POINTS = [
@@ -44,7 +60,14 @@ export default function Login() {
     try {
       await signIn(String(form.get("username") ?? ""), String(form.get("password") ?? ""));
       const me = await signedIn();
-      window.location.replace(me ? homeFor(me.roles) : "/login");
+      if (me && (me.roles.includes("controller") || me.roles.includes("approver"))) {
+        // Once per sign-in (not per tab): what came while they were away, shown on the
+        // first page. A failure here never blocks signing in.
+        await tool("welcome_back")
+          .then((w) => sessionStorage.setItem("crewops-welcome", JSON.stringify(w)))
+          .catch(() => undefined);
+      }
+      window.location.replace(me ? (nextPage() ?? homeFor(me.roles)) : "/login");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
       setBusy(false);

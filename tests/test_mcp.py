@@ -179,7 +179,9 @@ def test_rule_thresholds_are_read_by_staff_and_changed_by_admins(api):
     assert err.value.code == "FORBIDDEN"
     boss = Caller("vikram", frozenset({Role.SUPER_ADMIN}))
     assert api.set_threshold(boss, "RULE-REST-04", "min_rest_hours", 12, 13, "rota")["value"] == 12
-    assert api.activity(admin)[0]["actor"] == "vikram"
+    # Both changes may share a second, so it is found by content, not by its position.
+    relaxed = [e for e in api.activity(admin) if e.get("actor") == "vikram"]
+    assert [(e["action"], e["from"], e["to"]) for e in relaxed] == [("RULE_CHANGED", 13, 12)]
 
 
 def test_the_feed_lists_disruptions_for_staff(api):
@@ -722,3 +724,99 @@ def test_a_filed_report_names_the_controller_desk_it_went_to(api):
     filed(api.table, "r-gate0042", "gate_closure", VALID_DETAILS["gate_closure"], by="imran")
     shown = {r["disruption_id"]: r for r in api.my_reports(IMRAN)}
     assert shown["r-gate0042"]["desks"] == [{"desk_id": "desk-1", "controller": "Ananya Iyer"}]
+
+
+def test_the_same_seat_on_another_day_is_one_cover_not_a_rival(api):
+    # r-sick1042 has C-1042 out of P-2291's captain seat; another report says the same for
+    # 14 Oct. Their options are the same people, but they need one cover, not two.
+    disruption(api.table, "r-c104214", "C-1042", "2026-10-14")
+    shown = api.show(ROHIT, "r-sick1042")
+    (same,) = shown["same_seat"]
+    assert (same["disruption_id"], same["seats"]) == ("r-c104214", ["P-2291 Captain"])
+    rivals = {r["disruption_id"] for entries in shown["contention"].values() for r in entries}
+    assert "r-c104214" not in rivals
+    assert api.show(ROHIT, "r-c104214")["same_seat"][0]["disruption_id"] == "r-sick1042"
+
+
+def test_covering_one_day_of_a_trip_covers_the_other_days_report(api):
+    # Read the roster from the table, as the deployed server does, so approvals show.
+    api = CrewOpsApi(api.table, lambda: Live(CrewOpsTools.load(api.table)), lambda r: None)
+    # C-1042 is also reported out for 14 Oct, the second day of the same trip: one seat.
+    disruption(api.table, "r-c104214", "C-1042", "2026-10-14")
+    first = api.submit(ROHIT, "r-sick1042")
+    second = api.submit(ROHIT, "r-c104214")
+    picked = {a["crew_id"] for p in (first, second) for a in p["picks"]}
+    assert picked == {"C-3310"}  # both would use the same reserve captain
+    # The first approval re-checks every rule for the whole trip (both days) and commits.
+    assert api.approve(MEERA, "r-sick1042", first["plan_id"])["status"] == "COMMITTED"
+    # The second, made against the old roster, is refused: nothing is written twice.
+    stale = api.approve(MEERA, "r-c104214", second["plan_id"])
+    assert stale["status"] == "STALE" and "the crew of P-2291 changed" in " ".join(stale["reasons"])
+    # Its record shows the seat already filled, and who flies it, instead of options.
+    (seat,) = api.show(ROHIT, "r-c104214")["seats"]
+    assert seat["live"] is None
+    assert seat["re_crewed"] == {
+        "cancelled": False,
+        "holders": [{"crew_id": "C-3310", "name": "D. Reddy"}],
+    }
+    with pytest.raises(ApiError) as err:
+        api.submit(ROHIT, "r-c104214")
+    assert err.value.code == "NOTHING_TO_COVER"
+
+
+SPEAKER = Caller("ops.speaker", frozenset({Role.SPEAKER}))
+
+
+def test_the_speaker_hears_its_desk_and_the_room_only(api):
+    from crewops.alerts import spoken
+
+    (alert,) = api.speaker_feed(SPEAKER, "desk-2")["alerts"]
+    assert alert["event"] == "OPTIONS_READY" and alert["disruption_id"] == "r-sick1042"
+    assert alert["text"].endswith(
+        "Recommended cover for P-2291 Captain: D. Reddy (C-3310), a reserve callout, "
+        "₹23,090. On Rohit Malhotra's desk."
+    )
+    assert alert["speech"] == spoken(alert["text"]) and "C 3310" in alert["speech"]
+    assert "23,090 rupees" in alert["speech"] and "13 October" in alert["speech"]
+    assert api.speaker_feed(SPEAKER, "desk-1")["alerts"] == []
+    assert [a["id"] for a in api.speaker_feed(SPEAKER, "room")["alerts"]] == [alert["id"]]
+    # Submitted: it leaves the desk speaker and reaches the approvals corner, as a new event.
+    api.submit(ROHIT, "r-sick1042")
+    assert api.speaker_feed(SPEAKER, "desk-2")["alerts"] == []
+    (waiting,) = api.speaker_feed(SPEAKER, "approvals")["alerts"]
+    assert waiting["event"] == "SUBMITTED" and waiting["id"] != alert["id"]
+    assert "waiting for approval, from rohit" in waiting["text"]
+    # Only a speaker device hears the feed; people read the console.
+    for caller in (ROHIT, MEERA, CREW, IMRAN):
+        with pytest.raises(ApiError) as err:
+            api.speaker_feed(caller, "room")
+        assert err.value.code == "FORBIDDEN"
+    with pytest.raises(ApiError) as err:
+        api.speaker_feed(SPEAKER, "desk-9")
+    assert err.value.code == "INVALID"
+    # A speaker device does not ask questions (no model calls on its account).
+    with pytest.raises(ApiError) as err:
+        api.ask(SPEAKER, "who covers P-2291?")
+    assert err.value.code == "FORBIDDEN"
+
+
+def test_welcome_back_says_what_came_while_away(api):
+    from datetime import timedelta
+
+    first = api.welcome_back(ROHIT)
+    assert first == {"since": None, "alerts": [], "speech": ""}  # first sign-in: nothing
+    # Signed in "an hour ago"; since then a plan of Rohit's was sent back.
+    real = api.clock
+    api.clock = lambda: real() - timedelta(hours=1)
+    api.welcome_back(ROHIT)
+    api.clock = real
+    plan = api.submit(ROHIT, "r-sick1042")
+    api.reject(MEERA, "r-sick1042", plan["plan_id"], "Reserve needed for tomorrow")
+    back = api.welcome_back(ROHIT)
+    (alert,) = back["alerts"]
+    assert alert["event"] == "REJECTED"
+    assert alert["text"].startswith("The plan for C-1042 unavailable 2026-10-13 to 2026-10-14")
+    assert back["speech"].startswith("Welcome back, Rohit. While you were away, 1 update came")
+    assert "Reserve needed for tomorrow" in back["speech"]
+    assert api.welcome_back(ROHIT)["alerts"] == []  # now seen
+    assert api.welcome_back(IMRAN)["alerts"] == []  # reporters have no desk to come back to

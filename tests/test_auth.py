@@ -252,7 +252,9 @@ def test_sync_creates_then_changes_nothing(ops_table):
     plan = plan_team(cognito, POOL, ops_table, team, password)
     assert asked == []  # nothing is asked for until a step runs
     apply(plan)
-    assert len(cognito.users) == 15 and set(cognito.passwords.values()) == {"Correct-Horse-9"}
+    assert len(cognito.users) == len(team) == 16 and set(cognito.passwords.values()) == {
+        "Correct-Horse-9"
+    }
     assert cognito.groups["ananya.iyer"] == {"controller"}
     assert get_profile(ops_table, "c1042.nair")["crew_id"] == "C-1042"
     assert get_profile(ops_table, "ananya.iyer")["desk"] == "desk-1"
@@ -353,5 +355,16 @@ def test_role_combinations_and_name_forms(seed):
     )
     crew_admin = member(roles=("crew", "admin"), crew_id="C-1042", name="A. Nair")
     assert any("holds no other role" in e for e in validate_team([crew_admin], seed))
+    # A speaker is a device, so it can never also be a person with a role.
+    speaker_admin = member(
+        username="ops.speaker", name="Ops Room Speaker", roles=("speaker", "admin")
+    )
+    assert any("a speaker is a device" in e for e in validate_team([speaker_admin], seed))
+    assert (
+        validate_team(
+            [member(username="ops.speaker", name="Ops Room Speaker", roles=("speaker",))], seed
+        )
+        == []
+    )
     for name in ("A.Shah", "Shah A."):
         assert validate_team([member(name=name)], seed)

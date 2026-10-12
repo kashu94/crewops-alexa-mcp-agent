@@ -475,9 +475,19 @@ def test_a_stated_rank_is_never_swapped_for_another(tools):
     assert code == "NEEDS_CONFIRMATION" and "C-2295 (S. Nair, First Officer)" in message
 
 
-def test_joint_plan_refuses_repeated_seats(tools):
-    code, message = err(tools, "joint_plan", events=[{"crew_id": "C-1042"}, {"crew_id": "C-1042"}])
-    assert code == "INVALID_ARGUMENT" and "more than once" in message
+def test_joint_plan_never_staffs_one_seat_twice(tools):
+    # C-1042 reported out on 13 and on 14 Oct: both days of P-2291, one captain seat. One
+    # cover flies the whole trip, so it is one assignment, the same as covering it alone.
+    single = find_options(tools.world, "P-2291", Rank.CAPTAIN).recommended
+    for events in (
+        [{"crew_id": "C-1042"}, {"crew_id": "C-1042"}],
+        [{"crew_id": "C-1042", "date": "2026-10-13"}, {"crew_id": "C-1042", "date": "2026-10-14"}],
+    ):
+        out = ok(tools, "joint_plan", events=events)
+        assert [(a["pairing_id"], a["crew_id"]) for a in out["assignments"]] == [
+            ("P-2291", single.crew_id)
+        ]
+    # A seat given without who is out cannot be matched, so asking for it twice is refused.
     seat = {"pairing_id": "P-2291", "role": "Captain"}
     code, message = err(tools, "joint_plan", events=[seat, seat])
     assert code == "INVALID_ARGUMENT" and "has 1 Captain seat" in message

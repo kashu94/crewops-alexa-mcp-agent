@@ -21,9 +21,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from crewops import alerts as alert_briefs
 from crewops.agent.context import Turn
 from crewops.agent.memory import ConversationMemory, valid_conversation
-from crewops.analysis.runner import UNAVAILABLE_STATUSES
+from crewops.analysis.runner import ALL_STATUSES, UNAVAILABLE_STATUSES
 from crewops.domain import DataError, Report, Role, authorize
 from crewops.domain.desks import owning_desks
 from crewops.domain.reports import OPERATIONAL_REPORTERS, crew_out_of
@@ -41,6 +42,8 @@ from crewops.store.reports import (
     filed_by,
     filed_recently,
     get_disruption,
+    last_seen,
+    mark_seen,
     record_filed,
     rejections_for,
     suggestions_for,
@@ -49,6 +52,8 @@ from crewops.tools import TOOL_SCHEMAS, Caller, allowed_tools, dispatch
 from crewops.tools.errors import INTERNAL
 
 CACHE_SECONDS = 60.0
+FEED_CACHE_SECONDS = 4.0
+"""How long one speaker-feed read serves every screen that polls."""
 """How long one loaded operation answers questions before it is read again. Plan actions
 on this server reload it at once; changes made elsewhere show within this time."""
 READERS = frozenset({Role.CONTROLLER, Role.APPROVER, Role.AUDITOR, Role.ADMIN, Role.SUPER_ADMIN})
@@ -172,6 +177,7 @@ class CrewOpsApi:
         ``memory`` every question stands on its own; without ``alerts`` the alert tools
         say alerts are not set up."""
         self.table = table
+        self._feed_cache: dict[tuple[str, int], tuple[float, list[dict]]] = {}
         self.live_factory = live_factory
         self.send = send
         self.plans = plans or Plans(table)
@@ -202,10 +208,14 @@ class CrewOpsApi:
     def invalidate(self) -> None:
         with self._loading:
             self._live = None
+        self._feed_cache.clear()  # an action here is heard at once, not after the cache
 
     def ask(self, caller: Caller, question: str, conversation_id: str = "") -> dict[str, Any]:
         """``conversation_id``: the client's id for this conversation (letters, digits, - and
         _). With one, the previous turn may fill in what this question leaves out."""
+        if caller.roles <= {Role.SPEAKER}:
+            # A speaker device hears alert briefs; questions are for people.
+            raise ApiError("FORBIDDEN", "a speaker device does not ask questions")
         if conversation_id and not valid_conversation(conversation_id):
             raise ApiError(
                 "INVALID",
@@ -369,14 +379,19 @@ class CrewOpsApi:
             }
         tools = self.live().pipeline.tools
         seats = [_seat(s) for s in analysis.get("seats", [])]
+        still_open = item["status"] in ("OPTIONS_READY", "SUBMITTED")
         for seat in seats:
             seat["context"] = views.seat_context(tools, seat)
-            seat["live"] = views.live_options(tools, seat)
+            # Filled since by an approved plan (for this seat on another day, say): no cover
+            # is needed, so no options are offered for it.
+            seat["re_crewed"] = views.re_crewed(tools, seat) if still_open else None
+            seat["live"] = None if seat["re_crewed"] else views.live_options(tools, seat)
             seat["reserves"] = views.reserve_capacity(
                 tools, seat["role"], seat["impact"].get("affected_dates") or []
             )
         desks = views.desks_of_disruption(tools, analysis, [s["pairing_id"] for s in seats])
         joint = analysis.get("joint_plan")
+        mine = {(s["pairing_id"], s["role"], s["crew_out"]) for s in seats if s.get("crew_out")}
         return {
             "disruption_id": disruption_id,
             "status": item["status"],
@@ -410,7 +425,11 @@ class CrewOpsApi:
                     )
                     for s in seats
                 ],
+                mine,
             ),
+            # Other open disruptions needing this very seat (the same person out on another
+            # day of the same trip): one cover fills them all.
+            "same_seat": views.same_seat(tools, self.table, disruption_id, mine),
             # Crew among the options who have since been reported unavailable on these dates:
             # shown struck out, with when, rather than silently dropped.
             "unavailable_now": self._unavailable_now(disruption_id, seats),
@@ -688,6 +707,142 @@ class CrewOpsApi:
             ):
                 return why
         return None
+
+    # ------------------------------------------------------------------
+    # Spoken alerts: the desk speaker and "welcome back"
+    # ------------------------------------------------------------------
+
+    RECENT_RESOLVED = 10
+    """Resolved disruptions an alert may still be about: the latest few, so the cost of a
+    speaker's poll does not grow with every disruption ever handled."""
+
+    def _alert_items(self) -> list[dict]:
+        def reported(item: Mapping[str, Any]) -> str:
+            return str((from_dynamo(item.get("report") or {})).get("reported_utc") or "")
+
+        items: list[dict] = []
+        for status in ALL_STATUSES:
+            found = disruptions_with_status(self.table, status)
+            if status in RESOLVED:
+                found = sorted(found, key=reported, reverse=True)[: self.RECENT_RESOLVED]
+            items += found
+        return items
+
+    def _spoken_alerts(self, scope: str, since: str | None = None, limit: int = 20) -> list[dict]:
+        tools = self.live().pipeline.tools
+
+        def aircraft(pairing_id: str) -> str | None:
+            p = tools.world.pairings.get(pairing_id)
+            return p.aircraft if p else None
+
+        from crewops.tools.port import describe_report
+
+        items = self._alert_items()
+        try:
+            return alert_briefs.alerts(
+                items,
+                lambda d: plan_store.audit_trail(self.table, d),
+                aircraft,
+                describe_report,
+                scope,
+                since,
+                max(1, min(int(limit), 50)),
+            )
+        except ValueError as exc:
+            raise ApiError("INVALID", str(exc)) from None
+
+    def speaker_feed(self, caller: Caller, scope: str = "room", limit: int = 20) -> dict:
+        """What a desk or ops-room speaker announces: the latest event of each disruption
+        for its desk, the approvals corner, or the whole room. Only a speaker device hears
+        it; a person reads the console instead."""
+        if Role.SPEAKER not in caller.roles:
+            raise ApiError("FORBIDDEN", "only a speaker device hears the alert feed")
+        # Several screens poll every few seconds: one read serves them all for a moment.
+        key = (scope, limit)
+        now = time.monotonic()
+        cached = self._feed_cache.get(key)
+        if cached is None or now - cached[0] > FEED_CACHE_SECONDS:
+            cached = (now, self._spoken_alerts(scope, limit=limit))
+            self._feed_cache[key] = cached
+        return {"scope": scope, "alerts": cached[1]}
+
+    @staticmethod
+    def _scope_of(caller: Caller) -> str | None:
+        """The alerts a person follows: their desk, or approvals; None for other roles."""
+        if Role.CONTROLLER in caller.roles and caller.desk:
+            return caller.desk
+        if Role.APPROVER in caller.roles:
+            return alert_briefs.APPROVALS
+        return None
+
+    def my_alerts(self, caller: Caller, limit: int = 5) -> list[dict]:
+        """The latest updates on this controller's desk, or for approvers, newest first:
+        what Alexa reads when asked what is waiting. Marks nothing seen."""
+        scope = self._scope_of(caller)
+        if scope is None:
+            raise ApiError("FORBIDDEN", "only controllers and approvers have alerts")
+        return self._spoken_alerts(scope, limit=limit)
+
+    def push_subscribe(self, caller: Caller, endpoint: str, p256dh: str, auth: str) -> dict:
+        """Desktop alerts in this browser: the push subscription its service worker made.
+        Controllers and approvers only; only browser push services are accepted."""
+        import re
+
+        from crewops.notify.webpush import allowed_endpoint, unb64u
+        from crewops.store import push
+
+        if self._scope_of(caller) is None:
+            raise ApiError("FORBIDDEN", "desktop alerts are for controllers and approvers")
+        if not isinstance(endpoint, str) or len(endpoint) > 1000 or not allowed_endpoint(endpoint):
+            raise ApiError("INVALID", "endpoint: not a browser push service")
+        b64 = re.compile(r"^[A-Za-z0-9_-]+$")
+        try:
+            if not (b64.match(p256dh) and b64.match(auth)):
+                raise ValueError
+            if len(unb64u(p256dh)) != 65 or len(unb64u(auth)) != 16:
+                raise ValueError
+        except (ValueError, TypeError):
+            raise ApiError("INVALID", "keys: not a browser's push keys") from None
+        mine = push.subscriptions(self.table, caller.user_id)
+        if not any(s["endpoint"] == endpoint for s in mine) and len(mine) >= push.MAX_PER_PERSON:
+            raise ApiError(
+                "LIMIT", f"desktop alerts are on in {push.MAX_PER_PERSON} browsers already"
+            )
+        push.save(self.table, caller.user_id, endpoint, p256dh, auth, self.clock())
+        return {"status": "subscribed"}
+
+    def push_unsubscribe(self, caller: Caller, endpoint: str) -> dict:
+        from crewops.store import push
+
+        push.forget(self.table, caller.user_id, str(endpoint))
+        return {"status": "unsubscribed"}
+
+    def still_here(self, caller: Caller) -> dict:
+        """A controller's or approver's open console says so now and then, so "while you
+        were away" starts when they last had CrewOps open, not when they last signed in."""
+        if self._scope_of(caller) is not None:
+            mark_seen(self.table, caller.user_id, self.clock())
+        return {"ok": True}
+
+    def welcome_back(self, caller: Caller) -> dict:
+        """What came to this controller's desk, or to approvals, since they last signed
+        in; then it marks them seen. Nothing on a first sign-in."""
+        scope = self._scope_of(caller)
+        if scope is None:
+            return {"since": None, "alerts": [], "speech": ""}
+        now = self.clock()
+        since = last_seen(self.table, caller.user_id)
+        mark_seen(self.table, caller.user_id, now)
+        if since is None:
+            return {"since": None, "alerts": [], "speech": ""}
+        found = self._spoken_alerts(scope, since=since)
+        name = caller.user_id.split(".")[0].title()
+        when = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        return {
+            "since": since,
+            "alerts": found,
+            "speech": alert_briefs.welcome_speech(name, found, when),
+        }
 
     def reference(self, caller: Caller) -> dict[str, Any]:
         """The crew, flights, aircraft, gates and stations a report can name."""

@@ -170,3 +170,42 @@ select {
   .lead-in { opacity: 0.6; }
 }
 
+
+/* The desk speaker's light ring, as an Echo's: what the device is doing at a glance. */
+@keyframes ring-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes ring-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55), 0 18px 50px rgba(15, 23, 42, 0.25); }
+  50% { box-shadow: 0 0 0 18px rgba(245, 158, 11, 0), 0 18px 50px rgba(15, 23, 42, 0.25); }
+}
+.speaker-ring {
+  position: relative;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.25);
+  isolation: isolate;
+}
+.speaker-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 9999px;
+  background: #94a3b8;
+}
+.speaker-off::before { background: #cbd5e1; }
+.speaker-idle::before { background: conic-gradient(#5eead4, #38bdf8, #5eead4); opacity: 0.55; }
+.speaker-notify::before { background: conic-gradient(#fbbf24, #f59e0b, #fcd34d, #fbbf24); }
+.speaker-notify { animation: ring-pulse 1.6s ease-out infinite; }
+.speaker-speaking::before,
+.speaker-listening::before {
+  background: conic-gradient(from 0deg, #22d3ee, #1e3a8a 30%, #22d3ee 55%, #1e3a8a 80%, #22d3ee);
+  animation: ring-spin 1.4s linear infinite;
+}
+.speaker-listening::before { animation-duration: 2.6s; }
+@media (prefers-reduced-motion: reduce) {
+  .speaker-notify,
+  .speaker-speaking::before,
+  .speaker-listening::before {
+    animation: none;
+  }
+}

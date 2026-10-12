@@ -18,6 +18,8 @@ export const settings = {
   eventsRealtimeDomain: () => required("CREWOPS_EVENTS_REALTIME_DOMAIN"),
   pollyVoice: () => process.env.CREWOPS_POLLY_VOICE ?? "Kajal",
   pollyEngine: () => process.env.CREWOPS_POLLY_ENGINE ?? "neural",
+  /** Web push (desktop alerts): the app's public VAPID key; unset, desktop alerts are off. */
+  pushPublicKey: () => process.env.CREWOPS_PUSH_PUBLIC_KEY ?? "",
 };
 
 export function invocationUrl(region: string, runtimeArn: string): string {
