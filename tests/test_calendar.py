@@ -57,3 +57,39 @@ def test_now_moves_with_the_clock_and_questions_look_ahead(calendar):
     assert extract_dates("who flies on the 5th?", vocab) == ["2026-12-05"]
     assert extract_dates("reserves on Friday", vocab) == ["2026-11-13"]
     assert extract_dates("what is happening today", vocab) == ["2026-11-10"]
+
+
+def test_every_aircraft_flies_on_from_where_it_landed_and_no_gate_is_held_twice(calendar):
+    from collections import defaultdict
+
+    by_tail = defaultdict(list)
+    for f in calendar.flights:
+        by_tail[f.aircraft].append(f)
+    for tail, legs in by_tail.items():
+        legs.sort(key=lambda f: f.dep_utc)
+        for a, b in zip(legs, legs[1:], strict=False):
+            # VT-DXC's two-day rotation continues across weeks rather than restarting.
+            assert a.arr_station == b.dep_station and a.arr_utc <= b.dep_utc, (tail, a, b)
+    by_gate = defaultdict(list)
+    for g in calendar.gates:
+        by_gate[g.gate].append(g)
+    for gate, slots in by_gate.items():
+        slots.sort(key=lambda g: g.start_utc)
+        for a, b in zip(slots, slots[1:], strict=False):
+            assert a.end_utc <= b.start_utc, (gate, a.flight_id, b.flight_id)
+    assert sorted(g.flight_id for g in calendar.gates) == sorted(
+        f.flight_id for f in calendar.flights
+    )
+
+
+def test_crew_only_ever_fly_their_own_airlines_aircraft_with_the_rating(calendar):
+    tail_airline = {t: a.code for a in calendar.airlines for t in a.aircraft}
+    crew = {c.crew_id: c for c in calendar.crew}
+    flight = {f.flight_id: f for f in calendar.flights}
+    for p in calendar.pairings:
+        aircraft_type = flight[p.flight_ids[0]].aircraft_type
+        for seat in p.crew:
+            assert crew[seat.crew_id].airline == tail_airline[p.aircraft], (p.pairing_id, seat)
+            if seat.role.is_pilot:
+                assert aircraft_type in crew[seat.crew_id].ratings, (p.pairing_id, seat)
+    assert all(f.flight_no[:2] == tail_airline[f.aircraft] for f in calendar.flights)

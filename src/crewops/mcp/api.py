@@ -109,6 +109,25 @@ def _iso_z(at: datetime) -> str:
     return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _impact(analysis: Mapping[str, Any]) -> dict[str, Any]:
+    """What a disruption touches: flights uncovered or at risk, and their passengers (each
+    trip counted once, as the severity counts them)."""
+    flights: set[str] = set(analysis.get("affected_flights") or [])
+    per_trip: dict[str, int] = {}
+    for seat in analysis.get("seats") or []:
+        impact = seat.get("impact") or {}
+        flights |= set(impact.get("uncovered_flights") or [])
+        flights |= set(impact.get("at_risk_flights") or [])
+        trip = str(seat.get("pairing_id"))
+        per_trip[trip] = max(per_trip.get(trip, 0), int(impact.get("passengers") or 0))
+    flights |= {leg["flight_id"] for leg in analysis.get("late_departures") or []}
+    return {
+        "flights": len(flights),
+        "passengers": sum(per_trip.values()),
+        "flight_ids": sorted(flights),
+    }
+
+
 def _crew_name(tools: Any, crew_id: str | None) -> str | None:
     crew = tools.world.crew.get(crew_id) if crew_id else None
     return crew.name if crew else None
@@ -875,6 +894,176 @@ class CrewOpsApi:
             cached = (now, self._spoken_alerts(scope, limit=limit))
             self._feed_cache[key] = cached
         return {"scope": scope, "alerts": cached[1]}
+
+    def ops_board(self, caller: Caller) -> dict[str, Any]:
+        """The ops-room wall display (the Fire TV app): every open disruption, most serious
+        first, with its desk, how long it has waited, whether it was escalated and the
+        recommended cover; each desk's load; and today's flights, crew out and reserves.
+        For the speaker device and crew control; one read serves every screen briefly."""
+        if not caller.roles & (READERS | {Role.SPEAKER}):
+            raise ApiError("FORBIDDEN", "only the ops room and crew control see the board")
+        now = time.monotonic()
+        cached = self._feed_cache.get(("board",))
+        if cached is None or now - cached[0] > FEED_CACHE_SECONDS:
+            cached = (now, self._board())
+            self._feed_cache[("board",)] = cached
+        return cached[1]
+
+    def _board(self) -> dict[str, Any]:
+        from crewops.domain.desks import DESKS
+        from crewops.engine.options import Strategy
+        from crewops.tools.port import describe_report
+
+        tools = self.live().pipeline.tools
+        world = tools.world
+        today = world.snapshot_utc.date()
+        clock = self.clock()
+        level_rank = {"high": 0, "medium": 1, "low": 2}
+        cards = []
+        for status in OPEN_STATUSES:
+            for item in disruptions_with_status(self.table, status):
+                try:
+                    report = Report.from_dict(from_dynamo(item["report"]))
+                except (DataError, KeyError, TypeError):
+                    continue
+                analysis = from_dynamo(item.get("analysis") or {})
+                rated = severity(analysis, report.reported_utc.isoformat(), today)
+                desks = views.desks_of_disruption(
+                    tools, analysis, [s["pairing_id"] for s in analysis.get("seats", [])]
+                )
+                trail = plan_store.audit_trail(self.table, item["disruption_id"])
+                latest = max(trail, key=lambda e: str(e.get("at") or "")) if trail else {}
+                since = str(item.get("analysed_utc") or report.reported_utc.isoformat())
+                try:
+                    waited = (
+                        clock - datetime.fromisoformat(since.replace("Z", "+00:00"))
+                    ).total_seconds()
+                except ValueError:
+                    waited = 0
+                cover = []
+                for seat in analysis.get("seats") or []:
+                    rec = seat.get("recommended") or {}
+                    if rec.get("strategy"):
+                        try:
+                            how = Strategy(rec["strategy"]).label
+                        except ValueError:
+                            how = str(rec["strategy"])
+                        who = (
+                            f"{rec.get('name')} ({rec.get('crew_id')})"
+                            if rec.get("crew_id")
+                            else ""
+                        )
+                        cover.append(
+                            {
+                                "seat": f"{seat.get('pairing_id')} {seat.get('role')}",
+                                "who": who,
+                                "how": how,
+                                "cost_inr": rec.get("cost_inr"),
+                            }
+                        )
+                cards.append(
+                    {
+                        "disruption_id": item["disruption_id"],
+                        "status": item["status"],
+                        "handling": (analysis.get("handling") or {}).get("kind"),
+                        "what": describe_report(report),
+                        "report_type": report.report_type.value,
+                        "severity": rated["level"] if analysis else None,
+                        "reasons": rated["reasons"] if analysis else [],
+                        "desk": desks[0] if desks else None,
+                        "escalated": latest.get("action") == "ESCALATED",
+                        "waiting_minutes": max(0, int(waited // 60)),
+                        "airlines": analysis.get("airlines") or [],
+                        "cover": cover[:3],
+                        "impact": _impact(analysis),
+                    }
+                )
+        cards.sort(
+            key=lambda c: (
+                not c["escalated"],
+                level_rank.get(c["severity"] or "low", 3),
+                -c["waiting_minutes"],
+            )
+        )
+        desks = []
+        for d in DESKS:
+            mine = [c for c in cards if c["desk"] and c["desk"]["desk_id"] == d.desk_id]
+            desks.append(
+                {
+                    "desk_id": d.desk_id,
+                    "controller": d.controller,
+                    "open": len(mine),
+                    "high": sum(1 for c in mine if c["severity"] == "high"),
+                    "escalated": sum(1 for c in mine if c["escalated"]),
+                    "submitted": sum(1 for c in mine if c["status"] == "SUBMITTED"),
+                }
+            )
+        flights_today = [
+            f
+            for f in world.flights.values()
+            if f.date == today and f.flight_id not in world.cancelled
+        ]
+        out_today = {c for c, days in world.unavailable.items() if any(d == today for d, _ in days)}
+        reserves = {
+            r for r, duties in world.reserves.items() if any(today in d.dates for d in duties)
+        }
+        affected = {f for c in cards for f in c["impact"]["flight_ids"]}
+        upcoming = sorted(
+            (f for f in world.flights.values() if f.dep_utc >= world.snapshot_utc),
+            key=lambda f: f.dep_utc,
+        )[:8]
+        # By airline: cover only ever comes from the disrupted airline's own crew.
+        cover_today: dict[tuple[str, str, str], int] = {}
+        for crew_id, duties in world.reserves.items():
+            if not any(today in d.dates for d in duties) or crew_id in out_today:
+                continue
+            crew = world.crew.get(crew_id)
+            if crew is not None:
+                key = (world.airline_of_crew.get(crew_id) or "", crew.base, crew.rank.value)
+                cover_today[key] = cover_today.get(key, 0) + 1
+        return {
+            "as_of": clock.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "today": today.isoformat(),
+            # What just happened, as the desk speaker announces it.
+            "latest": [
+                {k: a.get(k) for k in ("at", "event", "title", "text", "disruption_id", "severity")}
+                for a in self._spoken_alerts("room", limit=5)
+            ],
+            "departures": [
+                {
+                    "flight_no": f.flight_no,
+                    "from": f.dep_station,
+                    "to": f.arr_station,
+                    "dep_utc": f.dep_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "aircraft": f.aircraft,
+                    "airline": world.airline_of_aircraft.get(f.aircraft),
+                    "state": "cancelled"
+                    if f.flight_id in world.cancelled
+                    else "affected"
+                    if f.flight_id in affected
+                    else "on plan",
+                }
+                for f in upcoming
+            ],
+            "reserve_cover": [
+                {"airline": airline, "base": base, "rank": rank, "on_call": n}
+                for (airline, base, rank), n in sorted(cover_today.items())
+            ],
+            "system": {"models": MODEL_BREAKER.status()},
+            "counts": {
+                level: sum(1 for c in cards if c["severity"] == level)
+                for level in ("high", "medium", "low")
+            }
+            | {"escalated": sum(1 for c in cards if c["escalated"]), "open": len(cards)},
+            "desks": desks,
+            "disruptions": cards[:30],
+            "day": {
+                "flights": len(flights_today),
+                "passengers": sum(f.booked or 0 for f in flights_today),
+                "crew_out": len(out_today),
+                "reserves_on_call": len(reserves),
+            },
+        }
 
     @staticmethod
     def _scope_of(caller: Caller) -> str | None:

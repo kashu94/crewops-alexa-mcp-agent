@@ -122,6 +122,13 @@ def build_server(
         latest event of each disruption, newest first, each with an id to remember it by."""
         return await run(ctx, lambda c: api.speaker_feed(c, scope, limit))
 
+    @mcp.tool(annotations=READ)
+    async def ops_board(ctx: Context) -> dict:
+        """The ops-room wall display: every open disruption (most serious and escalated
+        first) with its desk, waiting time and recommended cover; each desk's load; and
+        today's flights, crew out and reserves on call. Speaker devices and crew control."""
+        return await run(ctx, lambda c: api.ops_board(c))
+
     @mcp.tool(annotations=WRITE)
     async def welcome_back(ctx: Context) -> dict:
         """Controllers and approvers: what came to your desk (or to approvals) since you last

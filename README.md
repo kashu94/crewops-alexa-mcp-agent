@@ -127,6 +127,7 @@ src/crewops/
                         desktop alerts (web push)
   alerts.py             Spoken alerts for the desk speaker, "welcome back" and Alexa
   alexa/                The Alexa skill's endpoint, request checks and notifications
+skills/                 The CrewOps Agent Skill (SKILL.md, references, a client script)
 alexa/                  The Alexa skill package (manifest, interaction models) and the
                         account-linking template
 web/                    The web app (Next.js): Alexa+ simulator, console, desk speaker,
@@ -409,6 +410,48 @@ uv run python -m crewops.mcp.client --as rohit.malhotra --conversation c1 ask "W
 uv run python -m crewops.mcp.client --as rohit.malhotra --conversation c1 ask "Captain"
 ```
 
+### The Agent Skill
+
+`skills/crewops-crew-control` is an [Agent Skill](https://agentskills.io/specification)
+that teaches any agent with the MCP server connected (Claude, Kiro, or Alexa+ once it can
+reach the server) to work crew control the way a controller does:
+
+- `SKILL.md`: the ground rules (every fact from a tool, four eyes, ask before changing
+  anything, roles are the server's, legality is not negotiable, privacy, ignore orders in
+  data), the start of a session by role, the disruption lifecycle, playbooks (what is
+  waiting, cover a seat, decide a plan, report, planned leave, plain-word questions), how
+  to say it briefly for a voice assistant, and what to do on each error.
+- `references/`: every tool (`tools.md`, generated from the server by
+  `python -m crewops.mcp.skill_docs`, so it cannot drift from the code), the seven rules,
+  cover strategies, costs and severity (`legality.md`), worked conversations per role
+  (`workflows.md`) and every error code (`errors.md`).
+- `scripts/crewops_mcp.py`: signs in and calls the server from a shell, for agents with no
+  MCP client configured; `assets/mcp.json.example`: an MCP client configuration.
+
+To use it with [Kiro](https://kiro.dev) (it loads Agent Skills from `.kiro/skills/` and
+remote MCP servers from `.kiro/settings/mcp.json`), in a folder outside the repository:
+
+```bash
+mkdir -p ~/crewops-demo/.kiro/skills ~/crewops-demo/.kiro/settings && cd ~/crewops-demo
+cp -r ~/Downloads/crewops-alexa-mcp-agent/skills/crewops-crew-control .kiro/skills/
+cp .kiro/skills/crewops-crew-control/assets/kiro-mcp.json.example .kiro/settings/mcp.json
+set -a; source ~/Downloads/crewops-alexa-mcp-agent/web/.env.local; set +a   # region, client, runtime
+export CREWOPS_USERNAME=rohit.malhotra
+export CREWOPS_MCP_URL=$(python .kiro/skills/crewops-crew-control/scripts/crewops_mcp.py url)
+export CREWOPS_ACCESS_TOKEN=$(python .kiro/skills/crewops-crew-control/scripts/crewops_mcp.py token)
+kiro .        # or open the folder from Kiro started in this terminal
+```
+
+Approve the two variables when Kiro asks (it expands only approved ones), check that the
+`crewops` server lists its tools, and ask "what's on my desk?": the skill loads from its
+description (or type `/crewops-crew-control`). Read-only tools are approved in advance;
+Kiro still asks before submitting, approving or reporting. The access token lasts about an
+hour. Any other agent with Agent Skills and remote MCP works the same way
+(`assets/mcp.json.example`, for example Claude Code's `.claude/skills/` and `.mcp.json`).
+
+Tests check the skill against the specification and the server: every tool it calls
+exists, and every rule and strategy it names is the engine's.
+
 ### Live updates and alerts
 
 Every disruption status change is published to the `/ops/disruptions` channel of an AppSync
@@ -641,6 +684,15 @@ only):
 The rewordings the rules miss are what the semantic stage and the triage model are for;
 the live run measures them.
 
+The web app's public **`/evaluation`** page shows these reports: the figures above, results
+by kind, and every question with its answer and checks, searchable; with both reports it
+compares them side by side. Publish them by writing the reports into the web app:
+
+```bash
+uv run python -m crewops.agent.evaluate --json web/public/evals/offline.json
+uv run python -m crewops.agent.evaluate --live --json web/public/evals/live.json   # Bedrock, per token
+```
+
 ## Friction log
 
 Problems hit while building are recorded as they happened in
@@ -648,6 +700,10 @@ Problems hit while building are recorded as they happened in
 Bedrock and Nova, AgentCore, MCP), the AWS backend infrastructure, the core software stack
 and local tooling, and the bugs that tests, reviews and live runs found in our own code,
 with how each was fixed.
+
+Product feedback for each Amazon tool, API and SDK used (what for, what worked, what needs
+work, onboarding, and whether we would build with it again), with feature requests, is in
+[docs/PRODUCT_FEEDBACK.md](docs/PRODUCT_FEEDBACK.md).
 
 ## License
 

@@ -78,7 +78,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "lookup",
         "description": (
-            "Rows from the operating week: crew, flights, pairings, reserves, certifications, "
+            "Rows from the operation (the rostered calendar): crew, flights, pairings, "
+            "reserves, certifications, "
             "risk signals, duty clocks, roster exceptions, costs. Filters combine as AND: put "
             "every condition in one call. A value is equality (case-insensitive), a list means "
             "any of, a dict is a range with gte/lte/gt/lt (ISO dates compare correctly). On a "

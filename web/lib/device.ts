@@ -84,6 +84,15 @@ export async function paired(): Promise<boolean> {
   return Boolean(token && cookie && same(token, cookie));
 }
 
+/** A device app (the Fire TV wall display) has no browser cookie: it may send the pairing
+ * code itself in ``x-crewops-pairing``, compared in constant time. Otherwise as `paired`. */
+export async function pairedDevice(request: Request): Promise<boolean> {
+  if (await paired()) return true;
+  const expected = process.env.CREWOPS_SPEAKER_PAIRING_CODE;
+  const given = request.headers.get("x-crewops-pairing");
+  return Boolean(expected && given && same(given, expected));
+}
+
 /** Pairs this screen if the code is right: a device cookie, kept for 30 days and separate
  * from any person's sign-in. */
 export async function pair(code: string): Promise<boolean> {

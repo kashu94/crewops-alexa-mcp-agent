@@ -880,3 +880,23 @@ def test_the_operations_board_moves_a_week_at_a_time_inside_the_window(api):
     assert {f["date"] for f in later["flights"]} <= set(later["week"])
     with pytest.raises(ApiError):
         api.operations(ROHIT, "not-a-date")
+
+
+def test_the_ops_room_board_shows_every_open_disruption_most_serious_first(api):
+    speaker = Caller("ops.speaker", frozenset({Role.SPEAKER}))
+    board = api.ops_board(speaker)
+    (card,) = [c for c in board["disruptions"] if c["disruption_id"] == "r-sick1042"]
+    assert card["severity"] in ("high", "medium", "low") and card["reasons"]
+    assert card["desk"]["desk_id"] == "desk-2" and card["what"].startswith("C-1042")
+    assert card["cover"] and card["cover"][0]["how"]
+    assert board["counts"]["open"] == len(board["disruptions"]) >= 1
+    assert [d["desk_id"] for d in board["desks"]] == ["desk-1", "desk-2", "desk-3"]
+    assert board["day"]["flights"] > 0 and board["today"] == "2026-10-12"
+    assert card["impact"]["flights"] >= 1 and card["impact"]["passengers"] > 0
+    assert board["latest"] and board["latest"][0]["title"]
+    assert len(board["departures"]) == 8 and all(d["state"] for d in board["departures"])
+    assert {r["airline"] for r in board["reserve_cover"]} == {"DX", "KS", "NG"}
+    assert board["system"]["models"]["state"]
+    assert api.ops_board(ROHIT)["counts"] == board["counts"]
+    with pytest.raises(ApiError):
+        api.ops_board(CREW)

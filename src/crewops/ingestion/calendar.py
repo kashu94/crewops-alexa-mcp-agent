@@ -22,7 +22,7 @@ from collections import defaultdict
 from dataclasses import replace
 from datetime import date, timedelta
 
-from crewops.domain import CrewStatus, Pairing
+from crewops.domain import CrewStatus, Flight, GateSlot, Pairing
 from crewops.domain.models import PairingDay, PairingSeat
 from crewops.ingestion.seed import SeedData
 
@@ -111,12 +111,15 @@ def extend(seed: SeedData, last_day: date = LAST_DAY) -> SeedData:
     reserves = list(seed.reserves)
     seed_reserve_dates = {r.crew_id: r.dates for r in seed.reserves}
     week_of: dict[str, int] = {p.pairing_id: 0 for p in seed.pairings}
+    # An aircraft whose seed week does not end where it starts (a two-day rotation over a
+    # seven-day week) keeps its rotation going across weeks instead of repeating by weekday.
+    rotating = _rotating_tails(seed)
     for week in range(1, weeks + 1):
         shift = WEEK * week
         rotate = _rotation(seed, week, first + shift)
         kept: set[str] = set()
         for p in seed.pairings:
-            if p.days[-1].date + shift > last_day:
+            if p.days[-1].date + shift > last_day or p.aircraft in rotating:
                 continue
             new_id = _pairing_id(p.pairing_id, week)
             kept |= set(p.flight_ids)
@@ -175,6 +178,14 @@ def extend(seed: SeedData, last_day: date = LAST_DAY) -> SeedData:
                     d + shift for d in seed_reserve_dates[r.crew_id] if d + shift <= last_day
                 )
                 reserves[i] = replace(r, dates=r.dates + more)
+    continued_gates: list[GateSlot] = []
+    for tail in rotating:
+        more_flights, more_pairings, more_gates, weeks_of = _continued(seed, tail, last_day)
+        flights += more_flights
+        pairings += more_pairings
+        continued_gates += more_gates
+        week_of |= weeks_of
+    gates = _gated(gates, continued_gates)
     out = replace(
         seed,
         flights=tuple(flights),
@@ -183,6 +194,144 @@ def extend(seed: SeedData, last_day: date = LAST_DAY) -> SeedData:
         reserves=tuple(reserves),
     )
     return _repaired(out, week_of)
+
+
+def _gated(fixed: list[GateSlot], moving: list[GateSlot]) -> list[GateSlot]:
+    """``fixed`` plus ``moving``, each moving slot at its seed gate when that gate is free
+    then, else at another gate of the same station that is: a rotation shifted to other
+    weekdays must not park at a gate another flight already holds."""
+    by_gate: dict[str, list[GateSlot]] = defaultdict(list)
+    for g in fixed:
+        by_gate[g.gate].append(g)
+    station_gates: dict[str, list[str]] = defaultdict(list)
+    for gate in sorted(by_gate):
+        station_gates[gate.split("-")[0]].append(gate)
+
+    def free(gate: str, slot: GateSlot) -> bool:
+        return all(
+            slot.end_utc <= other.start_utc or other.end_utc <= slot.start_utc
+            for other in by_gate[gate]
+        )
+
+    out = list(fixed)
+    for slot in sorted(moving, key=lambda g: g.start_utc):
+        station = slot.gate.split("-")[0]
+        choices = [slot.gate] + [g for g in station_gates[station] if g != slot.gate]
+        gate = next((g for g in choices if free(g, slot)), None)
+        if gate is None:
+            raise ValueError(f"no free gate at {station} for {slot.flight_id}")
+        placed = replace(slot, gate=gate)
+        by_gate[gate].append(placed)
+        out.append(placed)
+    return out
+
+
+def _rotating_tails(seed: SeedData) -> set[str]:
+    """Aircraft whose seed week ends somewhere other than where it starts."""
+    out = set()
+    for tail in {f.aircraft for f in seed.flights}:
+        legs = sorted((f for f in seed.flights if f.aircraft == tail), key=lambda f: f.dep_utc)
+        if legs and legs[0].dep_station != legs[-1].arr_station:
+            out.add(tail)
+    return out
+
+
+def _continued(
+    seed: SeedData, tail: str, last_day: date
+) -> tuple[list[Flight], list[Pairing], list[GateSlot], dict[str, int]]:
+    """A two-day rotation continued day by day after the seed week.
+
+    The seed week shows the rotation (day A ends at the night stop, day B returns), starting
+    with a B day; it simply alternates on, and each A day with the B day after it is one
+    trip, crewed from the seed's two-day trips in turn (rotated by week) and checked legal
+    with the rest of the calendar. Trip ids stay four digits: the seed's ids for this
+    aircraft plus a hundred a week, in the order the trips start.
+    """
+    first = min(f.date for f in seed.flights)
+    trips = sorted(
+        (p for p in seed.pairings if p.aircraft == tail and len(p.days) == 2),
+        key=lambda p: p.days[0].date,
+    )
+    if not trips:
+        raise ValueError(f"{tail}: no two-day trip in the seed week to continue")
+    template = trips[0]
+    by_id = {f.flight_id: f for f in seed.flights}
+    gate_of = {g.flight_id: g for g in seed.gates}
+    seed_ids = sorted(int(p.pairing_id.split("-")[1]) for p in seed.pairings if p.aircraft == tail)
+    # The seed week alternates B, A, B, ...: day i (from the seed's first day) is an A day
+    # when i is odd. Continue from the day after the seed week.
+    flights: list[Flight] = []
+    pairings: list[Pairing] = []
+    gates: list[GateSlot] = []
+    week_of: dict[str, int] = {}
+    started: dict[int, int] = {}
+    i = 7
+    while True:
+        start = first + timedelta(days=i)
+        if start + timedelta(days=1) > last_day:
+            break
+        if i % 2 == 0:
+            i += 1
+            continue
+        week = i // 7
+        k = started.get(week, 0)
+        started[week] = k + 1
+        if k >= len(seed_ids):
+            raise ValueError(f"{tail}: more trips in week {week} than ids to give them")
+        pairing_id = f"P-{seed_ids[k] + 100 * week:04d}"
+        crew_from = trips[k % len(trips)]
+        rotate = _rotation(seed, week, first + WEEK * week)
+        days = []
+        for offset, seed_day in enumerate(template.days):
+            day = start + timedelta(days=offset)
+            shift = day - seed_day.date
+            ids = []
+            for fid in seed_day.flight_ids:
+                f = by_id[fid]
+                new_fid = _flight_id(f.flight_no, day)
+                ids.append(new_fid)
+                flights.append(
+                    replace(
+                        f,
+                        flight_id=new_fid,
+                        date=day,
+                        dep_utc=f.dep_utc + shift,
+                        arr_utc=f.arr_utc + shift,
+                        booked=_booked(new_fid, f.seats, f.booked),
+                    )
+                )
+                if (g := gate_of.get(fid)) is not None:
+                    gates.append(
+                        replace(
+                            g,
+                            pairing_id=pairing_id,
+                            flight_id=new_fid,
+                            date=day,
+                            start_utc=g.start_utc + shift,
+                            end_utc=g.end_utc + shift,
+                        )
+                    )
+            days.append(
+                PairingDay(
+                    date=day,
+                    flight_ids=tuple(ids),
+                    report_utc=seed_day.report_utc + shift,
+                    release_utc=seed_day.release_utc + shift,
+                )
+            )
+        pairings.append(
+            Pairing(
+                pairing_id=pairing_id,
+                aircraft=tail,
+                days=tuple(days),
+                crew=tuple(
+                    PairingSeat(rotate.get(s.crew_id, s.crew_id), s.role) for s in crew_from.crew
+                ),
+            )
+        )
+        week_of[pairing_id] = week
+        i += 1
+    return flights, pairings, gates, week_of
 
 
 def _illegal(seed: SeedData) -> list[tuple[str, str]]:

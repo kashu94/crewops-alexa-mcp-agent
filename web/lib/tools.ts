@@ -19,6 +19,7 @@ export const TOOLS = {
   welcome_back: { list: false, write: true },
   still_here: { list: false, write: true },
   operations_overview: { list: false, write: false },
+  ops_board: { list: false, write: false },
   push_subscribe: { list: false, write: true },
   push_unsubscribe: { list: false, write: true },
   show_disruption: { list: false, write: false },

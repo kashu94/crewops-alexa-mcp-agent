@@ -317,6 +317,94 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Suggestion: State the latency limit per tool type (deterministic lookups versus model
   calls), and accept an authorizer-protected server.
 
+### FL-217: The new developer console has no Alexa Notifications permission switch
+
+- Date: 2026-10-12
+- Service / tool: Alexa developer console (Build > Permissions), ASK CLI / SMAPI
+- Severity: Medium (about 20 minutes; needed a second tool)
+- Task attempted: Turn on Alexa Notifications for the skill, so it may send Proactive Events.
+- Steps taken: Opened Build > Permissions, scrolled the whole page: device address, customer
+  name, email, phone, lists, reminders, location, skills personalisation, PIN, timers, and
+  the Alexa Skill Messaging credentials.
+- Expected: An "Alexa Notifications" switch, as the Proactive Events guide describes.
+- Actual: No such switch. The permission (`alexa::devices:all:notifications:write`) and the
+  event publications can only be set in the skill manifest, which the console does not
+  edit; it took the ASK CLI (`ask smapi update-skill-manifest`) to turn them on.
+- Workaround: Upload the manifest with the ASK CLI; the console then shows notifications on.
+- Suggestion: Put the notifications switch (and the event publications) back on the
+  Permissions page, or link from it to the manifest route.
+
+### FL-218: The ASK CLI sign-in demanded an email the account did not have
+
+- Date: 2026-10-12
+- Service / tool: ASK CLI (`ask configure`), Login with Amazon, Amazon developer accounts
+- Severity: Medium (about 30 minutes)
+- Task attempted: Sign the ASK CLI in to the developer account that owns the skill.
+- Steps taken: `ask configure` opened Amazon's sign-in; the developer account had been
+  created with a mobile number only. Earlier, signing in to the developer console with an
+  email showed only "There was a problem", with no reason.
+- Expected: The same sign-in the developer console accepts.
+- Actual: The CLI's sign-in page asked for an email address to be added before going on,
+  and refused the person's email as "already in use" (it belongs to another Amazon
+  account). The console's generic "There was a problem" gave no hint that the email simply
+  was not on that account.
+- Workaround: Added a new address (a mail alias) to the mobile-number account, then signed
+  in with the number.
+- Suggestion: Let the CLI sign in with a phone-only developer account, and make the sign-in
+  error say "no account with this email" when that is the cause.
+
+### FL-219: The console simulator spun on a request the skill never received
+
+- Date: 2026-10-12
+- Service / tool: Alexa developer console (Test tab), SMAPI `simulate-skill`, CloudWatch Logs
+- Severity: Low (about 15 minutes)
+- Task attempted: Test "open crew ops" before linking an account.
+- Steps taken: Typed it into the Test tab's simulator with testing enabled in Development.
+- Expected: The skill's reply, and the request and response under Skill I/O.
+- Actual: The reply bubble kept spinning and Skill I/O stayed empty; the skill's logs
+  showed no request at that time. The same utterance through `ask smapi simulate-skill`
+  reached the endpoint at once and returned the right reply (4.3 s, a cold start).
+- Workaround: Test with `simulate-skill` (and `get-skill-simulation`); reload the console.
+- Suggestion: Time out in the simulator with a message, and say when a request was never
+  sent to the endpoint.
+
+### FL-220: Account linking needs values that exist only after deploying with its own
+
+- Date: 2026-10-12
+- Service / tool: Alexa developer console (Account Linking), Amazon Cognito, AWS CDK
+- Severity: Low (a few minutes, but confusing)
+- Task attempted: Link the skill to the app's Cognito sign-in.
+- Steps taken: Opened Account Linking to note Alexa's redirect URLs; saved the page.
+- Expected: Either order to work: create the authorization server first, or the skill first.
+- Actual: The Cognito client needs Alexa's redirect URLs, which appear only on that page;
+  the page's form then refuses to save without the authorization URI, token URI, client id
+  and secret, which exist only once that client is deployed. Saving early shows four
+  "must not be empty" errors with nothing saying the redirect URLs are already usable.
+- Workaround: Copy the redirect URLs without saving, deploy the client, then come back.
+- Suggestion: Show the redirect URLs before the form (or on the skill's overview), and
+  allow saving the switch without the provider details.
+
+### FL-221: The Vega project generator wrote into the repository root and replaced its .gitignore
+
+- Date: 2026-10-13
+- Service / tool: Vega CLI 1.4.4 (`vega project generate`), Vega SDK 0.24 (Fire TV)
+- Severity: High (could have committed the team's `.env`; caught at once, nothing lost)
+- Task attempted: Create a Fire TV (Vega OS) app inside the CrewOps repository.
+- Steps taken: From the repository root, `vega project generate --template helloWorld --name
+  CrewOpsTV --packageId com.crewops.tv`, with `--outputDir` left at its default (the current
+  directory), expecting a `CrewOpsTV/` folder.
+- Expected: A new folder named after the project, as `create-react-app`-style generators
+  make, or a refusal to write into a non-empty directory.
+- Actual: The files went straight into the repository root: `package.json`, `app.json`,
+  `manifest.toml`, `tsconfig.json`, `index.js`, configs, `test/`, and `App.tsx`, `assets/`,
+  `components/` and `data/` inside the Python `src/` folder. The repository's `.gitignore`
+  was silently replaced by the template's, so `.env` and build folders were no longer
+  ignored. No prompt and no warning.
+- Workaround: Listed the files by their write time, moved them into `tv/`, restored
+  `.gitignore` from git, and generate into an empty folder from now on.
+- Suggestion: Create a folder named after the project unless told otherwise, and refuse
+  (or ask) before writing into a non-empty directory or over an existing file.
+
 ## 2. AWS backend infrastructure (accounts, CDK, Cognito, DynamoDB, SQS, SNS, AppSync, Lambda, SDK)
 
 ### FL-001: Project account denies CDK outside its home region, with no hint why
