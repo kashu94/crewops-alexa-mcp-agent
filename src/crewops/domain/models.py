@@ -1,14 +1,11 @@
 """Typed records for one crew operation.
 
-Every record is a frozen dataclass built by ``from_dict``, which validates as it parses
-and names the exact field when something is wrong (``crew.rank: unknown value 'Pilot'``).
-Nothing downstream ever handles a raw dict or a timestamp string.
+Each record is a frozen dataclass built by ``from_dict``, which validates while parsing and
+names the failing field (``crew.rank: unknown value 'Pilot'``), so nothing downstream sees a
+raw dict or a timestamp string.
 
-Conventions:
-
-* All instants are timezone-aware UTC ``datetime`` values.
-* Calendar fields are ``date`` values; on-call windows are ``time`` values in UTC.
-* Money is whole rupees (``int``).
+Instants are aware UTC datetimes, calendar fields are dates, on-call windows are UTC times,
+and money is whole rupees.
 """
 
 from __future__ import annotations
@@ -24,12 +21,7 @@ STATION_RE = re.compile(r"^[A-Z]{3}$")
 
 
 class DataError(ValueError):
-    """A record could not be parsed. The message names the field that failed."""
-
-
-# --------------------------------------------------------------------------
-# Vocabulary
-# --------------------------------------------------------------------------
+    """Record failed to parse; the message names the field."""
 
 
 class Rank(StrEnum):
@@ -59,11 +51,6 @@ class CertType(StrEnum):
     MEDICAL_CLASS1 = "medical_class1"
     RECURRENT_TRAINING = "recurrent_training"
     DANGEROUS_GOODS = "dangerous_goods"
-
-
-# --------------------------------------------------------------------------
-# Parsing helpers
-# --------------------------------------------------------------------------
 
 
 def _req(d: Mapping[str, Any], key: str, ctx: str) -> Any:
@@ -153,11 +140,6 @@ def _list(d: Mapping[str, Any], key: str, ctx: str) -> list[Any]:
     return value
 
 
-# --------------------------------------------------------------------------
-# People
-# --------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class Crew:
     crew_id: str
@@ -166,17 +148,17 @@ class Crew:
     base: str
     ratings: tuple[AircraftType, ...]
     seniority: int
-    """Years of service: paid as a callout allowance, so it ranks only through cost."""
+    """Years of service. Paid as a callout allowance, so it only affects rank via cost."""
     reachability_minutes: int
     status: CrewStatus
     airline: str | None = None
-    """The airline that employs them (its two-letter code). Cover comes only from it."""
+    """Two-letter code of the employing airline. Cover only comes from the same one."""
     experience_years: int | None = None
     """Years flying, which orders a command upgrade among first officers."""
     command_qualified: bool = False
-    """A first officer cleared to command (upgrade trained): may fill a captain's seat."""
+    """FO cleared to command (upgrade trained), can fill a captain's seat."""
     right_seat_qualified: bool = False
-    """A captain current in the right seat: may fill a first officer's seat."""
+    """Captain current in the right seat, can fill an FO's seat."""
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any], ctx: str = "crew") -> Crew:
@@ -243,7 +225,7 @@ class DutyClock:
     duty_hours_7d: float
     flight_hours_28d: float
     last_rest_ended: datetime
-    """When their last rest *finished*: the earliest they may report again."""
+    """When their last rest finished, i.e. the earliest they may report again."""
     daily_history: tuple[DailyHours, ...]
 
     @classmethod
@@ -279,7 +261,6 @@ class ReserveDuty:
     window_end: time
 
     def covers(self, when: datetime) -> bool:
-        """Whether a report at ``when`` falls inside the on-call window that day."""
         moment = when.astimezone(UTC)
         return moment.date() in self.dates and (
             self.window_start <= moment.time().replace(tzinfo=None) <= self.window_end
@@ -304,7 +285,7 @@ class ReserveDuty:
 
 @dataclass(frozen=True, slots=True)
 class RiskSignal:
-    """A provided forecast. Shown next to an option; never changes legality or rank."""
+    """Supplied forecast. Shown next to an option, never affects legality or rank."""
 
     crew_id: str
     as_of_utc: datetime
@@ -324,11 +305,6 @@ class RiskSignal:
         )
 
 
-# --------------------------------------------------------------------------
-# Flying
-# --------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class Flight:
     flight_id: str
@@ -345,7 +321,7 @@ class Flight:
     aircraft_type: AircraftType
     seats: int
     booked: int | None = None
-    """Passengers booked, when known. Never more than the seats."""
+    """Passengers booked, if known. Never more than seats."""
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any], ctx: str = "flight") -> Flight:
@@ -503,11 +479,6 @@ class GateSlot:
         )
 
 
-# --------------------------------------------------------------------------
-# Policy
-# --------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class Rule:
     rule_id: str
@@ -540,13 +511,12 @@ class CostTable:
     cancellation_per_flight: int
     hotel_overnight: int
     seniority_allowance_pilot: int = 0
-    """Paid per year of seniority on a callout: senior crew cost more to call in."""
+    """Per year of seniority on a callout, so senior crew cost more to call in."""
     seniority_allowance_cabin: int = 0
     travel_per_10_minutes: int = 0
     """Travel allowance per 10 minutes the crew member needs to reach the airport."""
 
     def callout(self, rank: Rank, on_reserve: bool) -> int:
-        """Cost of calling someone in: cheaper from reserve than from a day off."""
         if on_reserve:
             return self.reserve_callout_pilot if rank.is_pilot else self.reserve_callout_cabin
         return self.dayoff_callout_pilot if rank.is_pilot else self.dayoff_callout_cabin

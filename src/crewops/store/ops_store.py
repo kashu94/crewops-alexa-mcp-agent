@@ -50,7 +50,7 @@ SORT_KEYS: dict[type, Any] = {
     Airline: lambda a: a.code,
     EmergencyGate: lambda g: g.gate,
 }
-"""Records come back from a scan in hash order; sorting makes a read deterministic."""
+"""A scan returns items in hash order, so sort to make reads deterministic."""
 
 
 def table_for(settings: Settings, session: boto3.Session | None = None) -> Any:
@@ -123,11 +123,8 @@ class OpsStore:
             kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
     def load_seed(self) -> SeedData:
-        """Read the whole operation back into the same shape the seed loader returns.
-
-        Items that are not part of the operation (disruptions, plans, audit events, added
-        by later features) are ignored here.
-        """
+        """Read the whole operation back in the shape the seed loader returns. Disruptions,
+        plans, audit events and the like share the table and are skipped."""
         by_type: dict[type, list[Any]] = defaultdict(list)
         for item in self.scan():
             if item.get(ENTITY) not in _OPERATION_ENTITIES:

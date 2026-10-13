@@ -85,7 +85,7 @@ element, so a one-element list would otherwise look like a single object."""
 
 
 def _parsed(texts: list[str], as_list: bool = False) -> Any:
-    """Tool results arrive as JSON text, one item per list element: show them as JSON."""
+    """Decode each text item as JSON where it parses."""
     values = []
     for text in texts:
         try:

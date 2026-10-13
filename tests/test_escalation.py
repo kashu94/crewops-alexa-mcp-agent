@@ -119,7 +119,7 @@ def test_the_speaker_announces_an_escalation(ops_table):
         "desk-1",
     )
     assert alert["event"] == "ESCALATED" and alert["title"] == "Escalated"
-    # It flies the day it was reported: medium, said first so the room knows how urgent.
+    # Flies the day it was reported, so medium. Said first so the room knows how urgent.
     assert alert["severity"] == "medium"
     assert alert["text"].startswith(
         "Medium severity. Still waiting: C-1042 unavailable 2026-10-13 to 2026-10-14"

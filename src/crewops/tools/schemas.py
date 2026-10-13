@@ -1,7 +1,7 @@
 """What each tool takes, as JSON Schema: shown to the model, and enforced before any call.
 
-The same schemas feed Amazon Bedrock's Converse API (``bedrock_tool_config``) and, later,
-the MCP server. Ids carry patterns, so a constructed id like ``"BLR->BOM"`` is refused with a
+The same schemas feed Bedrock's Converse API (``bedrock_tool_config``) and the MCP server's
+``list_crew_tools``. Ids carry patterns, so a constructed id like ``"BLR->BOM"`` is refused with a
 message saying what a real one looks like, before it reaches the engine.
 """
 

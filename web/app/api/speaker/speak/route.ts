@@ -5,7 +5,6 @@ import { sameOrigin } from "@/lib/tools";
 
 const perScreen = new RateLimit(60, 10 * 60 * 1000); // a busy ops room, not a loop
 
-/** Speaks an alert in the CrewOps voice, for a paired speaker screen. */
 export async function POST(request: Request) {
   if (!sameOrigin(request)) return Response.json({ error: "Bad origin." }, { status: 403 });
   if (declaredTooLarge(request, 8_000)) return Response.json({ error: "Request too large." }, { status: 413 });

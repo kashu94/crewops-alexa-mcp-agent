@@ -1,18 +1,21 @@
-"""How serious a disruption is: high, medium or low, with the reasons, from its analysis.
+"""Severity of a disruption (high, medium or low) with the reasons, from its analysis.
 
-Worked out from what the engine found, never guessed by a model, so the same disruption is
-always rated the same and every rating can be explained:
+Rated from what the engine found, not by a model, so the same disruption always gets the
+same rating and every rating can be explained.
 
-* **High** when a flight is at risk however it is handled: no legal crew for a seat, the
-  best way out is to cancel or fly a cabin crew member short, a joint plan leaves a seat
-  unfilled, or a delay breaks a duty limit; or when enough lesser factors add up.
-* **Medium** when it needs a real decision: cover only from outside today's reserves
-  (a day-off callout, positioning, a command upgrade), it flies within a day, it touches
-  many passengers or several seats, or departures leave late.
-* **Low** when a reserve covers it with time to spare, or there is nothing to cover.
+High means a flight is at risk however it is handled. No legal crew for a seat, the best
+option is to cancel or fly a cabin crew member short, a joint plan leaves a seat unfilled,
+a trip already under way has lost someone with flights still to fly (no reserve call-out
+reaches it, so crew control decides with operations), or a delay breaks a duty limit.
+Enough lesser factors together also make it high.
 
-Computed when read (the console, the speaker, Alexa and desktop alerts), so disruptions
-analysed before this existed are rated too.
+Medium means a real decision is needed. Cover only exists outside today's reserves (day-off
+callout, positioning, command upgrade), it flies within a day, it touches many passengers or
+several seats, or departures leave late.
+
+Low means a reserve covers it with time to spare, or there is nothing to cover.
+
+Computed on read (console, speaker, Alexa, desktop alerts), so older analyses get rated too.
 """
 
 from __future__ import annotations
@@ -22,7 +25,6 @@ from datetime import date
 from typing import Any
 
 HIGH, MEDIUM, LOW = "high", "medium", "low"
-LEVELS = (HIGH, MEDIUM, LOW)
 MANY_PASSENGERS = 300
 LONG_DELAY_MINUTES = 120
 MANY_SEATS = 3
@@ -40,7 +42,17 @@ def _first_date(seats: list[Mapping[str, Any]]) -> date | None:
 
 
 ACTIVE = ("options", "no_legal_cover")
-"""Seats still to cover; a trip already flying or cancelled adds nothing to the urgency."""
+"""Seat statuses still to cover from the roster. Cancelled trips add no urgency; trips already
+under way are handled separately by ``_under_way``."""
+
+
+def _under_way(seat: Mapping[str, Any]) -> bool:
+    """Started trip that lost someone with flights still ahead, e.g. the captain taken ill
+    after day one's report leaves the rest of the trip without one."""
+    impact = seat.get("impact") or {}
+    return seat.get("status") == "already_started" and bool(
+        impact.get("uncovered_flights") or impact.get("at_risk_flights")
+    )
 
 
 def severity(
@@ -50,9 +62,14 @@ def severity(
 
     How soon it flies is counted from ``today`` when given (a disruption read later is
     nearer its flights than when it was reported), else from when it was reported."""
-    seats = [s for s in analysis.get("seats") or [] if s.get("status", "options") in ACTIVE]
+    every = analysis.get("seats") or []
+    seats = [s for s in every if s.get("status", "options") in ACTIVE]
     hard: list[str] = []
     soft: list[str] = []
+
+    for s in filter(_under_way, every):
+        role = str(s.get("role") or "crew member").lower()
+        hard.append(f"{s.get('pairing_id', 'a trip')} is under way without its {role}")
 
     for s in seats:
         pairing = s.get("pairing_id", "a trip")

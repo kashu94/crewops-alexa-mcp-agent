@@ -280,8 +280,8 @@ export function SeatOptions({
   seat: Seat;
   contention?: Record<string, Rival[]>;
   unavailable?: Record<string, Unavailable>;
-  /** Decided: the crew id the committed plan used. The options are then shown as they were
-   * analysed, not searched again against today's roster. */
+  /** Once decided, the crew id the committed plan used. Options then show as analysed
+   * rather than being searched again against today's roster. */
   chosen?: string | null;
 }) {
   const decided = chosen !== null;

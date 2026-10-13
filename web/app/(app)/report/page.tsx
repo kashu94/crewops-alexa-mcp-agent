@@ -76,7 +76,7 @@ function Label({ text, hint, children }: { text: string; hint?: string; children
   );
 }
 
-/** A UTC instant from a datetime-local value, as the report wants it. */
+/** datetime-local has no zone; the report API wants UTC. */
 const utc = (v: FormDataEntryValue | null) => (v ? `${String(v)}:00Z` : "");
 const text = (v: FormDataEntryValue | null) => String(v ?? "").trim();
 
@@ -145,7 +145,7 @@ function CrewChips({
   );
 }
 
-/** Values a link from the Operations board fills in (``/report?type=…&crew_id=…``). */
+/** Prefill from an Operations board link, e.g. `/report?type=…&crew_id=…`. */
 type Prefill = { crew_id?: string; from_date?: string; flight_id?: string };
 
 function Fields({
@@ -397,7 +397,7 @@ function detailsOf(kind: Kind, f: FormData, crewIds: string[]): Record<string, u
         crew_id: text(f.get("crew_id")).toUpperCase(),
         ...dates(),
         reason: text(f.get("reason")),
-        // Taken ill part-way through the first day: legs before this are still flown.
+        // fell ill mid-day; earlier legs still count as flown
         ...(text(f.get("from_time"))
           ? { from_utc: `${text(f.get("from_date"))}T${text(f.get("from_time"))}:00Z` }
           : {}),
@@ -434,7 +434,7 @@ function detailsOf(kind: Kind, f: FormData, crewIds: string[]): Record<string, u
   }
 }
 
-/** Where a report went: the controller desk, or why it has none yet. */
+/** The controller desk a report went to, or why it hasn't gone to one yet. */
 function deskLine(r: MyReport): string {
   if (r.status === "REJECTED") return "Not sent to crew control: it was refused";
   const desks = r.desks ?? [];
@@ -468,7 +468,6 @@ function shown(value: unknown): string {
   return String(value);
 }
 
-/** Everything about one report, in a dialog over the blurred page. */
 function ReportDetail({ r, scope, onClose }: { r: MyReport; scope: "mine" | "crew"; onClose: () => void }) {
   const details = Object.entries(r.details ?? {}).filter(([, v]) => v !== null && v !== undefined && v !== "");
   return (
@@ -617,7 +616,7 @@ export default function ReportPage() {
 
   const [scope, setScope] = useState<"mine" | "crew">("mine");
   const [prefill, setPrefill] = useState<Prefill>({});
-  // Opened from the Operations board: the kind and the person or flight already chosen.
+  // coming from the Operations board, type and crew/flight are already picked
   useEffect(() => {
     const t = setTimeout(() => {
       const q = new URLSearchParams(window.location.search);
@@ -640,7 +639,7 @@ export default function ReportPage() {
     loadReports();
   }, [loadReports]);
 
-  // A new report is analysed within a minute: look again while one is still being read.
+  // analysis takes up to a minute, so keep polling while any report is pending
   const waiting = useMemo(
     () => (reports ?? []).some((r) => r.status === "REPORTED" || r.status === "QUEUED"),
     [reports],

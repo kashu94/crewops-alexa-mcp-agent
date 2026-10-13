@@ -8,10 +8,7 @@ export type LiveState = "connecting" | "live" | "offline" | "unavailable";
 
 /** Subscribes to disruption status changes over AppSync Events, reconnecting with backoff.
  * Events only say what changed; callers read the details through the server. */
-export function useLiveEvents(
-  onEvent: (event: DisruptionEvent) => void,
-  enabled = true,
-): LiveState {
+export function useLiveEvents(onEvent: (event: DisruptionEvent) => void, enabled = true): LiveState {
   const [state, setState] = useState<LiveState>(enabled ? "connecting" : "unavailable");
   const handler = useRef(onEvent);
   useEffect(() => {

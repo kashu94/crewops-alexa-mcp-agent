@@ -1,15 +1,15 @@
-"""Check that a request really comes from Alexa, as Amazon requires of a skill hosted on
-an HTTPS endpoint instead of an Alexa-triggered Lambda.
+"""Alexa request verification. Amazon requires this for skills on an HTTPS endpoint, since
+the request doesn't come through an Alexa Lambda trigger.
 
-1. ``SignatureCertChainUrl`` is Amazon's: https, ``s3.amazonaws.com``, port 443, a path
+1. ``SignatureCertChainUrl`` must be https on ``s3.amazonaws.com``, port 443, with a path
    under ``/echo.api/``.
-2. The certificate chain at that URL is current, leads to a trusted root, and names
+2. The chain at that URL must be in date, chain to a trusted root, and cover
    ``echo-api.amazon.com``.
-3. ``Signature-256`` is the chain's SHA-256 RSA signature of the exact request body.
-4. The request was made within the last 150 seconds.
-5. It is for this skill.
+3. ``Signature-256`` must be a valid SHA-256 RSA signature of the raw body.
+4. The timestamp must be within 150 seconds.
+5. The application id must be ours.
 
-Anything else is refused before the body is acted on. Chains are cached by URL.
+We refuse before touching the body if any check fails. Chains are cached per URL.
 """
 
 from __future__ import annotations
@@ -29,13 +29,13 @@ ECHO_NAME = "echo-api.amazon.com"
 
 
 class NotFromAlexa(Exception):
-    """The request failed a check: answer 400 and do nothing."""
+    """Answer 400 and do nothing."""
 
 
 def normalised_cert_url(url: str) -> str | None:
-    """The certificate URL with dot segments and duplicate slashes removed, if it is
-    Amazon's; None otherwise. A query string is refused: Amazon's URL has none, and each
-    new one would otherwise mean another fetch and another cached chain."""
+    """Normalised cert URL (dot segments and double slashes collapsed), or None if it isn't
+    Amazon's. Query strings are refused too. Amazon never sends one, and allowing them
+    would let anyone force a fresh fetch and cache entry per request."""
     try:
         parsed = urlparse(url)
         port = parsed.port
@@ -64,7 +64,7 @@ def _fetch(url: str) -> bytes:
 
 _chains: dict[str, Any] = {}
 MAX_CHAINS = 8
-"""Amazon rotates its signing certificate rarely: a handful of cached chains is plenty."""
+"""Amazon rarely rotates the signing cert, so a few cached chains is plenty."""
 
 
 def _chain(url: str, fetch: Callable[[str], bytes]) -> list[Any]:
@@ -91,7 +91,7 @@ def _trusted_store() -> Any:
 
 
 def check_chain(chain: list[Any], store: Any = None, now: datetime | None = None) -> Any:
-    """The signing certificate, once its chain is verified for echo-api.amazon.com."""
+    """Returns the leaf cert after verifying the chain for echo-api.amazon.com."""
     from cryptography import x509
     from cryptography.x509.verification import PolicyBuilder, VerificationError
 
@@ -149,7 +149,7 @@ def verified(
     store: Any = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """The request envelope, once every check passes; ``NotFromAlexa`` otherwise."""
+    """Parsed envelope if every check passes, else raises ``NotFromAlexa``."""
     lower = {k.lower(): v for k, v in headers.items()}
     url = lower.get("signaturecertchainurl", "")
     signature = lower.get("signature-256", "")

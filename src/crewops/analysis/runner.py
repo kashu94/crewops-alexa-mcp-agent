@@ -1,7 +1,7 @@
-"""Analyse stored disruptions: load the operation, run ``analyse``, store the result once.
+"""Load the operation, run ``analyse`` on stored disruptions and store each result once.
 
-Shared by the stream-triggered Lambda (new reports) and the ``run`` command (reports that
-were stored before analysis existed, or need analysing again after a failure).
+Used by the stream Lambda for new reports and by the ``run`` command for older ones or ones
+whose analysis failed.
 """
 
 from __future__ import annotations
@@ -35,16 +35,15 @@ from crewops.store.reports import (
 log = logging.getLogger(__name__)
 
 OPEN_STATUSES = (STATUS_REPORTED, STATUS_OPTIONS_READY, "SUBMITTED")
-"""Disruptions still being worked: counted at their controllers' desks."""
+"""Still being worked; these count against a controller's desk."""
 UNAVAILABLE_STATUSES = (*OPEN_STATUSES, "COMMITTED", "CLOSED")
-"""Disruptions whose crew are out on their dates. A committed or closed one still counts:
-the crew member is still sick (or still lacks the certificate), whatever was done about
-their seats."""
+"""Disruptions whose crew are out on their dates. Committed and closed ones count too, since
+the person is still sick (or still lacks the certificate) whatever was done about the seats."""
 
 
 def absences_from(items: list[dict[str, Any]]) -> dict[tuple[str, date], datetime]:
-    """(crew id, date) -> when an absence reported from a time starts that day. A whole-day
-    absence for the same person and date wins: they are out all day."""
+    """(crew id, date) -> start time of a part-day absence. A whole-day absence for the same
+    person and date wins."""
     since: dict[tuple[str, date], datetime | None] = {}
     for item in items:
         try:
@@ -70,7 +69,7 @@ def absences_from(items: list[dict[str, Any]]) -> dict[tuple[str, date], datetim
 
 
 def cancelled_flights(table: Any) -> frozenset[str]:
-    """Flights an approved plan cancelled: a cancelled trip's flights, which nobody flies."""
+    """Flights on trips an approved plan cancelled."""
     return frozenset(
         f
         for plan in plans_with_status(table, PLAN_COMMITTED)
@@ -106,12 +105,12 @@ def unavailable_crew(
     return {crew: tuple(sorted(set(days))) for crew, days in out.items()}
 
 
-ALL_STATUSES = (*OPEN_STATUSES, "COMMITTED", "CLOSED")
+ALL_STATUSES = UNAVAILABLE_STATUSES
 
 
 def next_desk(table: Any) -> str:
-    """The desk the next analysed disruption goes to: the controller with the fewest open
-    disruptions, then the fewest overall (so ties take turns), then desk order."""
+    """Desk for the next disruption. Fewest open first, then fewest overall so ties take
+    turns, then desk order."""
     open_counts: Counter[str] = Counter()
     totals: Counter[str] = Counter()
     for status in ALL_STATUSES:
@@ -125,7 +124,7 @@ def next_desk(table: Any) -> str:
 
 
 def seat_keys(analysis: dict[str, Any]) -> set[tuple[str, str, str]]:
-    """The seats an analysis needs covered: trip, role and the crew member who is out."""
+    """(trip, role, crew member out) for each seat the analysis needs covered."""
     return {
         (s["pairing_id"], s["role"], s["crew_out"])
         for s in analysis.get("seats") or []
@@ -134,10 +133,11 @@ def seat_keys(analysis: dict[str, Any]) -> set[tuple[str, str, str]]:
 
 
 def same_seat_owner(table: Any, analysis: dict[str, Any]) -> tuple[str | None, list[str]]:
-    """An open disruption already needing one of these seats, and its desk. One person out
-    on two days of one trip, reported twice, is one seat: whoever covers flies the whole
-    trip, so the second report goes to the desk already handling it, as crew control would
-    add it to the open case."""
+    """Open disruptions already needing one of these seats, and their desk.
+
+    One person out on two days of the same trip, reported twice, is still one seat (the cover
+    flies the whole trip), so the second report goes to the desk that has the first, the way
+    crew control would add it to the open case."""
     mine = seat_keys(analysis)
     if not mine:
         return None, []
@@ -163,9 +163,9 @@ def open_disruptions(table: Any) -> list[dict[str, Any]]:
 
 
 def operation_now() -> datetime | None:
-    """The real time in a deployed operation (``CREWOPS_REAL_TIME=1``, set by its stacks),
-    so flights before it have flown and reports look ahead from today. Unset (tests, the
-    evaluation, local runs) it is None: the seed's own moment, the same every run."""
+    """Wall-clock now when deployed (the stacks set ``CREWOPS_REAL_TIME=1``), so earlier
+    flights count as flown. Otherwise None, meaning the seed's own fixed moment, which keeps
+    tests, the evaluation and local runs repeatable."""
     return datetime.now(UTC) if os.environ.get("CREWOPS_REAL_TIME") == "1" else None
 
 
@@ -180,12 +180,12 @@ class Operation:
 
     @classmethod
     def load(cls, table: Any, now: datetime | None = None) -> Operation:
-        """The roster from the table, plus everyone open disruptions have taken out.
+        """The roster from the table, minus everyone open disruptions have taken out.
 
-        A crew member reported sick in one disruption must not be offered as cover in
-        another, so the crew named by open crew-unavailable and certification-lapse
-        reports are marked unavailable on the dates those reports cover. Flights an approved
-        plan cancelled are marked cancelled: nobody flies them, or positions on them.
+        Someone reported sick in one disruption must not be offered as cover in another, so
+        crew named in absence and certification-lapse reports are marked unavailable on
+        those dates. Flights an approved plan cancelled are marked cancelled so nobody is
+        rostered or positioned on them.
         """
         seed = OpsStore(table).load_seed()
         world = build_world(seed, now or operation_now())
@@ -211,8 +211,8 @@ class RunResult:
 
 
 def _on_call_then(world: World, report: Report) -> bool:
-    """Whether anyone this report takes out is on call (reserve) in its period: then crew
-    control must know, since the reserve pool at that base is one smaller."""
+    """Is anyone this report takes out on reserve in its period? Crew control needs to know,
+    the pool at that base is one smaller."""
     d = report.details
     start, end = date.fromisoformat(d["from_date"]), date.fromisoformat(d["to_date"])
     return any(
@@ -238,8 +238,8 @@ def analyse_item(table: Any, item: dict[str, Any], operation: Operation) -> RunR
         and not (doc.get("seats") or doc.get("delays"))
         and not _on_call_then(operation.world, report)
     ):
-        # Out on days they fly nothing (a day off): kept on record, so they are not called
-        # out then, but there is nothing for a controller to plan, so no desk takes it.
+        # off on days with no flying: keep the record so they aren't called out, but there's
+        # nothing to plan so no desk gets it
         record_only = "Recorded: no flights to cover on these dates."
         doc["handling"] = {
             "kind": "recorded",

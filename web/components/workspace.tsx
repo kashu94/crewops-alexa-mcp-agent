@@ -106,8 +106,7 @@ function SpecialRow({
   );
 }
 
-/** What choosing to cancel, or to operate short, means, in place of the explanation. */
-/** Cancelling a seat cancels its whole trip: every flight, and every passenger booked. */
+// Cancelling one seat cancels the whole trip, so count every flight and every booking on it.
 function tripFlights(seat: Seat): { names: string[]; booked: number } {
   const all = seat.context?.flights ?? [];
   if (all.length === 0) {
@@ -117,6 +116,7 @@ function tripFlights(seat: Seat): { names: string[]; booked: number } {
   return { names: all.map((f) => f.flight_no), booked: all.reduce((n, f) => n + (f.booked ?? 0), 0) };
 }
 
+/** Shown instead of the explanation when the choice is to cancel or to operate short. */
 function SpecialWarning({ seat, kind, cost }: { seat: Seat; kind: string; cost: number }) {
   const flights = (seat.impact?.uncovered_flights ?? []).map((f) => f.split("-")[0]);
   const trip = tripFlights(seat);
@@ -386,9 +386,9 @@ function OptionRow({
   recommended: boolean;
   rivals: Rival[];
   onSelect?: () => void;
-  /** Reported unavailable since: shown struck out, and not to be chosen. */
+  /** Reported unavailable since; shown struck out and can't be picked. */
   gone?: Unavailable;
-  /** Another desk's controller: suggest this option to the owning desk. */
+  /** Viewer is another desk's controller, so they can only suggest it to the owning desk. */
   onSuggest?: (note: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);

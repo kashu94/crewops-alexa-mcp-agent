@@ -25,7 +25,7 @@ from crewops.config import Settings, load_env_file
 from crewops.ingestion.seed import Severity, load_seed, validate
 
 DISPOSABLE_STAGES = frozenset({"dev", "test"})
-"""Stages whose data may be thrown away: the same as the CDK app's."""
+"""Keep in sync with the CDK app's list."""
 
 
 def main(argv: list[str] | None = None) -> int:

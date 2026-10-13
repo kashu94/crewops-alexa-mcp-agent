@@ -16,9 +16,9 @@ export class SignInError extends Error {}
 let client: CognitoIdentityProviderClient | null = null;
 
 function cognito(): CognitoIdentityProviderClient {
-  // Sign-in and refresh are public Cognito calls made with the app client id: the SDK
-  // sends them unsigned, so no AWS credentials are needed or used. Bounded, so a network
-  // that cannot reach Cognito fails sign-in with a message instead of spinning forever.
+  // Sign-in and refresh are public calls with the app client id. The SDK sends them
+  // unsigned, so no AWS credentials are involved. Timeouts so an unreachable Cognito
+  // fails sign-in with a message instead of hanging.
   client ??= new CognitoIdentityProviderClient({
     region: settings.region(),
     requestHandler: { connectionTimeout: 5_000, requestTimeout: 15_000 },

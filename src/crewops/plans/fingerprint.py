@@ -1,16 +1,14 @@
 """A plan's fingerprint: SHA-256 over exactly what was submitted, for four-eyes evidence.
 
-When a controller submits a plan, its fingerprint is taken over everything that decides it:
-the disruption, who replaces whom on which trip, the costs, what is left uncovered, the
-rosters it was made against, who submitted it and when. The approver sees the same
-fingerprint on the approval card. Approval computes it again from the stored plan and
-refuses if the two differ, so what is approved is byte for byte what was submitted, even if
-the stored record was edited in between. The approval then gets its own seal: SHA-256 over
-the plan's fingerprint, the approver and the time, recorded with the decision and in the
-audit trail.
+On submit we hash everything that defines the plan (SIGNED_FIELDS): the disruption, who
+replaces whom on which trip, costs, what's left uncovered, the rosters it was made against,
+and who submitted it when. The approver sees the same hash on the approval card. Approval
+recomputes it from the stored plan and refuses on a mismatch, so if the stored record was
+edited in between, it can't be approved. The approval gets its own seal, SHA-256 over the
+plan fingerprint, approver and time, stored with the decision and in the audit trail.
 
-This is tamper evidence, not a signature: nobody holds a private key. Anyone with the plan
-can recompute both values and check them.
+This is tamper evidence, not a signature. Nobody holds a private key, and anyone with the
+plan can recompute both hashes.
 """
 
 from __future__ import annotations
@@ -36,8 +34,8 @@ SIGNED_FIELDS = (
 
 
 def _canon(value: Any) -> Any:
-    """The same value however it was stored: numbers as their shortest decimal text (a
-    float written to DynamoDB comes back a Decimal), mappings with sorted keys."""
+    """Normalise so the hash doesn't depend on storage. A float written to DynamoDB comes
+    back as a Decimal, so numbers become their shortest decimal text; dict keys are sorted."""
     if isinstance(value, bool) or value is None or isinstance(value, str):
         return value
     if isinstance(value, int | float | Decimal):
@@ -58,8 +56,3 @@ def fingerprint(plan: Mapping[str, Any]) -> str:
 
 def approval_seal(plan_fingerprint: str, approver: str, at: str) -> str:
     return hashlib.sha256(f"{plan_fingerprint}|{approver}|{at}".encode()).hexdigest()
-
-
-def short(value: str | None) -> str:
-    """How it is shown: the first 16 hex digits, like a commit id."""
-    return (value or "")[:16]

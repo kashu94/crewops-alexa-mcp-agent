@@ -17,10 +17,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { makeRecognition } from "@/lib/speech";
 
-// A desk or ops-room speaker. It belongs to a place, not a person: nobody signs in here,
-// and no one's sign-in or sign-out affects it. Its server signs in as the speaker device
-// and hears only alert briefs. It behaves as an Echo does with an Alexa notification: a
-// chime and an amber ring, then "what are my notifications?" reads them.
+// Desk or ops-room speaker. It belongs to a place, not a person, so it never uses anyone's
+// session. The server calls in as the speaker device and only gets alert briefs. Modelled on
+// Alexa notifications on an Echo: chime, amber ring, then "what are my notifications?"
+// reads them out.
 
 type Alert = {
   id: string;
@@ -34,8 +34,8 @@ type Alert = {
   severity?: "high" | "medium" | "low" | null;
 };
 
-/** How each kind of alert looks: ops-room displays colour by urgency, with escalations
- * the loudest, so the kind reads from across the room before the words do. */
+/** Coloured by urgency, escalations loudest, so the kind is readable from across the room
+ * before the text is. */
 const LOOK: Record<string, { tag: string; rail: string; card: string; icon: typeof Bell; iconTone: string }> = {
   ESCALATED: {
     tag: "bg-red-500 text-white",
@@ -112,13 +112,13 @@ const SCOPES: { value: string; label: string }[] = [
 const POLL_MS = 5_000;
 const MAX_ANNOUNCEMENTS = 3; // an alert is spoken unprompted once, then twice more as a reminder
 const GAP_MS = 15_000;
-// After an announcement *ends*: a brief takes about 10 s to say, so 15 s between keeps all
-// three within about a minute without talking over the room.
+// Measured from when an announcement ends. A brief is ~10 s, so a 15 s gap gets all three
+// done in about a minute without talking over the room.
 const FIRST_DELAY_MS = 1_200; // after the chime
 const heardKey = (scope: string) => `crewops-speaker-heard:${scope}`;
 
-// What this screen has heard, per scope. Kept in localStorage across reloads; where the
-// browser blocks storage (some private windows), in memory for as long as the page is open.
+// Heard alerts per scope, in localStorage. Some private windows block storage, so fall back
+// to memory for the life of the page.
 const inMemory = new Map<string, Set<string>>();
 
 function loadHeard(scope: string): Set<string> | null {
@@ -135,11 +135,11 @@ function saveHeard(scope: string, heard: Set<string>) {
   try {
     localStorage.setItem(heardKey(scope), JSON.stringify([...heard].slice(-200)));
   } catch {
-    // kept in memory instead: announced again only after a reload, which is harmless
+    // memory only; worst case an alert is announced again after a reload
   }
 }
 
-/** Two soft notes, as a notification chime; made here, so no sound file is needed. */
+/** Two-note chime synthesised in WebAudio, so there's no sound file to ship. */
 function chime(ctx: AudioContext) {
   [880, 1318.5].forEach((freq, i) => {
     const osc = ctx.createOscillator();
@@ -167,8 +167,8 @@ function browserVoice(text: string): Promise<boolean> {
   });
 }
 
-/** Speaks ``text`` in the CrewOps voice, or the browser's own when that is unavailable or
- * the audio was refused. Says whether it was heard. */
+/** Speaks `text` with Polly, falling back to the browser voice if Polly fails or autoplay is
+ * blocked. Resolves false if nothing was spoken. */
 async function say(text: string): Promise<boolean> {
   const r = await fetch("/api/speaker/speak", {
     method: "POST",
@@ -207,13 +207,13 @@ export default function Speaker() {
   const [code, setCode] = useState("");
   const audio = useRef<AudioContext | null>(null);
   const announced = useRef<Set<string>>(new Set());
-  // Each unheard alert's announcements so far and when the next is due.
+  // per unheard alert: times announced, and when the next one is due
   const schedule = useRef(new Map<string, { count: number; nextAt: number }>());
   const busy = useRef(false);
   const unheardNow = useRef<Alert[]>([]);
   const recognition = useRef<ReturnType<typeof makeRecognition>>(null);
 
-  // Which desk this speaker serves: from the address (?for=desk-2), else as last set up.
+  // ?for=desk-2 wins, else whatever desk was set last time
   useEffect(() => {
     const t = setTimeout(() => {
       const fromUrl = new URLSearchParams(window.location.search).get("for");
@@ -241,7 +241,7 @@ export default function Speaker() {
   const markHeard = useCallback(
     (ids: string[]) => {
       if (!scope) return;
-      ids.forEach((id) => schedule.current.delete(id)); // heard: no more announcements
+      ids.forEach((id) => schedule.current.delete(id)); // heard, stop announcing
       setHeard((prev) => {
         const next = new Set(prev);
         ids.forEach((id) => next.add(id));
@@ -252,7 +252,7 @@ export default function Speaker() {
     [scope],
   );
 
-  /** "What are my notifications?": each new alert, oldest first, then it is heard. */
+  /** "What are my notifications?" Reads new alerts oldest first and marks them heard. */
   const read = useCallback(async () => {
     if (busy.current) return;
     busy.current = true;
@@ -264,7 +264,7 @@ export default function Speaker() {
       } else {
         await say(`You have ${queue.length} new CrewOps notification${queue.length === 1 ? "" : "s"}.`);
         for (const a of queue) {
-          // Heard only if it was actually spoken; otherwise it stays new.
+          // autoplay can block speech; only mark heard if it was actually spoken
           if (await say(a.speech)) markHeard([a.id]);
         }
       }
@@ -274,13 +274,12 @@ export default function Speaker() {
     }
   }, [markHeard]);
 
-  // Poll the alert feed while the speaker is on.
   useEffect(() => {
     if (!on || !paired || !scope) return;
     let stop = false;
     let inFlight = false;
     const tick = async () => {
-      if (inFlight) return; // a slow answer is never overtaken by, or overwrites, a newer one
+      if (inFlight) return; // stops a slow response landing after a newer one
       inFlight = true;
       const r = await fetch(`/api/speaker/feed?for=${encodeURIComponent(scope)}`, {
         signal: AbortSignal.timeout(8_000),
@@ -300,7 +299,7 @@ export default function Speaker() {
       setAlerts(list);
       const known = loadHeard(scope);
       if (known === null) {
-        // A speaker just set up announces what happens from now on, as a new Echo would.
+        // fresh speaker: treat the existing backlog as heard, like a new Echo
         const baseline = new Set(list.map((a) => a.id));
         saveHeard(scope, baseline);
         setHeard(baseline);
@@ -308,8 +307,8 @@ export default function Speaker() {
         return;
       }
       setHeard(known);
-      // An alert stops being announced once it is dealt with: its disruption moved on (a plan
-      // submitted, resolved, closed) and left this desk's list, or someone heard it.
+      // Stop announcing once the disruption has left this desk's list (plan submitted,
+      // resolved, closed) or someone has heard it.
       const pending = new Set(list.filter((a) => !known.has(a.id)).map((a) => a.id));
       for (const id of [...schedule.current.keys()]) if (!pending.has(id)) schedule.current.delete(id);
       const fresh = list.filter((a) => !known.has(a.id) && !announced.current.has(a.id));
@@ -329,8 +328,8 @@ export default function Speaker() {
     };
   }, [on, paired, scope]);
 
-  // Announcements: each new alert is spoken up to three times, 15 s after the last one ends,
-  // oldest first and one at a time, until it is dealt with or someone acknowledges it.
+  // Each new alert is spoken up to three times, oldest first, one at a time, until it's dealt
+  // with or acknowledged.
   useEffect(() => {
     if (!on || !announce || !scope) return;
     const forWhom =
@@ -513,7 +512,7 @@ export default function Speaker() {
         </section>
       ) : (
         <div className="relative grid min-h-0 flex-1 gap-6 px-5 py-6 lg:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.3fr)] lg:gap-10 lg:px-10">
-          {/* The device: an Echo seen from above, its light ring saying what it is doing. */}
+          {/* Echo from above; the ring shows state */}
           <section className="flex min-h-0 flex-col items-center justify-center gap-6">
             <div
               className={`speaker-ring speaker-${ring} grid h-56 w-56 place-items-center rounded-full p-[10px] xl:h-64 xl:w-64`}
@@ -618,7 +617,7 @@ export default function Speaker() {
             </p>
           </section>
 
-          {/* The alert stream: the only part that scrolls, and only when it has to. */}
+          {/* only the alert list scrolls */}
           <section className="flex min-h-0 flex-col">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Alert stream</h2>
@@ -683,7 +682,7 @@ export default function Speaker() {
                           <p
                             className={`mt-1.5 leading-relaxed ${a.event === "ESCALATED" ? "text-red-50" : "text-slate-200"}`}
                           >
-                            {/* The badge already says how serious; the words are for the voice. */}
+                            {/* severity is in the badge; this text is what gets spoken */}
                             {a.text.replace(/^(High|Medium|Low) severity\. /, "")}
                           </p>
                           <p className="mt-1 font-mono text-[10px] text-slate-500">{a.disruption_id}</p>

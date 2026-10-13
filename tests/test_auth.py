@@ -252,7 +252,7 @@ def test_sync_creates_then_changes_nothing(ops_table):
     plan = plan_team(cognito, POOL, ops_table, team, password)
     assert asked == []  # nothing is asked for until a step runs
     apply(plan)
-    assert len(cognito.users) == len(team) == 16 and set(cognito.passwords.values()) == {
+    assert len(cognito.users) == len(team) == 23 and set(cognito.passwords.values()) == {
         "Correct-Horse-9"
     }
     assert cognito.groups["ananya.iyer"] == {"controller"}

@@ -1,11 +1,11 @@
-"""Load the seed operating week from JSON and check it hangs together.
+"""Loads the seed week from JSON and checks it hangs together.
 
-Parsing (``load_seed``) checks each record on its own: types, enums, timestamps.
-Validation (``validate``) checks records against each other: every id a pairing names
-exists, roles match ranks, nobody is rostered twice at once, legs connect.
+``load_seed`` checks each record in isolation (types, enums, timestamps). ``validate`` does
+the cross-record checks, e.g. pairing ids exist, roles match ranks, no double-booking, legs
+connect.
 
-Errors mean the data cannot be trusted and loading into DynamoDB must stop. Warnings
-are oddities the engine is built to tolerate, reported so they are never a surprise.
+An error means the data can't be trusted and the DynamoDB load stops. Warnings are oddities
+the engine copes with, surfaced so nobody is surprised by them later.
 """
 
 from __future__ import annotations
@@ -60,8 +60,8 @@ SEED_FILES = (
 
 
 def default_seed_dir() -> Path:
-    """``data/seed`` at the repository root, or under ``CREWOPS_DATA_DIR`` when set (the
-    deployed MCP server, whose package keeps the data beside the code)."""
+    """``data/seed`` in the repo. The deployed MCP server bundles data next to the code and
+    points ``CREWOPS_DATA_DIR`` at it."""
     if root := os.environ.get("CREWOPS_DATA_DIR"):
         return Path(root) / "seed"
     return Path(__file__).resolve().parents[3] / "data" / "seed"
@@ -81,11 +81,10 @@ class SeedData:
     costs: CostTable
     gates: tuple[GateSlot, ...]
     contacts: tuple[Contact, ...] = ()
-    """Who is on duty for each operational team (see ``crewops.domain.contacts``)."""
+    """On-duty contact per operational team, see ``crewops.domain.contacts``."""
     airlines: tuple[Airline, ...] = ()
-    """The airlines, each with its aircraft (see ``crewops.domain.airlines``)."""
     emergency_gates: tuple[EmergencyGate, ...] = ()
-    """Gates held back at each station for disruptions."""
+    """Gates each station holds back for disruptions."""
 
     @property
     def snapshot_utc(self) -> datetime:
@@ -130,7 +129,7 @@ def _parse_list[T](rows: Any, name: str, parse: Callable[[Any, str], T]) -> tupl
 
 
 def load_seed(directory: Path | str | None = None) -> SeedData:
-    """Parse every seed file. Raises ``DataError`` naming the first bad field."""
+    """Raises ``DataError`` naming the first bad field."""
     root = Path(directory) if directory is not None else default_seed_dir()
     raw = {name: _read(root / name) for name in SEED_FILES}
 
@@ -173,7 +172,7 @@ def _duplicates(ids: Iterable[str]) -> list[str]:
 
 
 def validate(seed: SeedData) -> list[Issue]:
-    """Cross-record checks. An empty list of errors means the data is safe to load."""
+    """Cross-record checks. No ERROR issues means it's safe to load."""
     issues: list[Issue] = []
 
     def error(entity: str, message: str) -> None:
@@ -197,7 +196,7 @@ def validate(seed: SeedData) -> list[Issue]:
             [f"{e.crew_id} {e.date} {e.rule_id}" for e in seed.exceptions],
         ),
     ):
-        # Each of these is one item in the table; a duplicate would silently overwrite.
+        # each is one table item, so a duplicate would silently overwrite the first
         for dup in _duplicates(ids):
             error(dup, f"duplicate {kind}")
 

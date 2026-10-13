@@ -14,13 +14,14 @@ RULE-FLT-03         max_flight_hours        60 - 100   Block hours in 28 days
 RULE-REST-04        min_rest_hours          12 - 16    Rest between release and report
 ==================  ======================  =========  ====================================
 
-Each range stops at the regulatory value the operation was built with, so a change can only
-make the rules stricter, or restore them: no setting makes an illegal duty legal. Any
-admin may tighten a threshold; relaxing one (back towards the regulatory value) needs a
-super admin, as relaxing a company fatigue limit needs a senior manager's sign-off. A change
-names the value it expects to replace (two admins cannot overwrite each other unseen), must
-give a reason, and rewrites the rule's sentence so explanations quote the new number. It
-is recorded as an audit event (``CONFIG / AUDIT#ts#RULE_CHANGED#rule#id``).
+Each range stops at the regulatory value the operation was built with. A change can make a
+rule stricter or put it back, but no setting turns an illegal duty into a legal one. Any
+admin may tighten a threshold. Relaxing one (back towards the regulatory value) needs a
+super admin, the same way loosening a company fatigue limit needs a senior manager to sign
+off. A change names the value it expects to replace, so two admins can't silently overwrite
+each other. It also needs a reason, and it rewrites the rule's sentence so explanations
+quote the new number. Each change is an audit event
+(``CONFIG / AUDIT#ts#RULE_CHANGED#rule#id``).
 
 The analysis stored for a disruption keeps the options it found under the old rules until it
 is analysed again; approval always re-checks against the rules as they are then.
@@ -178,8 +179,8 @@ def set_threshold(
     *,
     may_relax: bool = False,
 ) -> dict[str, Any]:
-    """Change one threshold from ``expected`` to ``value``, with the rule's sentence and an
-    audit event, in one transaction. Relaxing it needs ``may_relax`` (a super admin)."""
+    """Move one threshold from ``expected`` to ``value``. The rule text and the audit event
+    go in the same transaction. Relaxing needs ``may_relax`` (super admin)."""
     t = BY_KEY.get((rule_id, param))
     if t is None:
         raise RuleError("INVALID", f"{rule_id} {param} is not adjustable")
@@ -273,8 +274,8 @@ def set_threshold(
 
 
 def activity(table: Any, limit: int = 50) -> list[dict[str, Any]]:
-    """The latest audit events across the system, newest first: rule changes, alert
-    addresses and every disruption's transitions. A filtered scan: the table is small."""
+    """Latest audit events anywhere (rule changes, alert addresses, disruption transitions),
+    newest first. A filtered scan, which is fine while the table is this small."""
     events: list[dict[str, Any]] = []
     kwargs: dict[str, Any] = {
         "FilterExpression": "#e = :audit",

@@ -34,19 +34,19 @@ SPEAKER_KEYS = (
 
 
 def kept_speaker_lines(path: Path) -> list[str]:
-    """The speaker settings already in the file, so a plain re-run does not drop them."""
+    """So a re-run without --speaker doesn't wipe the speaker sign-in."""
     if not path.exists():
         return []
     return [line for line in path.read_text().splitlines() if line.split("=", 1)[0] in SPEAKER_KEYS]
 
 
 SAFE = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
-"""Characters a .env value keeps exactly, unquoted (no "#", "$" or quotes)."""
+"""Survives unquoted in .env (no "#", "$" or quotes). Lookalikes like 0/O and 1/l/I are out."""
 
 
 def new_secret(length: int, symbol: bool) -> str:
-    """A random value of ``length`` safe characters; with ``symbol``, it also meets the
-    pool's password rules (an upper and lower case letter, a digit and a symbol)."""
+    """``symbol=True`` makes it pass the pool's password policy (upper, lower, digit,
+    symbol). Retries until it does."""
     import secrets
 
     while True:
@@ -87,7 +87,7 @@ def lines(region: str, auth: dict, mcp: dict, notify: dict, profile: str | None)
 
 
 def push_key_line(ssm, prefix: str) -> list[str]:
-    """The public push key, if the keys were made; none means desktop alerts stay off."""
+    """Empty if the VAPID keys haven't been created, which leaves desktop alerts off."""
     from botocore.exceptions import ClientError
 
     try:
@@ -137,8 +137,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"A stack output is missing: {exc}. Deploy the stacks first.", file=sys.stderr)
         return 1
     if args.speaker:
-        # The speaker gets its own random password, set on its account here, so it never
-        # holds the team's password; and a random pairing code for a hosted app.
+        # Fresh password just for the device account, so the team's shared password never
+        # ends up in .env.local.
         password, code = new_secret(24, symbol=True), new_secret(10, symbol=False)
         try:
             boto3.Session(region_name=settings.aws_region).client(

@@ -1,10 +1,9 @@
-"""Who is told about a disruption besides crew control: the operational teams.
+"""The operational teams told about a disruption besides crew control.
 
-A disruption reaches more people than the controller who plans cover. Each team here has a
-fixed job when something breaks, and the analysis names which of them a disruption needs
-(``crewops.analysis.notices``). The directory itself, the person on duty for each team at
-each station or for the network, is seed data (``contacts.json``). Email addresses are not
-part of it: an administrator subscribes addresses to a team's alerts, as for controllers.
+Each team has a fixed job when something breaks, and ``crewops.analysis.notices`` picks
+which ones a disruption needs. Who is on duty for each team, per station or for the network,
+comes from seed data (``contacts.json``). No email addresses in there; an administrator
+subscribes addresses to a team's alerts, same as for controllers.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from typing import Any
 from crewops.domain.models import STATION_RE, DataError, _enum, _str
 
 NETWORK = "NETWORK"
-"""The scope of a team that serves every station from the operations centre."""
+"""Scope for a team that serves every station from the operations centre."""
 
 
 class Team(StrEnum):

@@ -79,9 +79,9 @@ export default function Disruptions() {
     (d: FeedItem, s: Scope) => {
       const desks = d.desks ?? [];
       if (s === "network" || !me.desk) return true;
-      // Not analysed yet: whose it is is not known, so it shows under the whole network only.
+      // not analysed yet, so no desk owns it. Only the whole-network view shows it.
       if (d.status === "REPORTED") return false;
-      // No desk recorded (an older record touching no aircraft): any desk's.
+      // older records with no aircraft have no desk; show them to every desk
       const mine = desks.length === 0 || desks.includes(me.desk);
       return s === "mine" ? mine : !mine;
     },

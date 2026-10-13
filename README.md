@@ -1,59 +1,64 @@
 # CrewOps for Alexa+
 
-A voice-first crew operations agent for airline crew control, built for Alexa+ on the open
-**Model Context Protocol** and **AWS**.
+A voice-first agent for airline crew control, built for Alexa+ on the Model Context
+Protocol and AWS.
 
 A captain calls in sick at 01:30. Today a crew controller digs through rosters, duty-hour
 sheets and certification records to find a legal replacement. With CrewOps they ask:
 
 > "Alexa, Captain C-1042 is sick for P-2291. Who do I use?"
 
-CrewOps answers with a **legally checked, cost-ranked, cited** recommendation. Every crew id,
-duty hour and rupee in the answer comes from a deterministic rules engine, never from the
-model's own arithmetic. A verifier checks the final wording against the tool results before
-anyone hears it.
+CrewOps answers with a recommendation that is legally checked, ranked by cost and cited.
+Every crew id, duty hour and rupee in the answer comes from a deterministic rules engine,
+never from the model's own arithmetic, and a verifier checks the final wording against the
+tool results before anyone hears it.
 
-> **The model selects, sequences and narrates. It never calculates.**
+> The model selects, sequences and narrates. It never calculates.
 
 ## What it does
 
-- **Answers crew-control questions by voice.** Lookups ("who is on reserve at BLR?"),
-  replacements ("who covers P-2291?"), legality ("is C-2087 legal for P-2291?") and
-  consequences ("both A320 captains are sick, what's the joint plan?").
-- **Reacts to disruptions on its own.** A sick call or an incident goes onto a queue. The
-  disruption analysis works out the blast radius and legal, cost-ranked options before the
-  controller asks, and each change is pushed live to the console and, where the admin has
-  set it up, emailed to the role that must act.
-- **Covers seats the way crew control does.** Cover only ever comes from the airline that
-  flies the trip, ranked by what it costs (callout, seniority and travel allowances,
-  positioning and any delay). When fewer than three of the seat's own rank are legal, the
-  regulated substitutes follow: a command-qualified first officer for a captain, a captain in
-  the right seat for a first officer, or one cabin crew short while one per 50 seats remains.
-  Cancelling is always the last choice, and no two-pilot aircraft is offered with one pilot.
-- **Picks up where you left off.** "Alexa, anything waiting for me?" brings back pending work
-  hours later: a plan to review for a controller, a plan to sign off for an approver. Within
-  a conversation, a reply such as "Captain" or "is she legal?" is read with the question
-  before it.
-- **Tells the desk, even when nobody is signed in.** A desk speaker chimes and glows amber
-  when a disruption reaches its desk and reads the brief on request, under its own device
-  account. A controller signing in hears what came while they were away, and a linked Echo
-  (or the Alexa app) gets an Alexa notification from the CrewOps skill.
-- **Four-eyes on every crew change.** One person reports, a controller picks a plan, a different
-  person approves it, and only then is it committed in one transaction. Role checks live in
-  code, never in a prompt.
+It answers crew-control questions by voice: lookups ("who is on reserve at BLR?"),
+replacements ("who covers P-2291?"), legality ("is C-2087 legal for P-2291?") and
+consequences ("both A320 captains are sick, what's the joint plan?").
+
+It reacts to disruptions without being asked. A sick call or an incident goes onto a queue,
+and the disruption analysis works out the blast radius and the legal options, ranked by
+cost, before the controller asks. Each change is pushed live to the console and, where the
+admin has set it up, emailed to the role that must act.
+
+Seats are covered the way crew control covers them. Cover only ever comes from the airline
+that flies the trip, ranked by what it costs (callout, seniority and travel allowances,
+positioning and any delay). When fewer than three of the seat's own rank are legal, the
+regulated substitutes follow: a command-qualified first officer for a captain, a captain in
+the right seat for a first officer, or one cabin crew short while one per 50 seats remains.
+Cancelling is always the last choice, and no two-pilot aircraft is offered with one pilot.
+
+"Alexa, anything waiting for me?" brings back pending work hours later: a plan to review for
+a controller, a plan to sign off for an approver. Within a conversation, a reply such as
+"Captain" or "is she legal?" is read with the question before it.
+
+The desk hears about a disruption even when nobody is signed in. A desk speaker, running
+under its own device account, chimes and glows amber when a disruption reaches its desk and
+reads the brief on request. A controller signing in hears what came while they were away,
+and a linked Echo (or the Alexa app) gets an Alexa notification from the CrewOps skill. A
+Fire TV app puts the same operation on the ops-room wall.
+
+Every crew change has four eyes on it. One person reports, a controller picks a plan, a
+different person approves it, and only then is it committed in one transaction. Role checks
+live in code, never in a prompt.
 
 ## Roles
 
 | Role | Can do |
 |---|---|
-| **Crew** | See own schedule, report own unavailability |
-| **Reporter** | Record any disruption: sick crew (one or several), certification expiry, delays, aircraft faults, station and gate closures, gate changes; follow their own reports |
-| **Controller** | Review disruptions and options, submit one plan for approval |
-| **Approver** | Approve or reject submitted plans; approval commits them |
-| **Auditor** | Read-only access to every disruption, decision and audit record |
-| **Admin** | Tighten rule thresholds, read the system activity log, manage alert addresses |
-| **Super admin** | Everything an admin does, and relax a rule threshold back towards regulation (an admin may only tighten one) |
-| **Speaker** | A device, not a person: hears the alert briefs for the desk or area its screen is set to; cannot read records, ask questions or change anything |
+| Crew | See own schedule, report own unavailability |
+| Reporter | Record any disruption: sick crew (one or several), certification expiry, delays, aircraft faults, station and gate closures, gate changes; follow their own reports |
+| Controller | Review disruptions and options, submit one plan for approval |
+| Approver | Approve or reject submitted plans; approval commits them |
+| Auditor | Read-only access to every disruption, decision and audit record |
+| Admin | Tighten rule thresholds, read the system activity log, manage alert addresses |
+| Super admin | Everything an admin does, and relax a rule threshold back towards regulation (an admin may only tighten one) |
+| Speaker | A device, not a person: hears the alert briefs for the desk or area its screen is set to; cannot read records, ask questions or change anything |
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#roles-and-approvals).
 
@@ -137,6 +142,7 @@ tests/                  Unit tests
 docs/                   Architecture, decisions, friction log
 ```
 
+The Fire TV wall display is a separate app in `tv/`; see [tv/README.md](tv/README.md).
 
 ## Getting started
 
@@ -224,10 +230,10 @@ ahead, crew see their flights from five days back to two months ahead, and the O
 board moves a week at a time across the same span. Tests, the evaluation and local runs keep
 the seed's own moment (12 October, 18:00 UTC), so they give the same result every time.
 
-**Planned leave.** Leave booked ahead (annual leave, a planned operation, a course) is not a
-disruption: an admin books it on the Admin page, up to the end of the rostered period, as
-rostering would. The person is never offered as cover then, and any trips they already have
-in that period go to a controller to re-crew in advance, with four-eyes approval as usual.
+Planned leave (annual leave, a planned operation, a course) is not a disruption. An admin
+books it on the Admin page, up to the end of the rostered period, as rostering would. The
+person is never offered as cover then, and any trips they already have in that period go to
+a controller to re-crew in advance, with four-eyes approval as usual.
 Nothing about it is urgent, so it gets the controller's email but no escalation, no Echo
 chime, no desktop alert, no speaker announcement and no team emails.
 
@@ -262,11 +268,12 @@ operation as it was before either of them.
 
 Reports go to the SQS ingest queue, where a worker Lambda validates them, checks the role
 the sender states and every id they name, and stores each one once as a REPORTED
-disruption. Only the MCP server may send reports (it sets the sender from the user's
-verified login): the queue's policy refuses everyone else, unless their IAM ARN is listed in
-`CREWOPS_QUEUE_SENDERS` when the ingestion stack is deployed. To keep using this development
-command, which states the sender directly, list your own IAM user's ARN there; do the same
-before moving messages back from the dead-letter queue, since that sends them again as you:
+disruption. Only the MCP server may send reports, and it sets the sender from the user's
+verified login. The queue's policy refuses everyone else unless their IAM ARN is listed in
+`CREWOPS_QUEUE_SENDERS` when the ingestion stack is deployed. This development command
+states the sender directly, so to keep using it, list your own IAM user's ARN there. Do the
+same before moving messages back from the dead-letter queue, since that sends them again as
+you.
 
 ```bash
 uv run python -m crewops.ingestion.send_report crew_unavailable \
@@ -275,8 +282,8 @@ uv run python -m crewops.ingestion.send_report crew_unavailable \
 ```
 
 Report types: `crew_unavailable`, `multiple_crew_unavailable`, `certification_lapse`,
-`flight_delay`, `aircraft_technical`, `station_disruption`, `gate_closure`, `gate_change`. Add `--dry-run` to validate
-without sending. Crew may report only their own unavailability; auditors and admins may not
+`flight_delay`, `aircraft_technical`, `station_disruption`, `gate_closure`, `gate_change`.
+Add `--dry-run` to validate without sending. Crew may report only their own unavailability; auditors and admins may not
 report.
 
 ### Search indexes
@@ -311,9 +318,10 @@ stage keeps its table, with point-in-time recovery and deletion protection.
 Sign-in uses a Cognito user pool with one group per role (the `CrewOps-<stage>-Auth` stack).
 Nobody signs themselves up, and no email or phone is stored. The team is defined in
 `data/team/demo_team.json`: three controllers (one per desk), three approvers, two
-reporters, four crew members, an auditor, an admin, a super admin, and the ops-room speaker
-device (`ops.speaker`). Usernames are first name and surname (`ananya.iyer`); a crew
-member's starts with their crew number (`c1042.nair`). To create or update the accounts after deploying the stack:
+reporters, eleven crew members across the three airlines, an auditor, an admin, a super
+admin, and the ops-room speaker device (`ops.speaker`). Usernames are first name and surname
+(`ananya.iyer`); a crew member's starts with their crew number (`c1042.nair`). To create or
+update the accounts after deploying the stack:
 
 ```bash
 uv run python -m crewops.auth.provision            # what would change
@@ -342,7 +350,7 @@ uv run python -m crewops.plans.desk --as rohit.malhotra close r-demo-0002 --reas
 This is an operator's tool, acting as the named team member with your AWS credentials; people
 reach the same rules through the assistant, signed in.
 
-**Four-eyes record.** Each plan gets a SHA-256 fingerprint at submission, over exactly what
+Each plan gets a SHA-256 fingerprint at submission, over exactly what
 decides it (who replaces whom, costs, what is left uncovered, the rosters it was made against,
 who submitted it and when). The approval card shows it; approval computes it again and refuses
 a plan changed since (`TAMPERED`), and the commit only succeeds if the stored fingerprint is
@@ -352,19 +360,21 @@ anyone can recompute, not a signature: nobody holds a private key.
 
 ### Resilience and security of the assistant
 
-- **Circuit breaker** (`crewops.agent.breaker`). Every model call already has a firm timeout
-  and a deterministic fallback. After three outage failures in a row (timeouts, lost
-  connections, throttling, 5xx; never our own invalid requests), model calls pause for a
-  minute and every answer comes straight from the roster in DynamoDB through the templates,
-  at once, instead of each question waiting out a timeout. One call is then let through to
-  test the service. The assistant shows "Models paused" while it is open.
-- **Override check** (`crewops.agent.injection`). Before any model or guardrail call, the
-  common override phrasings ("ignore all previous instructions", "you are now an admin",
-  "bypass the RBAC checks", "approve without approval") are refused with a security alert;
-  ordinary questions such as "can we ignore the rest rule?" are not. Every refusal, by this
-  check or by the Bedrock Guardrail's prompt-attack filter, is recorded in the admin's
-  activity log with who asked and what. Neither is the real defence: the assistant has only
-  read tools, filtered by role, so no wording can make it submit, approve or change anything.
+Every model call already has a firm timeout and a deterministic fallback. On top of that, a
+circuit breaker (`crewops.agent.breaker`) counts outage failures: timeouts, lost
+connections, throttling and 5xx, never our own invalid requests. After three in a row,
+model calls pause for a minute and every answer comes straight from the roster in DynamoDB
+through the templates, at once, instead of each question waiting out a timeout. Then one
+call is let through to test the service. The assistant shows "Models paused" while the
+breaker is open.
+
+Before any model or guardrail call, an override check (`crewops.agent.injection`) refuses
+the common override phrasings ("ignore all previous instructions", "you are now an admin",
+"bypass the RBAC checks", "approve without approval") with a security alert. Ordinary
+questions such as "can we ignore the rest rule?" go through. Every refusal, by this check or
+by the Bedrock Guardrail's prompt-attack filter, is recorded in the admin's activity log
+with who asked and what. Neither is the real defence. The assistant has only read tools,
+filtered by role, so no wording can make it submit, approve or change anything.
 
 ### The MCP server
 
@@ -397,9 +407,10 @@ Its tools: `ask` (the full verified answer pipeline), `my_queue`, `show_disrupti
 `report_disruption`, the plan actions (`submit_plan`, `approve_plan`, `reject_plan`,
 `withdraw_plan`, `close_disruption`), `list_crew_tools` / `crew_tool` for the
 deterministic tools directly, `whoami`, `disruptions` (the desk's feed), `my_roster`
-(crew, with their notices), `my_reports` and `report_reference` (reporting), `rule_thresholds`, and, for admins, `set_rule_threshold`, `activity_log`,
-`alert_addresses`, `add_alert_address` and `remove_alert_address`. What each user may do
-depends on their role.
+(crew, with their notices), `my_reports` and `report_reference` (reporting),
+`rule_thresholds`, and, for admins, `set_rule_threshold`, `activity_log`, `alert_addresses`,
+`add_alert_address` and `remove_alert_address`. What each user may do depends on their
+role.
 
 A follow-up needs the same conversation id on each question. The previous turn then fills
 in only what a reply giving just a seat, a date or an id, or a "he", "she" or "that
@@ -443,8 +454,8 @@ kiro .        # or open the folder from Kiro started in this terminal
 ```
 
 Approve the two variables when Kiro asks (it expands only approved ones), check that the
-`crewops` server lists its tools, and ask "what's on my desk?": the skill loads from its
-description (or type `/crewops-crew-control`). Read-only tools are approved in advance;
+`crewops` server lists its tools, and ask "what's on my desk?". The skill loads from its
+description, or type `/crewops-crew-control`. Read-only tools are approved in advance;
 Kiro still asks before submitting, approving or reporting. The access token lasts about an
 hour. Any other agent with Agent Skills and remote MCP works the same way
 (`assets/mcp.json.example`, for example Claude Code's `.claude/skills/` and `.mcp.json`).
@@ -472,14 +483,18 @@ uv run python -m crewops.mcp.client --as priya.desai add_alert_address \
 uv run python -m crewops.mcp.client --as priya.desai alert_addresses
 ```
 
-**Escalation.** When a disruption reaches a desk (analysed, or its plan sent back), the
+#### Escalation
+
+When a disruption reaches a desk (analysed, or its plan sent back), the
 notifier creates a one-time EventBridge Scheduler schedule for 10 minutes later
 (`CREWOPS_ESCALATE_AFTER_MINUTES`), which deletes itself after it runs. If by then nobody has
-submitted a plan or closed it, the addresses subscribed to the **duty supervisor** audience
-get an email, and the desk and room speakers announce "Escalated". If anything was done, nothing
-happens. Subscribe an address the same way, with `"role": "duty_supervisor"`.
+submitted a plan or closed it, the addresses subscribed to the duty supervisor audience
+get an email, and the desk and room speakers announce "Escalated". If anything was done,
+nothing happens. Subscribe an address the same way, with `"role": "duty_supervisor"`.
 
-**Desktop alerts (web push).** A controller or approver can click the bell in the web app's
+#### Desktop alerts (web push)
+
+A controller or approver can click the bell in the web app's
 header to get a notification from the browser when something reaches their desk or waits for
 approval, even with CrewOps closed. Clicking the notification opens the disruption. The
 browser's push service (Google, Microsoft or Mozilla) delivers it free of charge; each message
@@ -493,17 +508,20 @@ uv run python -m crewops.web_env               # writes the public key for the w
 
 Signing out turns desktop alerts off in that browser. Without the keys the bell does not show.
 
-**Severity.** Every disruption is rated high, medium or low from its analysis, never by a
-model: high when a flight is at risk however it is handled (no legal crew, the best way out is
+#### Severity
+
+Every disruption is rated high, medium or low from its analysis, never by a model. It is
+high when a flight is at risk however it is handled (no legal crew, the best way out is
 to cancel or fly short, a seat left unfilled, a delay breaking a duty limit), medium when it
 needs a real decision or flies today or tomorrow (counted from today, not from when it was
-reported), low when a reserve covers it with time to
-spare. The console and disruption list show it with the reasons, and the speaker, Alexa and
+reported), and low when a reserve covers it with time to spare. The console and disruption list show it with the reasons, and the speaker, Alexa and
 desktop alerts say it first ("Medium severity. …").
 
-**Absent on a day off.** Someone reported unavailable on days they fly nothing is recorded,
-not put on a desk: no alert, no escalation, nothing to plan, but they are not offered as
-cover on those days, and the record notes their next duty. If they were on call (reserve)
+#### Absent on a day off
+
+Someone reported unavailable on days they fly nothing is recorded, not put on a desk. There
+is no alert, no escalation and nothing to plan, but they are not offered as cover on those
+days, and the record notes their next duty. If they were on call (reserve)
 then, it does go to a desk: the reserve pool at that base is one smaller. A reporter sees on
 the Operations board who is out and when, never why.
 
@@ -537,9 +555,9 @@ when the browser closes. The "View" menu lists only the views the signed-in role
 banner slides in with every disruption status change, and a Guide in the top bar and (i)
 icons explain each screen and term.
 
-The browser calls no AWS API except the live-events socket: the app's server forwards
-every action to the MCP server as the signed-in user, so every role rule is the server's. Voice input uses the browser's
-speech recognition (Chrome or Edge); elsewhere, type. Hosting on AWS comes in the next
+The browser calls no AWS API except the live-events socket. The app's server forwards every
+action to the MCP server as the signed-in user, so every role rule is the server's. Voice
+input uses the browser's speech recognition (Chrome or Edge); elsewhere, type. Hosting on AWS comes in the next
 step.
 
 ### The desk speaker and "welcome back"
@@ -553,8 +571,8 @@ ring amber and is announced in the Polly voice, then repeated as a reminder 15 s
 each announcement ends, three times at most. It stops as soon as the disruption is dealt with
 (a plan submitted, resolved or closed takes it off the desk's list) or someone taps "Got it"
 or asks "What are my notifications?". Several alerts take turns, oldest first. After the
-third announcement the ring stays amber until someone listens. Each alert is built from the disruption's latest event and its analysis, never from
-a model.
+third announcement the ring stays amber until someone listens. Each alert is built from the
+disruption's latest event and its analysis, never from a model.
 
 ```bash
 uv run python -m crewops.web_env --speaker   # after provisioning the team
@@ -612,7 +630,7 @@ Setting it up, once:
    `REPLACE_WITH_SkillEndpointUrl`), and import the manifest and the interaction models in
    the console (or deploy them with the ASK CLI). The endpoint uses the "wildcard
    certificate" option.
-5. On the skill's Permissions page, switch on **Alexa Notifications** and **Reminders**, note
+5. On the skill's Permissions page, switch on Alexa Notifications and Reminders, note
    the Login with Amazon client id and secret (Alexa Skill Messaging), and store them where
    the notifier reads them, never in a file:
 
@@ -684,7 +702,7 @@ only):
 The rewordings the rules miss are what the semantic stage and the triage model are for;
 the live run measures them.
 
-The web app's public **`/evaluation`** page shows these reports: the figures above, results
+The web app's public `/evaluation` page shows these reports: the figures above, results
 by kind, and every question with its answer and checks, searchable; with both reports it
 compares them side by side. Publish them by writing the reports into the web app:
 

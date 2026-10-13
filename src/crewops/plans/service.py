@@ -1,32 +1,30 @@
-"""Submit, withdraw, reject and approve plans, with every rule enforced here, in code.
+"""Submit, withdraw, reject and approve plans. The rules live here, in code.
 
-* **Only people decide.** Nothing here is a model tool: the advisor and the analysis only
-  prepare options. Every call names a signed-in ``Caller``.
-* **Controllers submit, for their desk.** A disruption belongs to the desk it was assigned
-  when analysed (older records: the desks of the aircraft it touches), and only that desk's
-  controller may plan it.
-* **Cancelling cancels the trip.** Choosing to cancel a seat cancels every flight of its
-  trip: every seat of that trip in the plan must be cancelled too, the cost is counted once,
-  and committing releases the trip's whole crew, so no aircraft is left with one pilot.
-* **Never below the cabin minimum.** Operating one cabin crew short is checked across the
-  whole plan, counting everyone on the trip reported unavailable, at submission and again
-  at approval.
-* **Every seat accounted for.** A seat is a pairing, a role and the crew member being
-  replaced. A seat with no legal cover (or that has already started) is listed in the plan
-  as uncovered, and the controller must say so explicitly to submit. A disruption with no
-  coverable seat at all can be closed with a reason, recording what was done instead.
-* **Four eyes.** An approver decides, never on a plan they submitted. Only the submitter may
-  withdraw.
-* **Legal now, and again at approval.** Each choice must be a legal option when submitted
-  and is checked again against the roster as it is at approval. If anything changed, the
-  plan becomes STALE and nothing is written.
-* **Approving is committing.** The roster changes, the plan, the disruption and the audit
-  are one transaction, conditioned on each pairing's crew and each moved crew member's
-  roster version being what the re-check saw. Two approvals, or an approval and a sick
-  report, touching the same person cannot both succeed.
-* **Contention is shown.** When another open plan or another disruption's proposed cover
-  wants the same crew member on overlapping dates, the submitter is told, and the approver
-  sees the same warnings in their queue.
+None of this is exposed as a model tool; the advisor and the analysis only prepare options,
+and every call takes a signed-in ``Caller``.
+
+The rules, roughly:
+
+- A disruption belongs to the desk it was assigned when analysed (for older records, the
+  desks of the aircraft it touches). Only that desk's controller can plan it.
+- A seat is a pairing, a role and the crew member being replaced. Seats with no legal cover,
+  or that have already started, go in the plan as uncovered and the controller has to
+  acknowledge them to submit. If nothing at all is coverable, the disruption is closed with
+  a reason instead.
+- Cancelling one seat cancels the whole trip. Every seat of that trip in the plan has to be
+  cancelled too, the cost is counted once, and the commit releases the whole crew so no
+  aircraft is left with one pilot.
+- Flying one cabin crew short is checked across the whole plan, counting anyone on the trip
+  already reported unavailable, at submit time and again at approval.
+- Four eyes: the approver can't be the submitter. Only the submitter can withdraw.
+- Each choice has to be legal at submit and is checked again against the roster at
+  approval. If anything changed the plan goes STALE and nothing is written.
+- Approval is the commit. Roster changes, plan, disruption and audit are one transaction,
+  conditioned on each pairing's crew and each moved person's roster version matching what
+  the re-check saw, so two approvals (or an approval and a sick report) on the same person
+  can't both land.
+- If another open plan, or another disruption's proposed cover, wants the same person on
+  overlapping dates, the submitter gets a warning and the approver sees it in their queue.
 """
 
 from __future__ import annotations
@@ -51,8 +49,8 @@ from crewops.tools import Caller
 
 MAX_REASON = 1000
 MAX_SEATS = 20
-"""Most seats one plan covers. A commit writes each seat's cover and replaced crew versions,
-each pairing and four more items, and DynamoDB allows 100 per transaction."""
+"""Cap on seats per plan. A commit writes two roster versions per seat, each pairing, and
+four more items, and DynamoDB allows 100 items per transaction."""
 
 
 class PlanError(Exception):
@@ -187,7 +185,7 @@ class Plans:
             "total_cost_inr": sum(a["cost_inr"] for a in assignments),
             "rosters_before": rosters_before,
         }
-        # What the approver will see, and approval re-checks, byte for byte.
+        # shown to the approver and recomputed at approval
         plan["fingerprint"] = fingerprint(plan)
         warnings = self.contention(plan, world)
         plan["warnings"] = list(warnings)
@@ -250,8 +248,8 @@ class Plans:
         """Re-check against the roster as it is now; commit if nothing changed, else STALE."""
         plan = self._submitted(disruption_id, plan_id)
         self._check_approver(caller, plan)
-        # What was submitted is also in the audit trail, written in the same transaction:
-        # a plan whose fingerprint was removed, or no longer matches, is never approved.
+        # The SUBMITTED audit event (same transaction as the plan) has the fingerprint too.
+        # If someone strips or edits the plan's copy, the audit one still catches it.
         recorded = next(
             (
                 e.get("fingerprint")
@@ -270,7 +268,7 @@ class Plans:
         moved = {a["crew_id"] for a in plan["assignments"] if a["crew_id"]} | {
             a["replaces"] for a in plan["assignments"] if a.get("replaces")
         }
-        # Read before the re-check: a change after it fails the commit's condition.
+        # read versions before the re-check, so a change in between fails the commit
         versions = store.read_versions(self.table, moved)
         world = self.load(self.table).world
         reasons = self._still_valid(world, plan)
@@ -415,8 +413,8 @@ class Plans:
 
     @staticmethod
     def _touches(desk: Desk, world: World, analysis: Mapping[str, Any]) -> bool:
-        """Whether this desk plans the disruption: the desk it was assigned when analysed
-        (the controller with the fewest open ones)."""
+        """Is this the desk the disruption was assigned to at analysis (the least-loaded
+        controller)?"""
 
         def aircraft(pairing_id: str) -> str | None:
             p = world.pairings.get(pairing_id)
@@ -652,7 +650,7 @@ class Plans:
                 if a["crew_id"]:
                     seat["crew_id"] = a["crew_id"]
                 else:
-                    # Operating short: the seat is left empty.
+                    # flying short: drop the seat
                     after.remove(seat)
                     emptied += 1
             if pid in cancelled:
@@ -704,7 +702,7 @@ def summary(plan: Mapping[str, Any]) -> dict[str, Any]:
         "submitted_utc": plan.get("submitted_utc"),
         "decided_by": plan.get("decided_by"),
         "decided_utc": plan.get("decided_utc"),
-        # Four-eyes evidence (crewops.plans.fingerprint).
+        # four-eyes evidence, see plans.fingerprint
         "fingerprint": plan.get("fingerprint"),
         "approval_seal": plan.get("approval_seal"),
     }

@@ -1,14 +1,14 @@
-"""Web push: a desktop notification for a controller or approver, even with CrewOps closed.
+"""Minimal web push sender (no pywebpush dependency).
 
-The browser's own push service (Google's for Chrome, Microsoft's for Edge, Mozilla's for
-Firefox) delivers it free of charge. Each message is encrypted for that one browser
-(RFC 8291, "aes128gcm"), so the push service carries it without reading it, and signed with
-the app's VAPID key (RFC 8292), so only CrewOps can send to its subscribers.
+Delivery goes through the browser vendor's push service (FCM for Chrome, WNS for Edge,
+Mozilla's for Firefox), which costs nothing. Payloads are encrypted per browser with
+RFC 8291 aes128gcm, so the push service can't read them, and signed with our VAPID key
+(RFC 8292) so nobody else can push to our subscribers.
 
-    uv run python -m crewops.notify.webpush keys   # once: the app's VAPID key pair
+    uv run python -m crewops.notify.webpush keys   # one-off, creates the VAPID key pair
 
-The private key is stored in Parameter Store (a SecureString), never in a file; the public
-key, which browsers need to subscribe, is a plain parameter the web app reads.
+The private key lives in Parameter Store as a SecureString. The public key is a plain
+parameter because the web app needs it for browsers to subscribe.
 """
 
 from __future__ import annotations
@@ -28,10 +28,10 @@ PUSH_HOSTS = (
     "updates.push.services.mozilla.com",
     "web.push.apple.com",
 )
-"""Push services a subscription may point at (and Microsoft's ``*.notify.windows.com``):
-the notifier never posts to any other address a browser hands it."""
+"""Allow-list for subscription endpoints, plus ``*.notify.windows.com``. The endpoint comes
+from the browser, so without this the notifier would POST wherever it was told."""
 SUBJECT = "https://github.com/kashu94/crewops-alexa-mcp-agent"
-"""Who push services can contact about this sender (RFC 8292 ``sub``)."""
+"""VAPID ``sub`` claim, a contact URL for the push services."""
 RECORD_SIZE = 4096
 
 Post = Callable[[str, bytes, dict[str, str]], int]
@@ -66,7 +66,7 @@ def _hkdf(salt: bytes, ikm: bytes, info: bytes, length: int) -> bytes:
 def encrypt(
     payload: bytes, p256dh: str, auth: str, *, salt: bytes | None = None, key: Any = None
 ) -> bytes:
-    """The request body for one subscription (RFC 8291, a single aes128gcm record)."""
+    """RFC 8291 request body, one aes128gcm record. Fresh salt and ECDH key unless given."""
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -83,7 +83,7 @@ def encrypt(
     nonce = _hkdf(salt, ikm, b"Content-Encoding: nonce\x00", 12)
     if len(payload) + 17 > RECORD_SIZE:
         raise ValueError("push payload too large for one record")
-    body = AESGCM(cek).encrypt(nonce, payload + b"\x02", None)  # \x02: the last record
+    body = AESGCM(cek).encrypt(nonce, payload + b"\x02", None)  # \x02 = last record delimiter
     header = salt + RECORD_SIZE.to_bytes(4, "big") + bytes([len(as_public)]) + as_public
     return header + body
 
@@ -118,8 +118,6 @@ def _post(url: str, body: bytes, headers: dict[str, str]) -> int:
 
 
 class Sender:
-    """Sends to stored subscriptions with the app's VAPID key."""
-
     def __init__(self, private_pem: str, public_b64: str, post: Post = _post) -> None:
         from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
@@ -146,12 +144,13 @@ class Sender:
         )
         if status in (200, 201, 202):
             return "sent"
-        # 404/410: the browser unsubscribed; 401/403: it subscribed with keys since replaced.
+        # 404/410 means the browser unsubscribed. 401/403 usually means it subscribed with
+        # VAPID keys we have since replaced.
         return "gone" if status in (401, 403, 404, 410) else "failed"
 
 
 def new_keys() -> tuple[str, str]:
-    """A VAPID key pair: the private key as PEM, the public key as browsers want it."""
+    """(private PEM, public key as base64url uncompressed point for applicationServerKey)."""
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives.serialization import (
         Encoding,

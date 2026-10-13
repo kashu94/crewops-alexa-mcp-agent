@@ -5,8 +5,8 @@ import { useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 /** A dialog in the middle of the screen with the page blurred behind it. Closes on the
- * close button, Escape, or a click outside it. Drawn on the page body, so no animated
- * panel it opens from can confine it. */
+ * close button, Escape, or a click outside. Portalled to the body because a transformed
+ * parent would otherwise trap the fixed overlay. */
 export function Modal({
   title,
   onClose,

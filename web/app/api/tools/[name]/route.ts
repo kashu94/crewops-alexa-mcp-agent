@@ -6,8 +6,8 @@ import { isTool, sameOrigin } from "@/lib/tools";
 
 const MAX_BODY = 16_000;
 
-/** Calls one MCP tool as the signed-in user. The MCP server verifies the token and applies
- * every role rule; this route only forwards known tools from this site. */
+/** Calls one MCP tool as the signed-in user. Auth and role checks happen in the MCP server;
+ * this route just refuses unknown tools and other origins. */
 export async function POST(request: Request, ctx: RouteContext<"/api/tools/[name]">) {
   const { name } = await ctx.params;
   if (!isTool(name)) {
@@ -45,9 +45,6 @@ export async function POST(request: Request, ctx: RouteContext<"/api/tools/[name
       return Response.json({ error: err.message, code: err.code }, { status });
     }
     console.error(`tool ${name} failed`, err);
-    return Response.json(
-      { error: "CrewOps is unreachable right now. Try again in a moment." },
-      { status: 502 },
-    );
+    return Response.json({ error: "CrewOps is unreachable right now. Try again in a moment." }, { status: 502 });
   }
 }

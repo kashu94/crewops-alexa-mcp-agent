@@ -48,3 +48,10 @@ components/            Shell, signed-in user, small UI pieces
 lib/                   Cognito, session cookies, MCP client, AppSync Events protocol
 tests/                 Vitest unit tests
 ```
+
+The tree above is the core. `app/` also holds the disruption list (`(app)/disruptions/`),
+the reporters' Operations board (`(app)/operations/`) and Report page (`(app)/report/`),
+the approvals queue (`(app)/approvals/`), the public `evaluation/` page and the desk
+`speaker/`. Under `api/`, `push/` hands out the public key for desktop alerts, `speaker/`
+pairs the desk speaker and serves its feed, and `tv/board` feeds the Fire TV wall display
+(see [../tv/README.md](../tv/README.md)).

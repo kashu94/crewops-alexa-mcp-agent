@@ -1,10 +1,10 @@
 """The CrewOps Alexa skill's endpoint.
 
-Alexa cannot trigger Lambda in ap-southeast-2, and the project is pinned to that region, so
-the skill uses an HTTPS endpoint: a Lambda function URL. The URL is public, as Alexa needs,
-and every request must pass Alexa's signature, certificate, timestamp and skill-id checks
-(``crewops.alexa.verify``) before anything runs; a linked person then has exactly their
-role's access, through the same sign-in checks as the MCP server.
+Alexa can't trigger a Lambda directly in ap-southeast-2, which is where everything else
+lives, so the skill points at a Lambda function URL instead. The URL has to be public for
+Alexa. Every request is checked for Alexa's signature, certificate, timestamp and skill id
+(``crewops.alexa.verify``) before anything runs, and a linked person goes through the same
+token checks as on the MCP server.
 
 The function runs the MCP server's code package (``build/mcp_server``), which carries the
 pipeline, its data and the libraries the checks need. Notifications are sent by the existing

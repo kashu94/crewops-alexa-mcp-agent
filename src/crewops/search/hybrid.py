@@ -1,14 +1,14 @@
 """Keyword (BM25) scoring and the hybrid blend with semantic similarity.
 
-Semantic similarity alone misses exact terms ("FDP", "DX402"); keywords alone miss
-paraphrases ("can a duty run long on a short day"). Every search here blends the two:
-``alpha * keyword + (1 - alpha) * semantic``, with both sides rescaled to 0-1 first, so a
-0.5/0.5 blend really weighs them equally.
+Semantic similarity alone misses exact terms ("FDP", "DX402") and keywords alone miss
+paraphrases ("can a duty run long on a short day"), so searches blend the two as
+``alpha * keyword + (1 - alpha) * semantic``. Both sides are rescaled to 0-1 first so a
+0.5/0.5 blend really does weigh them equally.
 
-When one side carries no signal at all (every candidate scored the same, which is normal
-for keywords when a paraphrase shares no words with any document), that side is dropped
-and the other carries the score alone. Blending a flat side in would cap every score at
-``alpha`` and make a perfect paraphrase unable to clear any threshold above it.
+If one side is flat (every candidate scored the same, normal for keywords when a paraphrase
+shares no words with any document) it is dropped and the other side scores alone. Blending
+a flat side in would cap every score at ``alpha``, and a perfect paraphrase could never
+clear a threshold above that.
 """
 
 from __future__ import annotations
@@ -114,7 +114,7 @@ def bm25(query: str, documents: Sequence[str]) -> list[float]:
 
 
 def normalize(scores: Sequence[float]) -> list[float]:
-    """Min-max to 0-1, so two unrelated scales can be blended fairly."""
+    """Min-max to 0-1 so two unrelated scales can be blended."""
     lo, hi = min(scores), max(scores)
     if hi - lo < 1e-9:
         return [0.0 for _ in scores]
@@ -122,15 +122,14 @@ def normalize(scores: Sequence[float]) -> list[float]:
 
 
 def is_flat(scores: Sequence[float]) -> bool:
-    """No signal: every candidate scored the same."""
     return max(scores) - min(scores) < 1e-9
 
 
 def blend(keyword: Sequence[float], semantic: Sequence[float], alpha: float = 0.5) -> list[float]:
-    """``alpha * keyword + (1 - alpha) * semantic``, each normalised; a flat side is dropped.
+    """``alpha * keyword + (1 - alpha) * semantic``, each normalised. A flat side is dropped.
 
-    With a single candidate both sides are flat, so it scores 0: blended scores only rank
-    candidates against each other. Use a hit's raw semantic similarity for absolute quality.
+    A single candidate has both sides flat and scores 0. Blended scores only rank candidates
+    against each other; for absolute quality use the hit's raw semantic similarity.
     """
     if len(keyword) != len(semantic):
         raise ValueError("score lists must be the same length")

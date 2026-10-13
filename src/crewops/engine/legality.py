@@ -1,15 +1,13 @@
-"""Is this crew member legal for this pairing, and if not, exactly why?
+"""Is this crew member legal for this pairing, and if not, why?
 
-``assess`` is the one entry point the rest of the system uses for a legality answer. It
-handles the two things that change *when* a duty happens before the rules run:
+``assess`` is the only place the rest of the system gets a legality answer from. Before the
+rules run it applies the two things that change when a duty happens. Positioning: someone
+based elsewhere flies in first, so day one slips until they can report (later days keep
+their schedule). A what-if delay: a late first departure stretches day one, which is how a
+delay pushes someone past their duty-period limit.
 
-* **Positioning.** A crew member based elsewhere flies in first, so the first day slips
-  until they can report. Later days keep their schedule.
-* **A what-if delay.** A late first departure stretches day one, which is how a delay
-  pushes someone past their duty-period limit.
-
-It also enforces the reserve on-call window: a reserve whose window does not cover the
-required report time is unavailable, not a cheaper option.
+It also checks the reserve on-call window. A reserve whose window doesn't cover the report
+time is unavailable, not a cheaper option.
 """
 
 from __future__ import annotations
@@ -43,8 +41,8 @@ class Assessment:
     days: tuple[DutyDay, ...]
     """The duty days as evaluated, after positioning and delay."""
     reach_slip_hours: float = 0.0
-    """How late the first departure leaves because, called now, they cannot reach the
-    airport by report time (set by the option search, which judged them on that slip)."""
+    """Departure slip because, called now, they can't reach the airport by report time. Set
+    by the option search, which judged them on that slip."""
 
     @property
     def legal(self) -> bool:
@@ -56,8 +54,7 @@ class Assessment:
 
     @property
     def departure_slip_hours(self) -> float:
-        """How late the first departure leaves: positioning, or the time to reach the
-        airport when called now."""
+        """Positioning delay, else the time to reach the airport when called now."""
         if self.positioning:
             return self.positioning.delay_hours
         return self.reach_slip_hours
@@ -66,8 +63,8 @@ class Assessment:
 def _intra_pairing_rest(days: list[DutyDay], world: World) -> list[RuleVerdict]:
     """Rest between consecutive days of the same pairing.
 
-    Only a delay or a positioning slip can break it (the published roster respects it), but
-    either one eating into the overnight must show up as a rest breach, not pass silently.
+    The published roster always respects it, so only a delay or positioning slip can break
+    it. When one eats into the overnight it has to show up as a rest breach.
     """
     out = []
     minimum = world.book.min_rest_hours
@@ -102,27 +99,25 @@ def assess(
     days = list(world.days_of(pairing_id))
     first = days[0]
 
-    # For crew already rostered on this pairing, a rest period that ends after one of its
-    # days is the rest *from* that day, not rest they still owe before it.
+    # Crew already on this pairing: a rest ending after one of its days is rest from that day,
+    # not rest still owed before it.
     own = [d for d in crew.duties if d.pairing_id == pairing_id]
     if crew.last_rest_ended and any(d.release_utc <= crew.last_rest_ended for d in own):
         crew = replace(crew, last_rest_ended=None)
 
-    # The base rule is about calling someone in. Crew already rostered on the pairing are
-    # placed there by the roster itself, so they are in position by definition.
+    # The base rule is about calling someone in; crew rostered on the pairing are in position
+    # by definition.
     rostered_here = bool(own)
 
     positioning = None
     if crew.base != first.dep_station and not rostered_here:
         positioning = world.positioning(crew, first)
         if positioning and positioning.delay_hours:
-            # Only the first day waits for the positioned crew member. Later days keep their
-            # schedule, so a late first release shortens the overnight rest, and the
-            # intra-pairing rest check below catches it if it falls below the minimum.
+            # Only day one waits. Later days keep their schedule, so the late release eats
+            # the overnight and _intra_pairing_rest catches it if rest drops below minimum.
             days[0] = days[0].shifted(positioning.delay_hours)
 
     if delay_hours:
-        # A what-if delay stretches one duty day: the first by default, or the day given.
         index = 0
         if delay_date is not None:
             matching = [i for i, d in enumerate(days) if d.date == delay_date]
@@ -140,7 +135,7 @@ def assess(
     )
     verdicts += _intra_pairing_rest(days, world)
 
-    # Crew are employed by one airline and can only be rostered on its aircraft.
+    # crew only fly their own airline's aircraft
     theirs = world.airline_of_crew.get(crew_id)
     flies = world.airline_of_pairing(pairing_id)
     if theirs and flies and theirs != flies:
@@ -154,8 +149,8 @@ def assess(
             )
         )
 
-    # Someone reported unavailable in another open disruption cannot cover these dates,
-    # whatever the roster says. Shown as a qualification failure: "not available to fly".
+    # Reported unavailable in another open disruption, whatever the roster says. Shown as a
+    # QUAL failure ("not available to fly").
     duty_dates = {d.date for d in days}
     for when, report_id in world.unavailable.get(crew_id, ()):
         if when in duty_dates:

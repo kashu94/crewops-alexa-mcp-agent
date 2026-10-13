@@ -70,7 +70,7 @@ def test_sick_on_a_day_off_is_recorded_not_put_on_a_desk(ops_table):
     assert any("next duty is 2026-10-17" in n for n in analysis["notes"])
     (closed,) = [e for e in audit_trail(ops_table, "r-offday01") if e["action"] == "CLOSED"]
     assert closed["actor"] == "system:analysis" and closed["reason"].startswith("Recorded")
-    # Still out on those days: never offered as cover for anyone else then.
+    # Still out on those days, so not offered as cover for anyone else.
     world = Operation.load(ops_table).world
     assert {d.isoformat() for d, _ in world.unavailable["C-5417"]} == {
         "2026-10-15",
@@ -93,6 +93,22 @@ def test_two_seats_on_one_trip_are_the_same_passengers_and_lead_counts_from_toda
     }
 
 
+def test_a_trip_under_way_that_lost_its_captain_is_high():
+    # A. Nair out on the first day of P-2291 after it reported: the rest of the trip has no
+    # captain, and no reserve call-out reaches a trip already flying.
+    out = seat(status="already_started", strategy=None, dates=("2026-10-13",))
+    out |= {
+        "role": "Captain",
+        "impact": {**out["impact"], "uncovered_flights": ["KS412-2026-10-13"]},
+    }
+    assert severity({"seats": [out]}, "2026-10-13T11:40:00Z") == {
+        "level": "high",
+        "reasons": ["P-2291 is under way without its captain"],
+    }
+    cancelled = {**out, "status": "cancelled"}
+    assert severity({"seats": [cancelled]})["level"] == "low"
+
+
 def _sick(ops_table, report_id, details):
     store_report(ops_table, Report.from_dict(report(report_id=report_id, **details)), AT)
     assert analyse_by_id(ops_table, report_id, Operation.load(ops_table)).outcome == "stored"
@@ -101,7 +117,7 @@ def _sick(ops_table, report_id, details):
 
 def test_a_sick_reserve_or_a_mixed_group_still_goes_to_a_desk(ops_table):
     OpsStore(ops_table).put_seed(load_seed())
-    # C-3310 flies nothing but is on call at BLR all week: one reserve fewer, so a desk is told.
+    # C-3310 flies nothing but is on call at BLR all week. One reserve fewer, so a desk is told.
     reserve = _sick(
         ops_table,
         "r-reserve1",
@@ -109,7 +125,7 @@ def test_a_sick_reserve_or_a_mixed_group_still_goes_to_a_desk(ops_table):
     )
     assert reserve["status"] == "OPTIONS_READY"
     assert any("one reserve fewer" in n for n in from_dynamo(reserve["analysis"])["notes"])
-    # One of two has a flight to cover: the report is worked, not merely recorded.
+    # One of the two has a flight to cover, so the report is worked, not just recorded.
     mixed = _sick(
         ops_table,
         "r-mixed001",

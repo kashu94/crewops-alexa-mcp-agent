@@ -1,19 +1,21 @@
 """Semantic search over rules, example questions and past scenarios.
 
-Three S3 Vectors indexes, each small and fixed:
+Three small, fixed S3 Vectors indexes.
 
-* ``rules``: the seven legality rules, for a legality question that names no rule id
-  ("how much rest does a pilot need?").
-* ``intents``: the gold example questions, with ids masked. The router's fallback: a
-  question phrased in a way no routing rule anticipated is matched to the closest example
-  question, whose intent the router knows. Never its ids or its answer.
-* ``scenarios``: past disruption scenarios, to classify what *kind* of disruption a free-text
-  description is. Only the kind is returned, never that scenario's answer: its crew and
-  costs were right for its own moment, and a live answer must always be computed fresh.
+``rules`` holds the seven legality rules, for legality questions that don't name a rule id
+("how much rest does a pilot need?").
 
-Each document is embedded with Amazon Titan Text Embeddings V2 and stored with its text as
-metadata. A query fetches every document of the index with its semantic distance, scores
-the same documents by keywords (BM25), and blends the two (see ``hybrid``).
+``intents`` holds the gold example questions with ids masked. It's the router's fallback
+when no routing rule expected the phrasing: the closest example lends its intent, never its
+ids or answer.
+
+``scenarios`` holds past disruption scenarios and is only used to tell what kind of
+disruption a free-text description is. We never return a scenario's answer because its crew
+and costs were right for that moment only.
+
+Documents are embedded with Titan Text Embeddings V2 and stored with their text as
+metadata. A query pulls every document in the index with its distance, scores the same
+documents with BM25 and blends the two (see ``hybrid``).
 """
 
 from __future__ import annotations
@@ -37,10 +39,10 @@ ID_PATTERNS = (
     (re.compile(r"\bVT-[A-Z]{3}\b", re.I), "<aircraft>"),
     (re.compile(r"\b\d{4}-\d{2}-\d{2}\b"), "<date>"),
 )
-"""Specific ids replaced by placeholders in example questions and in queries against them.
-An example question is about a *kind* of request, not about C-3310 or P-2291: masking keeps
-ids from dominating the keyword score and keeps one question's answer (a crew id it names)
-from surfacing in another's search."""
+"""Ids swapped for placeholders, in example questions and in queries against them. An
+example stands for a kind of request, not for C-3310 or P-2291. Masking stops ids from
+dominating the keyword score and stops one question's answer (a crew id it names) turning
+up in another's search."""
 
 
 def mask_ids(text: str) -> str:
@@ -51,12 +53,12 @@ def mask_ids(text: str) -> str:
 
 INDEXES = (RULES, INTENTS, SCENARIOS)
 QUERY_LIMIT = 100
-"""Neighbours requested per query, and the most documents an index may hold. Responses come
-in pages of at most 100; keeping every index within one page means a query sees all of its
-documents, so keyword scores are computed over the whole index. ``put`` enforces it."""
+"""Neighbours per query and also the cap on documents per index. S3 Vectors pages at 100,
+so staying within one page means a query sees every document and BM25 runs over the whole
+index. ``put`` enforces it."""
 TEXT_KEY = "text"
-"""Metadata key holding the embedded text. Declared non-filterable on each index, so it
-can be long and does not count against the filterable-metadata size limit."""
+"""Metadata key for the embedded text. Non-filterable on every index so it can be long
+without hitting the filterable-metadata size limit."""
 
 SCENARIO_KIND = {
     "SICK_CREW": "crew_unavailable",
@@ -65,17 +67,17 @@ SCENARIO_KIND = {
     "CERT_EXPIRY": "certification_lapse",
     "DELAY": "flight_delay",
 }
-"""Scenario event types mapped to report types. A delay that names an aircraft rather than
-a flight is an aircraft fault."""
+"""Scenario event type -> report type. A delay naming an aircraft rather than a flight is
+treated as an aircraft fault (see ``scenario_documents``)."""
 
 
 @dataclass(frozen=True, slots=True)
 class Document:
     key: str
     text: str
-    """What is embedded and keyword-matched."""
+    """Embedded and keyword-matched."""
     metadata: Mapping[str, Any] = field(default_factory=dict)
-    """Returned with a hit. Never contains an answer key."""
+    """Returned with a hit. Never holds an answer key."""
 
 
 def rule_documents(rules_doc: Mapping[str, Any]) -> list[Document]:
@@ -86,8 +88,8 @@ def rule_documents(rules_doc: Mapping[str, Any]) -> list[Document]:
 
 
 def intent_documents(questions: Sequence[Mapping[str, Any]]) -> list[Document]:
-    """Example questions with their ids masked. A hit names the closest example question and
-    its tier; the router maps that question to an intent. Expected answers are never stored."""
+    """Ids are masked and expected answers are left out. A hit gives the example's id and
+    tier, and the router maps the id to an intent."""
     return [
         Document(
             q["question_id"],
@@ -121,7 +123,6 @@ def scenario_documents(scenarios: Sequence[Mapping[str, Any]]) -> list[Document]
 
 
 def load_documents(seed_dir: Path, eval_dir: Path) -> dict[str, list[Document]]:
-    """All three corpora from the repository's data files."""
     read = lambda p: json.loads(p.read_text(encoding="utf-8"))  # noqa: E731
     return {
         RULES: rule_documents(read(seed_dir / "rules.json")),
@@ -138,7 +139,7 @@ Embed = Callable[[str], list[float]]
 
 
 def titan_embedder(bedrock_runtime: Any, model_id: str, dimensions: int) -> Embed:
-    """Embed one text with Titan Text Embeddings V2 (unit-length vectors, for cosine)."""
+    """Titan Text Embeddings V2, normalised to unit length so distance is cosine."""
 
     def embed(text: str) -> list[float]:
         response = bedrock_runtime.invoke_model(
@@ -163,8 +164,8 @@ class Hit:
     score: float
     """Blended 0-1 score, relative to the other documents of the same index."""
     semantic: float
-    """Absolute cosine similarity, -1 to 1. Use it for a floor: the blended score is
-    relative, so the best document always scores high even when nothing really matches."""
+    """Absolute cosine similarity, -1 to 1. Use this for floors. The blended score is
+    relative, so the best document scores high even when nothing really matches."""
     keyword: float
     metadata: Mapping[str, Any]
 
@@ -176,7 +177,7 @@ class VectorSearch:
         self.embed = embed
 
     def put(self, index: str, documents: Sequence[Document]) -> int:
-        """Embed and store documents; the same key replaces the stored vector."""
+        """Embed and store. An existing key's vector is replaced."""
         if len(documents) > QUERY_LIMIT:
             raise ValueError(
                 f"{index}: {len(documents)} documents; at most {QUERY_LIMIT} keep every query "
@@ -199,7 +200,6 @@ class VectorSearch:
         return len(vectors)
 
     def search(self, index: str, query: str, top_k: int = 3, alpha: float = 0.5) -> list[Hit]:
-        """The ``top_k`` documents of ``index`` best matching ``query``, best first."""
         if index == INTENTS:
             query = mask_ids(query)
         response = self.s3vectors.query_vectors(
@@ -214,7 +214,6 @@ class VectorSearch:
         if not found:
             return []
         texts = [v.get("metadata", {}).get(TEXT_KEY, "") for v in found]
-        # Cosine distance is 1 - similarity.
         semantic = [1.0 - float(v.get("distance", 1.0)) for v in found]
         keyword = bm25(query, texts)
         blended = blend(keyword, semantic, alpha)

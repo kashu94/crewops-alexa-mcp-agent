@@ -1,12 +1,11 @@
 """A signed-in user, from their Cognito token's claims, as the ``Caller`` the tools check.
 
-The claims must come from a token whose signature has already been verified, by whatever
-receives the request (AgentCore's JWT authorizer, in front of the MCP server): this module
-does not check signatures. It is the second line: only an access token is accepted (an id
-token is for the client, not for calling services), and it must name this pool, this app
-client and be current. Then the roles come from the groups, which only an admin can change,
-and the crew id and desk from the user's profile in the operations table, which only the
-team command writes. Nothing comes from what a user typed.
+This module doesn't check signatures. The claims must come from a token already verified
+upstream (AgentCore's JWT authorizer in front of the MCP server, and tokens.py). What it does
+check: it must be an access token (id tokens are for the client, not for calling services),
+for this pool and app client, and not expired. Roles come from Cognito groups, which only an
+admin can change. Crew id and desk come from the user's profile in the operations table,
+which only the team command writes. Nothing is taken from user input.
 """
 
 from __future__ import annotations

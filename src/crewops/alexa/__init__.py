@@ -1,2 +1,2 @@
-"""The CrewOps Alexa skill: its HTTPS endpoint, request verification, account linking, and
-the notifications (Alexa Proactive Events) that make an Echo chime for a desk."""
+"""CrewOps Alexa skill. HTTPS endpoint, request verification, account linking, and the
+Proactive Events notifications that make a desk's Echo chime."""

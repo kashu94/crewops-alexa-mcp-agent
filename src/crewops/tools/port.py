@@ -21,7 +21,6 @@ from typing import Any
 from crewops.analysis.disruption import option_dict
 from crewops.domain import DataError, Rank, Report, ReportType, parse_utc
 from crewops.domain.desks import DESKS, owning_desks
-from crewops.domain.reports import crew_out_of
 from crewops.engine import AlreadyStarted, World, assess, find_options
 from crewops.engine.duty import calendar_window
 from crewops.engine.impact import Seat, delay_effect, joint_plan, pairing_impact
@@ -372,8 +371,8 @@ class CrewOpsTools:
         return matches[0].crew_id
 
     def _near_names(self, name: str, limit: int = 3) -> str:
-        """Real crew whose full name or surname is close to ``name``: for a typo, never
-        an answer."""
+        """Crew whose full name or surname is close to ``name``. Offered back for a typo,
+        never used as the answer."""
         keys: dict[str, set[str]] = {}
         for c in self.world.crew.values():
             full = c.name.lower()
@@ -722,10 +721,8 @@ class CrewOpsTools:
         if on is not None:
             self._in_week(on)
         now = self.world.snapshot_utc
-        crew_loss: dict[str, set[date] | None] = {}
-        """Crew lost on these pairings, on these dates (None: every remaining day)."""
-        hit: list[Any] = []
-        """Flights hit directly by a flight, aircraft or station event."""
+        crew_loss: dict[str, set[date] | None] = {}  # pairing -> dates lost, None = all left
+        hit: list[Any] = []  # flights hit directly by a flight, aircraft or station event
         described: dict[str, Any] = {}
 
         if kind == "pairing":
@@ -1306,55 +1303,6 @@ class CrewOpsTools:
         rows.sort(key=lambda r: r["reported_utc"], reverse=True)
         return {"desk": desk, "count": len(rows), "disruptions": rows}
 
-    def report_aircraft(self, report: Report) -> set[str]:
-        """The aircraft a report touches, which decides the desks it belongs to."""
-        d, w = report.details, self.world
-        kind = report.report_type
-        if kind in (ReportType.FLIGHT_DELAY, ReportType.GATE_CHANGE):
-            flight = w.flights.get(d["flight_id"])
-            return {flight.aircraft} if flight else set()
-        if kind is ReportType.AIRCRAFT_TECHNICAL:
-            return {d["aircraft"]}
-        if kind is ReportType.STATION_DISRUPTION:
-            start, end = parse_utc(d["from_utc"]), parse_utc(d["to_utc"])
-            return {
-                f.aircraft
-                for f in w.flights.values()
-                if (f.dep_station == d["station"] and start <= f.dep_utc <= end)
-                or (f.arr_station == d["station"] and start <= f.arr_utc <= end)
-            }
-        if kind is ReportType.GATE_CLOSURE:
-            start, end = parse_utc(d["from_utc"]), parse_utc(d["to_utc"])
-            return {
-                w.flights[g.flight_id].aircraft
-                for g in self.gates
-                if g.gate == d["gate"]
-                and g.start_utc < end
-                and start < g.end_utc
-                and g.flight_id in w.flights
-            }
-        if kind in (
-            ReportType.CREW_UNAVAILABLE,
-            ReportType.MULTIPLE_CREW_UNAVAILABLE,
-            ReportType.PLANNED_LEAVE,
-        ):
-            first, last = date.fromisoformat(d["from_date"]), date.fromisoformat(d["to_date"])
-
-            def hit(day: date) -> bool:
-                return first <= day <= last
-        else:  # certification lapse: every duty after the expiry
-            valid_to = date.fromisoformat(d["valid_to"])
-
-            def hit(day: date) -> bool:
-                return day > valid_to
-
-        return {
-            w.pairings[pid].aircraft
-            for crew_id in crew_out_of(kind, d)
-            for pid, _ in self.crew_pairings.get(crew_id, [])
-            if any(hit(day.date) for day in w.pairings[pid].days)
-        }
-
 
 def describe_report(report: Report) -> str:
     """One line on what a report says happened (public: alerts and the feed use it)."""
@@ -1362,7 +1310,6 @@ def describe_report(report: Report) -> str:
 
 
 def _what(report: Report) -> str:
-    """One line on what a report says happened."""
     d, kind = report.details, report.report_type
     if kind is ReportType.CREW_UNAVAILABLE:
         span = (

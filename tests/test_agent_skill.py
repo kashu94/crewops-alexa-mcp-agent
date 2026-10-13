@@ -77,7 +77,7 @@ def test_the_helper_script_and_client_config_parse():
     kiro = json.loads((SKILL / "assets" / "kiro-mcp.json.example").read_text(encoding="utf-8"))
     server = kiro["mcpServers"]["crewops"]
     assert server["headers"]["Authorization"] == "Bearer ${CREWOPS_ACCESS_TOKEN}"
-    # Only reading is approved in advance: every change is still asked about.
+    # Only reads are pre-approved; every change still asks.
     import asyncio as _a
 
     read_only = {

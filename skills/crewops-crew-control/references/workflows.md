@@ -36,8 +36,8 @@ from a tool result.
 > **Agent:** Submitted as plan pl-8f2c. It now waits for an approver; the roster changes
 > only when they approve.
 
-If every option fails, the seat shows `no_legal_cover` and the handling is **decision**:
-say so plainly ("No legal captain for P 2391 on the 13th") and offer what the analysis
+If every option fails, the seat shows `no_legal_cover` and the handling is `decision`.
+Say so plainly ("No legal captain for P 2391 on the 13th") and offer what the analysis
 lists (a delay, a cancellation and its cost), never a rule-breaking assignment.
 
 ## 3. Controller: a seat on another desk
@@ -58,7 +58,7 @@ The owning desk sees it and decides.
 3. To send back: `reject_plan("r-…", "pl-…", reason)`. The controller sees the reason.
 
 > **User:** Anything to approve?
-> **Agent:** One, Meera: Rohit's plan for C 1042 — D. Reddy covers P 2391 for 23,090
+> **Agent:** One, Meera: Rohit's plan for C 1042. D. Reddy covers P 2391 for 23,090
 > rupees. No other desk wants D. Reddy. Approve it?
 > **User:** Approve.
 > **Agent:** Approved and committed: legality was re-checked and the roster now shows

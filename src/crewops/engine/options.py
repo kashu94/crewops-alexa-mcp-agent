@@ -1,14 +1,13 @@
 """Who could cover this seat, what each choice costs, and why everyone else is out.
 
 ``find_options`` assesses every crew member of the needed rank against the pairing and
-returns the legal ones ranked by cost, with cancellation always listed last as the explicit
-baseline. Every figure a controller might want spoken is computed here, never by a model:
-the premium of the next tier, how many times cheaper covering is than cancelling, how many
-options tie on cost.
+returns the legal ones ranked by cost, with cancellation always last as the baseline. Any
+figure a controller might want read out (next-tier premium, how many times cheaper covering
+is than cancelling, how many options tie) is computed here so a model never has to.
 
-Ranking is by cost, then departure delay, then crew id for a stable order. Cost includes
-the seniority allowance and the travel allowance for the reach time, so those rank only
-through what they pay; the provided risk score is shown and never changes the rank.
+Ranked by cost, then departure delay, then crew id so the order is stable. Seniority and
+travel allowances are in the cost, so they only affect rank through what they pay. The risk
+score is shown but never changes the rank.
 """
 
 from __future__ import annotations
@@ -26,11 +25,11 @@ from crewops.engine.world import World
 
 
 class AlreadyStarted(ValueError):
-    """The pairing reported before the snapshot: it can no longer be re-crewed."""
+    """Pairing reported before the snapshot, too late to re-crew."""
 
 
 class TripCancelled(AlreadyStarted):
-    """An approved plan cancelled the pairing's flights: there is nothing to re-crew."""
+    """An approved plan cancelled the pairing's flights, nothing to re-crew."""
 
 
 class Strategy(StrEnum):
@@ -56,13 +55,13 @@ class Strategy(StrEnum):
 
 
 SUBSTITUTE_BELOW = 3
-"""Fewer legal crew of the seat's own rank than this, and the qualified other rank is
-offered too: command-qualified first officers for a captain's seat, captains current in the
-right seat for a first officer's. Listed after every option of the seat's own rank."""
+"""With fewer legal crew of the seat's own rank than this, the qualified other rank is offered
+as well (command-qualified FOs for a captain's seat, right-seat-current captains for an FO's),
+listed after every own-rank option."""
 
 SEATS_PER_CABIN_CREW = 50
-"""The minimum cabin crew: one per 50 passenger seats (or part of 50). A trip that still
-meets it without the missing member may operate one short; below it, it may not."""
+"""Minimum cabin crew is one per 50 passenger seats or part of 50. A trip that still meets it
+without the missing member may operate one short."""
 
 REACH_ROUNDING_MINUTES = 5
 
@@ -74,9 +73,8 @@ FUNNEL = (
     ("rested", (REST,), "rest conflict or already rostered"),
     ("within limits", (FDP, DUTY, FLIGHT), "would breach a duty or flight-hour limit"),
 )
-"""The order a controller thinks in: can they fly this type, are they current, can they get
-there, are they free, and do they have the hours. Each excluded candidate drops at the
-first stage they fail."""
+"""The order a controller thinks in: rated on the type, current, can get there, free, has the
+hours. A candidate drops out at the first stage they fail."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +94,7 @@ class Option:
     seniority: int | None = None
     risk_score: float | None = None
     resilience: float | None = None
-    """0-100: how much of today's reserve cover for this rank and base survives the choice."""
+    """0-100, how much of today's reserve cover for this rank and base survives the choice."""
     experience_years: int | None = None
 
     @property
@@ -199,10 +197,10 @@ def _stage(a: Assessment) -> str:
 
 
 def _resilience(world: World, a: Assessment, role: Rank, base: str) -> float:
-    """A reserve callout uses one of today's on-call crew of this rank at this base.
+    """Score for using one of today's on-call crew of this rank at this base.
 
-    Using the only reserve captain at a station is a bigger hit than using one of twelve,
-    so the score is 100 * (n - 1) / n. A day-off callout leaves the reserve pool intact.
+    Taking the only reserve captain at a station hurts more than taking one of twelve, hence
+    100 * (n - 1) / n. A day-off callout leaves the pool alone and scores 100.
     """
     if not a.on_reserve:
         return 100.0
@@ -219,8 +217,8 @@ def _resilience(world: World, a: Assessment, role: Rank, base: str) -> float:
 def _assess(
     world: World, crew_id: str, pairing_id: str, delay_hours: float, delay_date: date | None
 ) -> Assessment:
-    """The assessment, with the departure slipping when the crew member cannot reach the
-    airport by report time (called now, they need their reach time to get there)."""
+    """``assess``, plus a departure slip when someone called now can't reach the airport by
+    report time."""
     a = assess(world, crew_id, pairing_id, delay_hours, delay_date)
     if not a.legal or a.positioning is not None or delay_hours:
         return a
@@ -251,15 +249,14 @@ def _row(world: World, a: Assessment, strategy: Strategy) -> tuple:
 
 
 def cabin_minimum(world: World, pairing_id: str) -> int:
-    """The fewest cabin crew the trip may fly with: one per 50 seats (or part of 50) on its
-    largest aircraft."""
+    """Fewest cabin crew the trip may fly with, sized on its largest aircraft."""
     seats = max(world.flights[f].seats for f in world.pairing(pairing_id).flight_ids)
     return -(-seats // SEATS_PER_CABIN_CREW)
 
 
 def cabin_present(world: World, pairing_id: str, crew_ids: Iterable[str]) -> int:
-    """How many of ``crew_ids`` (the trip's cabin crew) fly all of it: not reported
-    unavailable on any of its days, or only from a time after that day's last departure."""
+    """How many of the trip's cabin crew fly all of it, i.e. aren't reported unavailable on
+    any of its days (or only from after that day's last departure)."""
     return sum(1 for c in crew_ids if not _misses_part_of(world, c, pairing_id))
 
 
@@ -275,9 +272,10 @@ def _misses_part_of(world: World, crew_id: str, pairing_id: str) -> bool:
 
 
 def _may_operate_short(world: World, pairing_id: str) -> bool:
-    """Whether the trip still has the minimum cabin crew without the missing one: every
-    cabin crew member reported unavailable on its days is missing too (at least one, the
-    seat being asked about), so two out on one trip are never both "one short"."""
+    """Does the trip keep its cabin minimum without the missing member?
+
+    Everyone reported unavailable on its days counts as missing (at least one, the seat being
+    asked about), so two out on one trip can't both be flown "one short"."""
     pairing = world.pairing(pairing_id)
     cabin = [s.crew_id for s in pairing.crew if s.role in (Rank.CABIN_CREW, Rank.SENIOR_CABIN_CREW)]
     missing = max(1, len(cabin) - cabin_present(world, pairing_id, cabin))
@@ -293,8 +291,8 @@ def find_options(
 ) -> OptionsResult:
     """Every legal way to fill ``role`` on ``pairing_id``, cheapest first.
 
-    With a delay, candidates are judged against the delayed schedule: whoever covers the
-    seat has to fly the day as it will now run, not as it was planned.
+    With a delay, candidates are judged against the delayed schedule, since the cover has to
+    fly the day as it will now run.
     """
     role = Rank(role)
     pairing = world.pairing(pairing_id)
@@ -310,8 +308,8 @@ def find_options(
     airline = world.airline_of_pairing(pairing_id)
 
     def candidates(rank: Rank, qualified: frozenset[str] | None = None) -> list:
-        """Crew of ``rank`` employed by the trip's airline (and holding the extra
-        qualification, when one is needed), not already on the trip."""
+        """Crew of ``rank`` at the trip's airline, not already on it, holding ``qualified``
+        when given."""
         return sorted(
             (
                 c
@@ -332,8 +330,8 @@ def find_options(
     rows = [_row(world, a, Strategy(_strategy(a))) for a in legal]
     rows.sort(key=lambda r: (r[0], r[1], r[2].crew_id))
 
-    # Too few of the seat's own rank: the qualified other rank, after them, most
-    # experienced first. Regulation allows exactly these two substitutions.
+    # Short of own-rank cover: add the qualified other rank after them, most experienced
+    # first. Regulation allows exactly these two substitutions.
     substitute = {
         Rank.CAPTAIN: (Rank.FIRST_OFFICER, world.command_qualified, Strategy.COMMAND_UPGRADE),
         Rank.FIRST_OFFICER: (Rank.CAPTAIN, world.right_seat_qualified, Strategy.RIGHT_SEAT),

@@ -60,7 +60,7 @@ type Event = {
   reason?: string;
 };
 
-// The teams a disruption's analysis may name (the server's crewops.domain.contacts).
+// Must match crewops.domain.contacts on the server.
 const ALERT_TEAMS = [
   ["gate_control", "Gate and stand control"],
   ["station_ops", "Station duty manager"],
@@ -88,7 +88,7 @@ function ThresholdRow({
   onSaved,
 }: {
   t: Threshold;
-  /** A super admin: may relax a threshold as well as tighten it. */
+  /** super admin: may relax a threshold, not just tighten it */
   mayRelax: boolean;
   onSaved: (m: Message) => void;
 }) {
@@ -96,7 +96,7 @@ function ThresholdRow({
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const changed = value !== t.value;
-  // Less strict than now: a higher limit, or a shorter minimum rest.
+  // relaxing = higher limit or shorter minimum rest
   const relaxing = t.stricter === "lower" ? value > t.value : value < t.value;
   const blocked = relaxing && !mayRelax;
   const regulatory = t.stricter === "lower" ? t.max : t.min;

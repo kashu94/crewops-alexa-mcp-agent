@@ -1,18 +1,16 @@
 """Live reports: who may report what, and what a well-formed report looks like.
 
-A report is the first event in a disruption's life (REPORTED). It names its type, who sent
-it, when, and type-specific details. Parsing validates and normalises the details, so
-everything downstream can rely on their shape: dates as ``YYYY-MM-DD``, instants as UTC
-``...Z`` strings, numbers as numbers.
+A report starts a disruption (REPORTED). It carries its type, sender, time and type-specific
+details. Parsing normalises the details so downstream code can rely on the shape: dates as
+``YYYY-MM-DD``, instants as UTC ``...Z`` strings, numbers as numbers.
 
-Who may report is decided here, in code, never by a prompt. The roles checked are the ones
-the message states: the sender is trusted to have set them from a verified login. In the
-finished system only the MCP server, which signs users in through Cognito, sends reports,
+Permission to report is checked here in code, not by a prompt. We trust the roles in the
+message because only the MCP server (which signs users in through Cognito) sends reports,
 and the queue accepts messages from it alone.
 
-* reporter, controller and approver: any type;
-* crew: only their own unavailability;
-* auditor, admin and super admin: nothing (they observe and configure, they do not operate).
+Reporters, controllers and approvers can file any type. Crew can only report themselves
+unavailable. Auditors and admins observe and configure, so they file nothing (planned leave
+is the exception, booked by an admin).
 """
 
 from __future__ import annotations
@@ -48,7 +46,7 @@ class Role(StrEnum):
     ADMIN = "admin"
     SUPER_ADMIN = "super_admin"
     SPEAKER = "speaker"
-    """A desk or ops-room speaker: a device, not a person. It only hears alert briefs."""
+    """Desk or ops-room speaker. A device, not a person; it only gets alert briefs."""
 
 
 class ReportType(StrEnum):
@@ -61,8 +59,8 @@ class ReportType(StrEnum):
     MULTIPLE_CREW_UNAVAILABLE = "multiple_crew_unavailable"
     GATE_CLOSURE = "gate_closure"
     PLANNED_LEAVE = "planned_leave"
-    """Leave booked ahead (annual leave, a planned operation, a course), recorded by an
-    admin, as rostering would: the person's trips then are re-crewed in advance."""
+    """Leave booked ahead (annual leave, a planned operation, a course). Recorded by an admin
+    the way rostering would, so the person's trips get re-crewed in advance."""
 
 
 ABSENCE_TYPES = frozenset(
@@ -86,10 +84,10 @@ def _iso(value: datetime) -> str:
 
 
 def _shown(value: Any, limit: int = 60) -> str:
-    """A short, safe rendering of bad input for an error message.
+    """Bad input, truncated for an error message.
 
-    Error messages end up in logs and in stored rejection records, so they must never grow
-    with the input: a 500,000-character field must not make a 500,000-character message.
+    These messages land in logs and stored rejection records, so a 500,000-character field
+    must not turn into a 500,000-character message.
     """
     text = repr(value)
     return text if len(text) <= limit else text[: limit - 3] + "..."
@@ -122,11 +120,6 @@ def _window(d: Mapping[str, Any], ctx: str) -> tuple[str, str]:
     return _iso(start), _iso(end)
 
 
-# --------------------------------------------------------------------------
-# Details per report type
-# --------------------------------------------------------------------------
-
-
 def _crew_unavailable(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
     start = parse_date(d.get("from_date"), f"{ctx}.from_date")
     end = parse_date(d.get("to_date", d.get("from_date")), f"{ctx}.to_date")
@@ -143,7 +136,7 @@ def _crew_unavailable(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
         "reason": reason,
     }
     if d.get("from_utc"):
-        # Part-way through the first day (taken ill mid-trip): legs before it are flown.
+        # taken ill mid-trip; legs before this are still flown
         at = parse_utc(d.get("from_utc"), f"{ctx}.from_utc")
         if at.date() != start:
             raise DataError(f"{ctx}.from_utc: must be on from_date ({start.isoformat()})")
@@ -168,8 +161,8 @@ def _planned_leave(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
 
 
 def _multiple_crew_unavailable(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
-    """Several crew out at once (a stomach bug after a crew meal, a road accident on the way
-    in): one report, so their seats are covered together and never by one another."""
+    """Several crew out at once (food poisoning after a crew meal, a road accident on the way
+    in). One report so their seats are covered together and never by each other."""
     raw = d.get("crew_ids")
     if not isinstance(raw, list) or not 2 <= len(raw) <= MAX_CREW_IN_ONE_REPORT:
         raise DataError(f"{ctx}.crew_ids: a list of 2 to {MAX_CREW_IN_ONE_REPORT} crew ids")
@@ -216,8 +209,8 @@ def _gate(d: Mapping[str, Any], key: str, ctx: str) -> str:
 
 
 GATE_CLOSURE_CAUSES = ("internal", "external")
-"""internal: the gate's own equipment or staff (jet bridge, power, a security sweep), fixed
-by the station. external: weather or a natural event, which may close more gates."""
+"""internal is the gate's own equipment or staff (jet bridge, power, security sweep), fixed by
+the station. external is weather or similar, which may close more gates."""
 
 
 def _gate_closure(d: Mapping[str, Any], ctx: str) -> dict[str, Any]:
@@ -266,8 +259,8 @@ DETAIL_PARSERS: dict[ReportType, Callable[[Mapping[str, Any], str], dict[str, An
 
 
 def crew_out_of(report_type: str, details: Mapping[str, Any]) -> tuple[str, ...]:
-    """The crew a report takes off the roster: the sick, or the holder of a lapsed
-    certificate. Empty for reports about flights, aircraft, stations and gates."""
+    """Crew the report takes off the roster (the sick, or whoever holds a lapsed certificate).
+    Empty for flight, aircraft, station and gate reports."""
     if report_type == ReportType.MULTIPLE_CREW_UNAVAILABLE:
         return tuple(details.get("crew_ids") or ())
     if report_type in (
@@ -279,17 +272,12 @@ def crew_out_of(report_type: str, details: Mapping[str, Any]) -> tuple[str, ...]
     return ()
 
 
-# --------------------------------------------------------------------------
-# Report
-# --------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class Reporter:
     user_id: str
     roles: frozenset[Role]
     crew_id: str | None = None
-    """Set when the reporter is themselves crew; required for crew self-reports."""
+    """Set when the reporter is crew; required for crew self-reports."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -321,7 +309,7 @@ class Reporter:
 @dataclass(frozen=True, slots=True)
 class Report:
     report_id: str
-    """Chosen by the sender and reused on any resend, so a report is stored only once."""
+    """Chosen by the sender and reused on resend, so a report is stored once."""
     report_type: ReportType
     reported_by: Reporter
     reported_utc: datetime
@@ -374,9 +362,9 @@ MAX_CLOCK_SKEW = timedelta(minutes=5)
 
 
 def check_timing(report: Report, received: datetime) -> str | None:
-    """None if the report time is plausible: not ahead of when it arrived (small skew allowed).
+    """None unless the report claims a time after it arrived (beyond a little skew).
 
-    Late reports are fine; a report from the future is a clock error or a forgery, and would
+    Late reports are fine. One from the future is a clock error or a forgery, and it would
     also jump the queue in the status index, which is ordered by report time.
     """
     if report.reported_utc > received + MAX_CLOCK_SKEW:

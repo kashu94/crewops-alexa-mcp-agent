@@ -30,3 +30,6 @@ node_modules/
 
 # Alexa account linking, filled in from the template: holds the Alexa client secret.
 alexa/account-linking.json
+
+# Git bundles carry the whole history: they are for moving commits, never for the repository.
+*.bundle

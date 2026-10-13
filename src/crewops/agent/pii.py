@@ -1,14 +1,14 @@
 """Remove personal data with no operational purpose, at the point an answer leaves.
 
-It runs after the verifier, never before: the verifier checks the answer against the
-unredacted tool results, and a redacted answer would make real numbers look unsourced.
+Runs after the verifier, never before. The verifier checks the answer against the
+unredacted tool results, and redacting first would make real numbers look unsourced.
 
-Kept on purpose: crew name, rank, base and crew id. A controller has to know who to call.
-Removed: email addresses, phone numbers, Indian government ids (Aadhaar, PAN, passport),
-payment cards (Luhn-checked, so long ids are not mistaken for cards) and IP addresses in
-text, and any field whose name marks it as an address, date of birth, health note, bank
-detail, government id or emergency contact, whatever its content. Those have no reliable
-text pattern: an address reads like prose and a birth date like any other date.
+Crew name, rank, base and crew id stay, because a controller has to know who to call. In
+text we strip emails, phone numbers, Indian government ids (Aadhaar, PAN, passport),
+payment cards (Luhn-checked so long ids aren't mistaken for cards) and IP addresses. Any
+field whose name marks it as an address, date of birth, health note, bank detail,
+government id or emergency contact goes whatever it holds, since those have no reliable
+text pattern. An address reads like prose and a birth date like any other date.
 """
 
 from __future__ import annotations
@@ -22,23 +22,23 @@ PHONE_RE = re.compile(
     r"|0\d{2,4}[\s-]\d{3,4}[\s-]\d{4})(?![\d-])"
 )
 """A leading + with digits, a bare run of 10-15 digits, or a landline with its 0 prefix.
-Never a date or flight id: those are 4-2-2 groups."""
+Dates and flight ids are 4-2-2 groups and don't match."""
 MOBILE_RE = re.compile(
     r"\b((?:call|phone|mobile|cell|contact|tel|ring|whatsapp|number)\b\D{0,12})"
     r"[6-9]\d{4}[\s-]\d{5}(?![\d-])",
     re.I,
 )
-"""A mobile written 5+5 ("98765 43210"), only beside a word saying it is a number: two
+"""A mobile written 5+5 ("98765 43210"). Needs a word like "call" nearby, because two
 plain amounts ("70000 80000") look exactly the same."""
 AADHAAR_RE = re.compile(r"(?<![\d-])(?<!\d\s)\d{4}[\s-]\d{4}[\s-]\d{4}(?![\s-]?\d)")
-"""Exactly three groups of four: not three groups inside a longer number."""
+"""Exactly three groups of four, not part of a longer number."""
 PAN_RE = re.compile(r"(?<![A-Z0-9])[A-Z]{5}[0-9]{4}[A-Z](?![A-Z0-9])")
 PASSPORT_RE = re.compile(r"(?<![A-Za-z0-9-])[A-Z]\d{7}(?![A-Za-z0-9])")
 IPV4_RE = re.compile(
     r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"
 )
 CARD_RE = re.compile(r"(?<![\d-])(?:\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{1,7}|\d{13,19})(?![\d-])")
-"""Grouped in fours, or one unbroken run: never digits joined across separate dates."""
+"""Grouped in fours or one unbroken run. Won't join digits across separate dates."""
 
 SENSITIVE_FIELDS = frozenset(
     {
@@ -84,7 +84,7 @@ def redact_text(text: str) -> str:
 
 
 def redact(value: Any) -> Any:
-    """A copy of a JSON-like value with personal data removed, at any depth."""
+    """Copy of a JSON-like value with personal data removed at any depth."""
     if isinstance(value, dict):
         return {
             k: ("[removed]" if str(k).lower() in SENSITIVE_FIELDS and v is not None else redact(v))

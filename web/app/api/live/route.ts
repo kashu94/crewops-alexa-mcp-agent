@@ -2,8 +2,8 @@ import { settings } from "@/lib/config";
 import { realtimeUrl } from "@/lib/live";
 import { currentTokens } from "@/lib/session";
 
-/** What the page needs to open the live-events socket: the ID token (AppSync's Cognito mode
- * takes ID tokens) and the endpoints. Nothing is cached. */
+/** Token and endpoints for the live-events socket. AppSync's Cognito mode wants the ID token,
+ * not the access token. Not cached. */
 export async function GET() {
   const tokens = await currentTokens();
   if (!tokens) {

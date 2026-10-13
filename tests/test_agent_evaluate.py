@@ -1,8 +1,8 @@
 """The held-out evaluation: its scoring, and the guarantees it must always show.
 
-Rewording scores are reported, never asserted: asserting them would make the held-out set a
-tuning target. What is asserted is what must hold whatever the scores: no unsourced claim,
-no personal data, and every role, question-back, follow-up and injection case behaving.
+Rewording scores are reported, never asserted, or the held-out set would become a tuning
+target. What is asserted holds whatever the scores: no unsourced claim, no personal data,
+and every role, question-back, follow-up and injection case behaving.
 """
 
 import pytest

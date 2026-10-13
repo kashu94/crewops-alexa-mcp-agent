@@ -1,9 +1,8 @@
 """Tool results as short spoken sentences, with no model involved.
 
-This is the answer of last resort: when no model is configured, or a model's draft fails
-verification, this is what the user hears. Every id, number, time and name in it is copied
-from a tool result, so it always passes the verifier. It is plain rather than fluent, and
-says so by being brief.
+This is the fallback answer. With no model configured, or when a model's draft fails
+verification, this is what the user hears. Every id, number, time and name is copied from a
+tool result so it always passes the verifier. Plain rather than fluent, and kept short.
 """
 
 from __future__ import annotations
@@ -14,11 +13,11 @@ from typing import Any
 from crewops.tools import TraceEntry
 
 SHOW = 8
-"""Most rows read out from a lookup. The count said is always the full, exact count."""
+"""Most rows read out from a lookup. The count we say is still the full count."""
 
 
 def _n(value: Any) -> str:
-    """A number as a person says it: 60.0 -> "60", 18500 -> "18,500"."""
+    """60.0 -> "60", 18500 -> "18,500"."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return str(value)
     if float(value).is_integer():
@@ -196,8 +195,8 @@ def _legality(r: dict[str, Any], args: dict[str, Any]) -> str:
 
 
 def _option(o: dict[str, Any], lead: str = "") -> str:
-    """An option as part of a sentence: "to assign Captain …" after "is", "assign …" in a
-    list. The engine's labels start with a capital for use on their own."""
+    """Lower-cases the engine's "Assign ..." label so it fits mid-sentence ("is to assign
+    Captain ..." or "assign ..." in a list)."""
     action = o["action"]
     if action.startswith("Assign "):
         action = f"{lead}assign {action[len('Assign ') :]}"
@@ -443,8 +442,7 @@ def render_entry(entry: TraceEntry) -> str:
 
 
 def render(trace: Sequence[TraceEntry]) -> str:
-    """Every result, in the order the calls were made. A repeated identical result is said
-    once."""
+    """Results in call order. Identical repeats are only said once."""
     seen: set[str] = set()
     parts = []
     for entry in trace:

@@ -1,15 +1,15 @@
 """Classify a question: which intent, therefore which tier, and why.
 
-Three stages, each reached only when the one before abstains:
+Three stages, each only reached when the one before abstains.
 
-1. **Rules.** Ordered patterns, most specific first; the first match wins. They settle the
-   common question shapes with no model call, and every decision names the rule that fired.
-2. **Semantic match.** The closest example question (ids masked) lends its intent, never its
-   ids or answer, provided the absolute similarity clears a floor measured on paraphrases.
-3. **Triage model.** A small model classifies the kind of question only. With no model, or
-   an unusable reply, the safe default is a lookup: it reads data and changes nothing.
+1. Rules. Ordered patterns, most specific first, first match wins. They settle the common
+   question shapes with no model call, and every decision names the rule that fired.
+2. Semantic match. The closest example question (ids masked) lends its intent but never its
+   ids or answer, and only if the similarity clears a floor measured on paraphrases.
+3. Triage model. A small model picks the kind of question, nothing else. With no model or
+   an unusable reply we default to a lookup, which reads data and changes nothing.
 
-Entities always come from this question's own text, whichever stage decided the intent.
+Entities always come from this question's own text, whichever stage picked the intent.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from crewops.agent.entities import (
 from crewops.agent.intents import Confidence, Intent, Tier
 
 NOT_ABOUT_ONE = r"^(?!.*\b(?:impact|affect|effect|cover|replace|legal|cancel|risk)\w*).*?"
-"""Prefix for a rule that must not take a question about one disruption's effect or cover."""
+"""Prefix that stops a rule from taking a question about one disruption's effect or cover."""
 
 
 def _p(*alternatives: str) -> re.Pattern[str]:
@@ -42,7 +42,7 @@ def _p(*alternatives: str) -> re.Pattern[str]:
 
 
 # --------------------------------------------------------------------------
-# Disruption vocabulary: how a desk says someone cannot fly
+# How a desk says someone can't fly
 # --------------------------------------------------------------------------
 
 _SICK = (
@@ -107,16 +107,16 @@ class Rule:
 
 
 RULES: tuple[Rule, ...] = (
-    # Gates first: "delayed" would otherwise read as a disruption.
+    # Gates first, or "delayed" reads as a disruption.
     Rule(Intent.CHECK_GATE, _p(r"\bgates?\b", r"\b[a-z]{3}-g\d+\b"), "gate"),
-# "Controller" names a desk, never a crew member.
+    # "Controller" names a desk, never a crew member.
     Rule(Intent.LOOKUP_CONTROLLERS, _p(r"\bcontrollers?\b"), "controllers"),
-    # "What disruptions are on my desk", "how many are open": the live store, not a lookup.
+    # "What disruptions are on my desk", "how many are open" read the live store.
     Rule(
         Intent.LOOKUP_CONTROLLERS,
         _p(
-            # Not "the impact of the disruption on P-2291" or "who covers": those have
-            # their own intents.
+            # not "the impact of the disruption on P-2291" or "who covers", those have
+            # their own intents
             NOT_ABOUT_ONE + r"\b(open|active|current|pending|unresolved|ongoing|outstanding|"
             r"how many|which|what|list|show)\b[^.?!]{0,30}\bdisruptions?\b",
             NOT_ABOUT_ONE + r"\bdisruptions?\b[^.?!]{0,30}\b(open|on (my|the) desk|pending|"
@@ -125,14 +125,14 @@ RULES: tuple[Rule, ...] = (
         ),
         "open disruptions",
     ),
-    # "likely to go sick" asks about a risk score; it is not a sick call.
+    # "likely to go sick" is a risk score question, not a sick call
     Rule(
         Intent.LOOKUP_RISK,
         _p(r"\blikely to (go|call|be) (sick|off)\b", r"\bflagged\b", r"\brisk score\b",
            r"\bdisruption[- ]risk\b", r"\brisk signal", r"\bwhat drives\b"),
         "risk",
     ),
-    # Tier 3. "Draft the callout" also says "callout"; the verb tells them apart.
+    # Tier 3. "Draft the callout" also says "callout", so the verb has to decide.
     Rule(
         Intent.DRAFT_NOTIFICATION,
         _p(r"\bdraft\b", r"\bnotification\b", r"\bnotify\b", r"\bmessage (to|for|telling)\b",
@@ -159,7 +159,7 @@ RULES: tuple[Rule, ...] = (
         "resolve_illegal",
     ),
     Rule(
-        # No bare "rank": "what is C-2087's rank" is a lookup.
+        # no bare "rank", "what is C-2087's rank" is a lookup
         Intent.RANK_OPTIONS,
         _p(r"\branked\b", r"\brank (the |these )?options\b", r"\brank them\b",
            r"\brecommend", r"\bwhat should\b", r"\bshould (it|we|they|the desk)\b",
@@ -186,7 +186,7 @@ RULES: tuple[Rule, ...] = (
            r"[^.?!]*\b(cover|take|operate|fly)\b"),
         "legality",
     ),
-    # A disruption with "which flights" asks about consequences, not for a name.
+    # a disruption plus "which flights" wants consequences, not a name
     Rule(
         Intent.IMPACT_OF_EVENT,
         _p(r"\baffected\b", r"\bat risk\b", r"\bimmediately\b.*\bflights?\b",
@@ -197,7 +197,7 @@ RULES: tuple[Rule, ...] = (
         "impact",
     ),
     Rule(
-        # "find me a captain who is A320-rated, BLR-based" is a filter, not a cover request.
+        # "find me a captain who is A320-rated, BLR-based" is a filter, not cover
         Intent.LOOKUP_CREW,
         re.compile(
             r"\bfind (?:me )?(?:a |an )?(?:captain|first officer|fo|pilot|crew member)\b"
@@ -212,7 +212,7 @@ RULES: tuple[Rule, ...] = (
         "excluded-from-search",
     ),
     Rule(Intent.FIND_REPLACEMENT, NEEDS_COVER_RE, "cover-request"),
-    # A bare statement that someone cannot fly is a request for cover.
+    # someone can't fly, nothing else said: they want cover
     Rule(Intent.FIND_REPLACEMENT, DISRUPTION_RE, "disruption"),
     # Tier 1.
     Rule(
@@ -263,7 +263,7 @@ RULES: tuple[Rule, ...] = (
         "roster",
     ),
     Rule(
-        # A bare "how many" must say what is counted before it lands here.
+        # a bare "how many" has to say what it counts to land here
         Intent.LOOKUP_CREW,
         _p(r"\bwho\b", r"\blist all\b", r"\bqualified\b", r"\brating\b", r"\bbased at\b",
            r"\bhome base\b", r"\brated on\b", r"\b(rank|seniority|reachability)\b",
@@ -277,9 +277,9 @@ RULES: tuple[Rule, ...] = (
 PERSON_ASPECTS = frozenset(
     {Intent.LOOKUP_DUTY_CLOCK, Intent.LOOKUP_CERT, Intent.LOOKUP_RISK, Intent.LOOKUP_ROSTER}
 )
-"""Tier-1 intents that each answer one aspect of one person. Several in one question
-("duty headroom, expiring certificates and risk for C-1042") become a crew profile, so no
-aspect is silently left unanswered."""
+"""Tier-1 intents that each answer one aspect of one person. A question asking for several
+("duty headroom, expiring certificates and risk for C-1042") becomes a crew profile, or
+all but one aspect would go unanswered."""
 
 
 # --------------------------------------------------------------------------
@@ -295,7 +295,7 @@ class Route:
     decided_by: str = "rule"
     """rule, semantic, triage or default."""
     matched: str | None = None
-    """The rule name, or the example question id, that decided."""
+    """Rule name or example question id that decided."""
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -315,7 +315,8 @@ class Route:
 
 
 def is_multi_event(text: str, ents: Entities) -> bool:
-    """Two disruptions at once. Two crew ids alone are not ("can C-1042 cover for C-2087?")."""
+    """Two disruptions at once. Two crew ids alone don't count ("can C-1042 cover for
+    C-2087?")."""
     if not DISRUPTION_RE.search(text):
         return False
     named_twice = len(ents.crew_ids) >= 2 or len(ents.pairing_ids) >= 2 or len(ents.aircraft) >= 2
@@ -355,8 +356,8 @@ ID_PATTERNS = (CREW_RE, PAIRING_RE, FLIGHT_ID_RE, FLIGHT_NO_RE, RULE_RE, AIRCRAF
 
 
 def is_bare_identifier(text: str) -> bool:
-    """Only ids, no words: similarity to an example would measure the shared id, not the
-    kind of question."""
+    """Only ids, no words. Similarity would then measure the shared id, not the kind of
+    question."""
     for pattern in ID_PATTERNS:
         text = pattern.sub("", text)
     return not re.search(r"[A-Za-z]{2,}", text)
@@ -392,8 +393,8 @@ class Router:
         floor: float = 0.45,
         triage: Triage | None = None,
     ) -> None:
-        """``examples`` maps example question ids to their text. Each one's intent is what
-        the rules decide for it, so there is no second, hand-kept list to drift."""
+        """``examples`` maps example question ids to their text. Their intents come from the
+        rules, so there's no second hand-kept list to drift."""
         self.vocab = vocab
         self.search = search
         self.floor = floor
@@ -444,7 +445,7 @@ class Router:
             payload = json.loads(_json_part(raw))
             intent = Intent(str(payload["intent"]).strip().upper())
             confidence = Confidence(str(payload.get("confidence", "medium")).strip().lower())
-        except Exception as exc:  # any failure: the safe default, and say why
+        except Exception as exc:  # any failure falls back to a lookup, with the reason
             return Route(
                 Intent.LOOKUP_CREW,
                 ents,
@@ -453,11 +454,11 @@ class Router:
                 notes=[f"triage gave no usable answer ({type(exc).__name__}); a lookup"],
             )
         if confidence is Confidence.HIGH:
-            confidence = Confidence.MEDIUM  # a model's word is never as sure as a rule's
+            confidence = Confidence.MEDIUM  # never trust a model as much as a rule
         return Route(intent, ents, confidence, "triage")
 
 
 def _json_part(raw: str) -> str:
-    """The JSON object in a reply, without code fences or a sentence around it."""
+    """Strip code fences or chatter around the JSON object."""
     start, end = raw.find("{"), raw.rfind("}")
     return raw[start : end + 1] if start != -1 and end > start else raw

@@ -12,6 +12,7 @@ import {
   Search,
   Timer,
   Users,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -61,7 +62,7 @@ type Week = {
   week: string[];
   flights: Flight[];
   unavailable: Out[];
-  /** The days that may be shown (a few back, two months ahead) and the operation's today. */
+  /** Showable range (a few days back to two months ahead) and the operation's today. */
   window?: { from: string; to: string; today: string };
 };
 
@@ -91,8 +92,7 @@ function reportHref(params: Record<string, string>) {
   return `/report?${new URLSearchParams(params).toString()}`;
 }
 
-/** A crew member on a flight: struck through in rose when reported unavailable that day;
- * otherwise a link to report them unavailable, pre-filled. */
+/** Struck through in rose if reported unavailable that day, otherwise a prefilled report link. */
 function CrewChip({
   person,
   label,
@@ -102,7 +102,7 @@ function CrewChip({
   person: Person | null;
   label: string;
   date: string;
-  /** False for a day already past: nothing is reported for it. */
+  /** false for past days, which can't be reported */
   reportable?: boolean;
 }) {
   if (!person) return <span className="text-[11px] text-slate-400">{label} —</span>;
@@ -168,8 +168,8 @@ function Kpi({
   );
 }
 
-/** Passengers booked per day, stacked by airline (the schedule repeats daily; the load does
- * not), with crew out and open disruptions marked. */
+/** Daily passengers stacked by airline, with crew out and open disruptions marked. The
+ * schedule repeats daily, the load doesn't. */
 function WeekChart({
   week,
   flights,
@@ -323,8 +323,9 @@ function FlightRow({ f, today }: { f: Flight; today: string }) {
         <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-600">
           <Mono>{f.from}</Mono> <ArrowRight size={11} className="text-slate-400" /> <Mono>{f.to}</Mono>
           <span className="text-slate-300">·</span>
-          <Mono className="text-muted">{f.aircraft}</Mono>
-          <span className="text-muted">{f.aircraft_type}</span>
+          <Mono className="text-muted">
+            {f.aircraft} {f.aircraft_type}
+          </Mono>
         </p>
       </div>
       <div className="flex min-w-0 flex-col gap-1">
@@ -381,7 +382,7 @@ export default function Operations() {
       tool<Week>("operations_overview", start ? { start } : {}).then(
         (w) => {
           setData(w);
-          // Keep the chosen day if it is in this week; else today, or the week's first day.
+          // keep the selected day if it's in this week, else today, else the week's first day
           const today = w.window?.today ?? "";
           setSelected((s) => (s && w.week.includes(s) ? s : w.week.includes(today) ? today : (w.week[0] ?? null)));
         },
@@ -392,7 +393,7 @@ export default function Operations() {
   useEffect(() => {
     load();
   }, [load]);
-  // A status change anywhere (a disruption analysed, a plan approved) refreshes the board.
+  // any status change (analysed, approved, ...) refreshes the board
   useLiveListener(load);
 
   const date = selected ?? data?.week[0] ?? "";
@@ -580,8 +581,19 @@ export default function Operations() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Flight, station, aircraft or crew"
-                className="w-full rounded-lg border border-line bg-surface py-1.5 pl-8 pr-3 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-sky-100"
+                className="w-full rounded-lg border border-line bg-surface py-1.5 pl-8 pr-8 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-sky-100"
               />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear the search"
+                  title="Clear"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-sunken hover:text-slate-700"
+                >
+                  <X size={13} />
+                </button>
+              )}
             </label>
             <div className="flex items-center gap-1">
               <button

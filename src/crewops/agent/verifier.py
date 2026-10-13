@@ -1,15 +1,14 @@
-"""The trust gate: every id, number, time, name, rule verdict and legality verdict in an
-answer must come from a tool result of the same turn.
+"""Every id, number, time, name, rule verdict and legality verdict in an answer must come
+from a tool result of the same turn.
 
-The model has no other source of facts, so anything it states that no tool returned is
-invented. The check is set membership over the trace: deterministic, so it cannot itself
-make something up. A draft that fails is discarded and the deterministic rendering of the
-tool results is spoken instead.
+The model has no other source of facts, so anything it states that no tool returned was
+made up. The check is plain set membership over the trace and can't invent anything itself.
+A draft that fails is thrown away and the template rendering is spoken instead.
 
-Evidence is what the tools *returned*. The ids a call was made with also count when the call
-succeeded (the question named them), and the ids in an error message count (so "C-1024
-doesn't exist" can be said), but no number ever comes from an argument or an error: a model
-cannot make a figure true by passing it to a tool.
+Evidence is what the tools returned. Ids passed as arguments to a successful call also count
+(the question named them), as do ids in an error message (so "C-1024 doesn't exist" can be
+said). Numbers never come from arguments or errors, otherwise a model could make a figure
+true just by passing it to a tool.
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ from crewops.agent.entities import (
 from crewops.tools import TraceEntry
 
 NUMERIC_FLOOR = 10.0
-"""Whole numbers below this are prose ("all 7 rules", "2 options"), not claims to source."""
+"""Whole numbers below this are prose ("all 7 rules", "2 options"), not claims to check."""
 TOLERANCE = 0.01
 
 DATE_RE = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
@@ -49,17 +48,17 @@ ID_PATTERNS = (
     CLOCK_RE,
 )
 DURATION_RE = re.compile(r"(?<![\w.])(\d+)h(\d{2})m\b")
-""""1h20m": one claim, in hours."""
+""""1h20m" is one claim, in hours."""
 NUMBER_RE = re.compile(
     r"(?<![\w.\-])(-(?=[\d₹]))?(?:₹\s*)?(\d[\d,]*(?:\.\d+)?)"
     r"(\s?(?:lakhs?|crores?|thousand|million)\b|[a-zA-Z]{1,4}\b)?",
     re.I,
 )
-"""A number, with its sign and any unit stuck to it ("47h", "120min", "45k", "2359Z")."""
+"""A number with its sign and any unit stuck to it ("47h", "120min", "45k", "2359Z")."""
 NAME_RE = re.compile(r"\b[A-Z]\. ?[A-Z][a-zA-Z'-]+")
-"""Every crew name is "Initial. Surname"."""
+"""Crew names are always "Initial. Surname"."""
 FULL_NAME_ID_RE = re.compile(r"\b([A-Z][a-zA-Z'-]{2,}\s+[A-Z][a-zA-Z'-]+)\s*\((C-\d{4})\)")
-"""A full first name beside an id was invented: no crew name has one."""
+"""A full first name beside an id is invented, since no crew name has one."""
 RANK_WORDS = {"captain", "first", "officer", "senior", "cabin", "crew", "fo", "reserve"}
 FLIGHT_MENTION_RE = re.compile(r"\bflight\s+([A-Za-z]{1,4}\d{1,4})\b", re.I)
 PROSE_DATE_RE = re.compile(
@@ -72,7 +71,7 @@ WINDOW_RE = re.compile(
     r"\b(?:next|last|past|coming|previous|preceding)\s+\d+\s*(?:day|week|month|hour|hr)s?\b",
     re.I,
 )
-""""the next 30 days" echoes the question's window; it is not a measured value."""
+""""the next 30 days" echoes the question's window, it isn't a measured value."""
 FAIL_WORDS_RE = re.compile(
     r"\b(?:breach\w*|violat\w*|exceed\w*|illegal|fails?|failed|non-?compliant)\b", re.I
 )
@@ -88,10 +87,10 @@ LEGAL_CLAIM_RE = re.compile(
     r"(?!\s+(?:option|choice))",
     re.I,
 )
-"""A crew id, then within the clause a verdict: "is legal", "is not legal", "is cleared
-to", "can cover", "cannot take"."""
+"""A crew id followed, in the same clause, by a verdict such as "is legal", "is not legal",
+"is cleared to", "can cover" or "cannot take"."""
 MODAL_RE = re.compile(r"\b(cannot|can[’']t|unable to|able to|could|can|may)\b", re.I)
-"""Longest first, so "can't" is not read as "can"."""
+"""Longest first, or "can't" matches as "can"."""
 RANK_SURNAME_RE = re.compile(
     r"\b(?:Captain|Capt\.?|First Officer|FO|Purser|Senior Cabin Crew|Cabin Crew)"
     r"\s+([A-Z][a-z]{2,})\b"
@@ -101,7 +100,7 @@ RANK_SURNAME_ID_RE = re.compile(
     r"\b(?:Captain|Capt\.?|First Officer|FO|Purser|Senior Cabin Crew|Cabin Crew)\s+"
     r"([A-Z][a-z]{2,})\s*\(\s*(C-\d{4})\s*\)"
 )
-""""Captain Reddy (C-1526)": the surname must be that id's."""
+""""Captain Reddy (C-1526)". The surname has to be that id's."""
 RANK_SURNAME_SKIP = frozenset({"Officer", "Crew", "Cabin", "Seat", "Seats", "Callout"})
 FIRST_SURNAME_RE = re.compile(r"\b([A-Z][a-z]{2,})\s+([A-Z][a-z]{2,})\b")
 NOT_FIRST_NAMES = frozenset(
@@ -173,8 +172,8 @@ def normalise_clock(value: str) -> str | None:
 
 
 def _stamps(text: str) -> tuple[list[str], str]:
-    """The (date, time) inside every full timestamp, and the text with the times removed
-    (the dates stay, to be matched as dates)."""
+    """Date and time from every full timestamp, plus the text with the times cut out. The
+    dates are left in so they still match as dates."""
     found = []
     for stamp in ISO_DT_RE.findall(text):
         date, clock = re.split(r"[T ]", stamp, maxsplit=1)
@@ -193,7 +192,7 @@ def _ids(text: str) -> list[str]:
 
 
 def _strip(text: str) -> str:
-    """No numbers from inside ids ("C-1042" is not 1042), dates or calendar words."""
+    """Blank out ids ("C-1042" is not 1042), dates and calendar words before reading numbers."""
     text = ISO_DT_RE.sub(" ", text)
     for pattern in ID_PATTERNS:
         text = pattern.sub(" ", text)
@@ -202,7 +201,7 @@ def _strip(text: str) -> str:
 
 
 def numbers_in(text: str) -> list[tuple[str, float]]:
-    """(as written, value) for every number in the text, ids and dates excluded."""
+    """(as written, value) for each number in the text, ignoring ids and dates."""
     text = _strip(text)
     out = []
     for m in DURATION_RE.finditer(text):
@@ -239,7 +238,7 @@ def _dicts(node: Any) -> Iterable[dict[str, Any]]:
 
 
 def _scalars(node: Any) -> Iterable[Any]:
-    """Every value in a result, and the length of every list ("12 records" is sourced)."""
+    """Every leaf value, plus every list's length so "12 records" counts as sourced."""
     if isinstance(node, dict):
         for value in node.values():
             yield from _scalars(value)
@@ -263,10 +262,10 @@ class Evidence:
     counts: set[float] = field(default_factory=set)
     lists: list[list[str]] = field(default_factory=list)
     costs: list[tuple[float, int, str]] = field(default_factory=list)
-    """Rupee amounts, by result: the only numbers arithmetic may combine."""
+    """Rupee amounts per result. The only numbers we allow arithmetic on."""
     surnames: set[str] = field(default_factory=set)
     text: str = ""
-    """Every string the results contained, for names said exactly as a tool gave them."""
+    """All strings from the results, to accept names said exactly as a tool gave them."""
 
     def has_id(self, value: str) -> str | None:
         return self.identifiers.get(value) or self.identifiers.get(normalise_clock(value) or "")
@@ -275,9 +274,9 @@ class Evidence:
         return next((t for n, _, t in self.numbers if abs(n - value) <= TOLERANCE), None)
 
     def derive(self, value: float) -> tuple[str, str] | None:
-        """A sum or difference of two rupee amounts from the *same* result ("₹5,500 more"
-        than the recommendation; a plan's two costs together). Nothing wider: over all the
-        numbers in a result, pairwise arithmetic can reach almost any small number."""
+        """Sum or difference of two rupee amounts from the same result ("₹5,500 more" than
+        the recommendation, a plan's two costs added up). Kept this narrow on purpose:
+        pairwise arithmetic over every number in a result can hit almost any small value."""
         if abs(value) < NUMERIC_FLOOR:
             return None
         by_result: dict[int, list[tuple[float, str]]] = {}
@@ -311,7 +310,7 @@ COUNT_FIELDS = frozenset(
 ERROR_NAME_ID_RE = re.compile(
     r"(C-\d{4})\s*\(([A-Z]\. [A-Z][a-zA-Z'-]+)|([A-Z]\. [A-Z][a-zA-Z'-]+)\s*\((C-\d{4})"
 )
-""""C-1938 (N. Reddy, ..." and "H. Pillai (C-1317, ...": names a did-you-mean names."""
+""""C-1938 (N. Reddy, ..." and "H. Pillai (C-1317, ..." in a did-you-mean error."""
 
 
 def build_evidence(trace: Sequence[TraceEntry]) -> Evidence:
@@ -346,7 +345,7 @@ def build_evidence(trace: Sequence[TraceEntry]) -> Evidence:
                 ev.names.setdefault(d["crew_id"], d["name"])
             for key, value in d.items():
                 if isinstance(value, list):
-                    ev.counts.add(float(len(value)))  # a list's length is a count it gives
+                    ev.counts.add(float(len(value)))
                 if isinstance(value, bool) or not isinstance(value, int | float):
                     continue
                 if key.endswith("cost_inr"):
@@ -357,7 +356,7 @@ def build_evidence(trace: Sequence[TraceEntry]) -> Evidence:
         if entry.tool == "check_legality" and "legal" in result:
             ev.legal.setdefault(result["crew_id"], set()).add(bool(result["legal"]))
         if entry.tool == "find_options":
-            if result.get("crew_out"):  # out of the seat: they will not fly it
+            if result.get("crew_out"):  # the person being replaced won't fly it
                 ev.legal.setdefault(result["crew_out"], set()).add(False)
             for o in result.get("options", []) + [result.get("recommended") or {}]:
                 if o.get("crew_id"):
@@ -393,16 +392,16 @@ def _clauses(text: str) -> Iterable[tuple[int, str]]:
 
 
 def _negated(text: str, at: int) -> bool:
-    """A negation just before position ``at``: "not breached", "isn't legal", "no breach"."""
+    """Negation just before ``at``, as in "not breached", "isn't legal", "no breach"."""
     return bool(NEGATION_RE.search(text[max(0, at - 16) : at]))
 
 
 def _rule_context(text: str, ev: Evidence) -> list[Claim]:
     """ "breaches RULE-DUTY-02" must match that rule's real status.
 
-    Read clause by clause, and each rule takes the verdict word nearest to it, so one rule's
-    verdict never attaches to its neighbour. A negation counts only right before the verdict
-    word: "RULE-DUTY-02 is not breached" claims a pass.
+    Works clause by clause, and each rule takes the nearest verdict word so one rule's
+    verdict doesn't leak onto its neighbour. Negation only counts right before the verdict
+    word, so "RULE-DUTY-02 is not breached" claims a pass.
     """
     out, seen = [], set()
     for _, clause in _clauses(text):
@@ -413,7 +412,7 @@ def _rule_context(text: str, ev: Evidence) -> list[Claim]:
         for rule in RULE_RE.finditer(clause):
             after = [v for v in verdicts if v[0] >= rule.end()]
             before = [v for v in verdicts if v[0] < rule.start()]
-            if after:  # "RULE-X passes but RULE-Y fails": each takes the word after it
+            if after:  # "RULE-X passes but RULE-Y fails", each takes the word after it
                 at, is_fail = min(after, key=lambda v: v[0] - rule.end())
             else:
                 at, is_fail = max(before, key=lambda v: v[0])
@@ -426,9 +425,9 @@ def _rule_context(text: str, ev: Evidence) -> list[Claim]:
 
 
 def _legality(text: str, ev: Evidence) -> list[Claim]:
-    """ "C-2087 is legal for P-2291", "C-2087 can cover P-2291", "C-2087 cannot take it": each
-    must match a legality verdict a tool gave for C-2087. Negation is read only between the
-    id and the verdict, so "No, C-2087 is legal" still claims legal."""
+    """ "C-2087 is legal for P-2291", "C-2087 can cover P-2291", "C-2087 cannot take it" each
+    need a matching legality verdict from a tool. Negation only counts between the id and
+    the verdict, so "No, C-2087 is legal" still claims legal."""
     out = []
     for _, clause in _clauses(text):
         for m in LEGAL_CLAIM_RE.finditer(clause):
@@ -436,7 +435,7 @@ def _legality(text: str, ev: Evidence) -> list[Claim]:
             if word in ("cover", "take", "fly", "operate"):
                 modal = MODAL_RE.search(mid)
                 if not modal:
-                    continue  # "C-3310 to cover": an assignment, checked as an id
+                    continue  # "C-3310 to cover" is an assignment; the id check covers it
                 claimed = not re.search(r"cannot|can[’']t|unable", modal.group(), re.I)
                 claimed = claimed != bool(re.search(r"\bnot\b", mid[modal.end() :], re.I))
             else:
@@ -447,7 +446,7 @@ def _legality(text: str, ev: Evidence) -> list[Claim]:
 
 
 def _names(text: str, ev: Evidence) -> list[Claim]:
-    """Every crew name must be one a tool gave, and beside an id it must be that id's name."""
+    """Crew names must come from a tool, and next to an id must be that id's name."""
     out: list[Claim] = []
     known = set(ev.names.values())
     seen: set[str] = set()
@@ -472,8 +471,8 @@ def _names(text: str, ev: Evidence) -> list[Claim]:
     for full, crew_id in FULL_NAME_ID_RE.findall(text):
         if full.split()[0].lower() not in RANK_WORDS:
             flag(f"{full} ({crew_id})")
-    # A person named another way: "Captain Sharma", or "Ravi Iyer" for R. Iyer. Only a
-    # surname a tool gave counts, and only in the form the tool gave it.
+    # Other ways of naming someone: "Captain Sharma", or "Ravi Iyer" for R. Iyer. The
+    # surname must be one a tool gave, in the form it gave it.
     for surname, crew_id in RANK_SURNAME_ID_RE.findall(text):
         given = ev.names.get(crew_id)
         if given is None or given.split()[-1] != surname:
@@ -508,8 +507,8 @@ def _uncovered(text: str, trace: Sequence[TraceEntry]) -> list[Claim]:
 
 
 def _headcount(text: str, ev: Evidence) -> list[Claim]:
-    """A stated headcount must equal a count a lookup computed: "26 captains" could
-    otherwise pass because 26 is someone's seniority elsewhere in the rows."""
+    """A stated headcount has to equal a count a lookup computed. Otherwise "26 captains"
+    could pass because 26 is someone's seniority somewhere in the rows."""
     if not ev.counts:
         return []
     out = []
@@ -546,9 +545,9 @@ CANCEL_ADVICE_RE = re.compile(
 
 
 def _no_cover(text: str, trace: Sequence[TraceEntry]) -> list[Claim]:
-    """ "Nobody can cover", "cancel it": verdicts with no id or number in them. Each needs a
-    result that says so: cover searched and none found, a seat a joint plan left unfilled, or
-    legs a delay forces off. The absence of a contradicting result is not enough."""
+    """ "Nobody can cover", "cancel it" carry no id or number, so they need a result that
+    backs them: a cover search that found nothing, a seat a joint plan left unfilled, or
+    legs a delay forces off. No contradicting result isn't enough."""
     out = []
     evidence = any(
         e.ok
@@ -569,9 +568,8 @@ def _no_cover(text: str, trace: Sequence[TraceEntry]) -> list[Claim]:
 
 
 def keeps_every_fact(original: str, rewrite: str) -> bool:
-    """``rewrite`` has exactly the ids, times and numbers of ``original``: a rewording may
-    change the words, never drop a fact or bring in another (re-verifying alone would allow
-    any fact found elsewhere in the results)."""
+    """Same ids, times and numbers in both. A rewording may change words but not drop or add
+    a fact. Re-verifying alone would let in any fact found elsewhere in the results."""
 
     def ids(text: str) -> set[str]:
         return {normalise_clock(i) or i for i in _ids(text)}
@@ -583,7 +581,6 @@ def keeps_every_fact(original: str, rewrite: str) -> bool:
 
 
 def verify(text: str, trace: Sequence[TraceEntry]) -> Verification:
-    """Check an answer against the tool results that produced it."""
     trace = list(trace)
     ev = build_evidence(trace)
     claims: list[Claim] = []
@@ -611,13 +608,3 @@ def verify(text: str, trace: Sequence[TraceEntry]) -> Verification:
     claims += _no_cover(text, trace)
     unsupported = [c for c in claims if not c.supported]
     return Verification(ok=bool(trace) and not unsupported, claims=claims, unsupported=unsupported)
-
-
-RETRY_INSTRUCTION = """\
-Your draft stated things no tool result supports: {bad}.
-Every id, number, time and name must come from a tool result. Call the tool that
-establishes them, or answer without them. Do not restate them from memory."""
-
-
-def retry_prompt(result: Verification) -> str:
-    return RETRY_INSTRUCTION.format(bad=", ".join(c.value for c in result.unsupported))

@@ -1,10 +1,9 @@
 """What kind of question was asked, and how deep the answer has to go.
 
-The tier always comes from the intent, so the two can never disagree:
-
-1. **Lookup**: a fact from the roster ("who is on reserve at BLR?").
-2. **Replacement**: legality or cover for one disruption ("who covers P-2291?").
-3. **Consequence**: plans, what-ifs and several disruptions at once.
+The tier is derived from the intent, so the two can't disagree. Lookup is a fact from the
+roster ("who is on reserve at BLR?"), replacement is legality or cover for one disruption
+("who covers P-2291?"), and consequence covers plans, what-ifs and several disruptions at
+once.
 """
 
 from __future__ import annotations

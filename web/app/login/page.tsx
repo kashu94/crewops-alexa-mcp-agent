@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Lock, LogOut, Plane, ShieldCheck, Sparkles, Zap } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Lock, LogOut, Plane, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { NightApproach } from "@/components/login-art";
@@ -8,8 +8,7 @@ import { Button, Field, Notice, Spinner } from "@/components/ui";
 import { signIn, signOut, tool } from "@/lib/client";
 import { homeFor, type Me } from "@/lib/roles";
 
-/** Who is signed in in this browser, without the client's sign-in redirect (this is the
- * sign-in page). */
+/** Current session, fetched without the usual redirect to sign-in (we're already on it). */
 async function signedIn(): Promise<Me | null> {
   const r = await fetch("/api/tools/whoami", {
     method: "POST",
@@ -21,9 +20,8 @@ async function signedIn(): Promise<Me | null> {
   return data?.result ?? null;
 }
 
-/** Where to go after sign-in when a page sent the browser here (``?next=``): a page of
- * this site only. Parsed as a URL, so tricks such as "//host" or "/<tab>/host" that a
- * browser reads as another site are refused. */
+/** Post-sign-in target from `?next=`, same origin only. Parsed as a URL because "//host" and
+ * "/<tab>/host" look like paths but browsers treat them as other sites. */
 function nextPage(): string | null {
   const next = new URLSearchParams(window.location.search).get("next");
   if (!next || !next.startsWith("/")) return null;
@@ -46,6 +44,7 @@ const POINTS = [
 export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [current, setCurrent] = useState<Me | null>(null);
 
   useEffect(() => {
@@ -61,8 +60,8 @@ export default function Login() {
       await signIn(String(form.get("username") ?? ""), String(form.get("password") ?? ""));
       const me = await signedIn();
       if (me && (me.roles.includes("controller") || me.roles.includes("approver"))) {
-        // Once per sign-in (not per tab): what came while they were away, shown on the
-        // first page. A failure here never blocks signing in.
+        // "while you were away" summary, once per sign-in rather than per tab. Best effort;
+        // must not block sign-in.
         await tool("welcome_back")
           .then((w) => sessionStorage.setItem("crewops-welcome", JSON.stringify(w)))
           .catch(() => undefined);
@@ -138,7 +137,28 @@ export default function Login() {
           <p className="mt-1 text-sm text-muted">Use the account your administrator created.</p>
           <form onSubmit={submit} className="mt-6 flex flex-col gap-4">
             <Field label="Username" name="username" autoComplete="username" required autoFocus />
-            <Field label="Password" name="password" type="password" autoComplete="current-password" required />
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">Password</span>
+              <span className="relative">
+                <input
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  required
+                  className="w-full rounded-lg border border-line bg-surface py-2 pl-3 pr-10 outline-none transition focus:border-accent focus:ring-4 focus:ring-sky-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  title={showPassword ? "Hide password" : "Show password"}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-400 hover:bg-sunken hover:text-slate-700"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </span>
+            </label>
             {error && <Notice tone="error">{error}</Notice>}
             <Button type="submit" tone="primary" disabled={busy} className="py-2.5">
               {busy ? <Spinner /> : <Lock size={14} />} Sign in

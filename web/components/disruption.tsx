@@ -39,7 +39,7 @@ const STRATEGY: Record<string, string> = {
 };
 
 /** Other open disruptions needing this very seat: the same person out on another day of
- * the same trip. One cover fills them all, so they are planned as one, not competed for. */
+ * the same trip. One cover fills them all, so they get planned together instead of competing. */
 function SameSeat({ detail }: { detail: Detail }) {
   const same = detail.same_seat ?? [];
   if (same.length === 0) return null;
@@ -255,7 +255,7 @@ export function TripFacts({ seat }: { seat: Seat }) {
 
 type AuditRow = Detail["audit"][number];
 
-/** Approving commits the roster in the same step, recorded as two events: shown as one. */
+/** Approve and commit happen in one step but are logged as two events; show them as one row. */
 export function mergeAudit(audit: AuditRow[]): (AuditRow & { label: string })[] {
   const out: (AuditRow & { label: string })[] = [];
   for (const a of audit) {
@@ -430,9 +430,9 @@ export function Actions({
   const canPlan = isController && detail.yours && detail.status === "OPTIONS_READY";
   const canDecide = isApprover && pending && pending.submitted_by !== me.user_id;
   const canWithdraw = isController && pending && pending.submitted_by === me.user_id;
-  // Some seats without cover: a plan can still go, with them acknowledged. No seat with
-  // cover: the only way out is to close it, as the server requires.
-  // A seat with no legal crew counts as handled once it is chosen to be cancelled or flown short.
+  // Uncovered seats can still go in a plan if they're acknowledged. If nothing can be
+  // covered the server only allows closing it. A seat with no legal crew counts as
+  // handled once someone picks cancel or fly-short for it.
   const decided = new Set(choices.filter((c) => c.crewId === "CANCEL" || c.crewId === "SHORT").map((c) => c.seat));
   const open = (s: Seat) => (s.status !== "options" || Boolean(s.re_crewed)) && !decided.has(seatKey(s));
   const someUncovered = detail.seats.some(open);
@@ -442,8 +442,7 @@ export function Actions({
   // Only changed seats go: the server keeps the joint plan for the rest.
   const picked = Object.fromEntries(choices.filter((c) => c.overrides).map((c) => [c.seat, c.crewId]));
   const stale = choices.some((c) => c.stale);
-  // No seat with cover (or none to cover at all): it is closed, or marked resolved with a
-  // remark when it was handled outside crew control.
+  // nothing coverable: close it, or resolve with a remark if it was handled outside crew control
   const noneCoverable = detail.seats.every(open);
   const internal = detail.handling?.kind === "internal";
 

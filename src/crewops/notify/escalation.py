@@ -1,15 +1,14 @@
-"""Escalation: a disruption left untouched on a desk is raised with the duty supervisor.
+"""Raises a disruption with the duty supervisor when nobody touches it on a desk.
 
-When a disruption reaches a desk (analysed, or a plan sent back), the notifier creates a
-one-time EventBridge schedule for ``CREWOPS_ESCALATE_AFTER_MINUTES`` later, which deletes
-itself once it has run. When it fires, this Lambda looks again: if the disruption is still
-waiting on that desk with nothing done since (no plan submitted, not closed, not sent back
-again), it emails the duty supervisor (the "duty_supervisor" alert audience the admin
-subscribes an address to) and records an ESCALATED event, which the desk and room speakers
-announce. Anything else means it was handled, and nothing happens.
+When a disruption lands on a desk (analysed, or its plan sent back) the notifier creates a
+one-time EventBridge schedule ``CREWOPS_ESCALATE_AFTER_MINUTES`` out. The schedule deletes
+itself after it runs. When it fires, this Lambda checks again. If the disruption is still
+sitting there with nothing done since, it emails the "duty_supervisor" audience and writes
+an ESCALATED audit event, which the desk and room speakers announce. Otherwise it was
+handled and we do nothing.
 
-No timer runs while nothing happens: a check exists only for a disruption that reached a
-desk, and only until it has run.
+There is no polling. A schedule only exists between a disruption reaching a desk and its
+check running.
 """
 
 from __future__ import annotations
@@ -37,8 +36,8 @@ def _iso(at: datetime) -> str:
 
 
 def schedule_name(prefix: str, disruption_id: str, at: datetime) -> str:
-    """A unique schedule name within EventBridge's 64 characters and character set: the
-    time and a hash of the id always fit, whatever the stage and id lengths."""
+    """EventBridge caps names at 64 chars with a restricted charset. The timestamp and id
+    hash always fit, so the readable id is truncated rather than the unique part."""
     digest = hashlib.sha256(disruption_id.encode()).hexdigest()[:10]
     fixed = f"{prefix}-esc-{int(at.timestamp())}-{digest}"
     room = 64 - len(fixed) - 1
@@ -56,11 +55,10 @@ def schedule_check(
     minutes: int,
     now: datetime,
 ) -> str | None:
-    """A one-time check ``minutes`` from now for a disruption that just reached a desk."""
     if (change.before, change.after) not in STARTS_CLOCK:
         return None
     if change.report_type == "planned_leave":
-        return None  # re-crewed weeks ahead: no ten-minute clock
+        return None  # re-crewed weeks ahead, a short clock makes no sense
     name = schedule_name(prefix, change.disruption_id, now)
     when = now + timedelta(minutes=minutes)
     scheduler.create_schedule(
@@ -88,8 +86,7 @@ def check(
     describe: Any,
     aircraft: Any = lambda _p: None,
 ) -> str:
-    """Escalate if the disruption is still waiting, untouched since ``since``. Returns what
-    happened: "escalated", "handled" or "missing"."""
+    """Returns "escalated", "handled" or "missing"."""
     from crewops.alerts import STAGE
     from crewops.domain import Report
     from crewops.domain.desks import owning_desks
@@ -103,8 +100,8 @@ def check(
     if item.get("status") != "OPTIONS_READY":
         return "handled"  # a plan was submitted, or it was resolved
     trail = plan_store.audit_trail(table, disruption_id)
-    # Anything after the clock started (a plan submitted and sent back, an earlier
-    # escalation) means someone acted, or another check is already on its way.
+    # Any staged action after `since` (submit then send-back, an earlier escalation) means
+    # someone acted, or a newer check is already queued.
     if any(
         str(e.get("at") or "") > since and STAGE.get(str(e.get("action")), 0) >= 1 for e in trail
     ):
@@ -113,8 +110,8 @@ def check(
     desks = owning_desks(analysis, aircraft) if analysis else []
     on_desk = f"{desks[0].controller}'s desk ({desks[0].desk_id})" if desks else "a desk"
     what = describe(Report.from_dict(from_dynamo(item["report"])))
-    # Recorded first: if the email then fails and the check is retried, the retry sees this
-    # and stops, so the supervisor is never emailed twice (the speakers still announce it).
+    # Write the audit event before emailing. If SNS fails and Lambda retries, the retry sees
+    # ESCALATED and stops, so the supervisor never gets two emails.
     at = _iso(now)
     table.put_item(
         Item={

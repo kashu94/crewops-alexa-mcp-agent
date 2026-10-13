@@ -14,8 +14,7 @@ export type DisruptionEvent = {
 
 function base64Url(text: string): string {
   // Tokens and domains are ASCII, which btoa takes as is.
-  const b64 =
-    typeof btoa === "function" ? btoa(text) : Buffer.from(text, "utf8").toString("base64");
+  const b64 = typeof btoa === "function" ? btoa(text) : Buffer.from(text, "utf8").toString("base64");
   return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
@@ -48,9 +47,7 @@ export type Incoming =
 function asEvent(value: unknown): DisruptionEvent | null {
   const parsed = typeof value === "string" ? safeJson(value) : value;
   const e = parsed as Partial<DisruptionEvent> | null;
-  return e && e.kind === "disruption_status" && typeof e.disruption_id === "string"
-    ? (e as DisruptionEvent)
-    : null;
+  return e && e.kind === "disruption_status" && typeof e.disruption_id === "string" ? (e as DisruptionEvent) : null;
 }
 
 function safeJson(text: string): unknown {

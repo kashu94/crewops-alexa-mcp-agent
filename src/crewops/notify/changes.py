@@ -1,7 +1,7 @@
-"""What a stream record means for the people watching: a disruption changed status.
+"""Turns a stream record into what people see when a disruption changes status.
 
-Only disruption status changes are of interest. Each becomes one console event, and some
-also become an alert for a role:
+Only disruption status changes matter here. Each one becomes a console event, and some
+also become an alert for a role.
 
 =========================  ===================  ============================================
 From -> to                 Alert to             Why
@@ -13,13 +13,12 @@ SUBMITTED -> OPTIONS_READY controller           the plan was rejected, withdrawn
 =========================  ===================  ============================================
 
 When a disruption is analysed (REPORTED -> OPTIONS_READY), each operational team its
-analysis names is also alerted (``crewops.analysis.notices``): flight information to update
-the screens, operations monitoring to tell the captain, gate control to move gates, and so
-on. One email per team, with every notice for that team.
+analysis names is also alerted (see ``crewops.analysis.notices``), e.g. flight information
+to update the screens, gate control to move gates. One email per team with all its notices.
 
-Events and alerts carry the disruption id, its report type and the statuses; team alerts
-also carry the flights, gates, stations and times the team acts on. None carries a crew
-member's name or id: those are read in CrewOps, signed in, with role checks.
+Events and alerts carry the disruption id, report type and statuses. Team alerts also carry
+the flights, gates, stations and times the team acts on. Crew names and ids are left out on
+purpose; people read those in CrewOps after signing in, where role checks apply.
 """
 
 from __future__ import annotations
@@ -55,7 +54,7 @@ def _s(image: dict[str, Any], key: str) -> str | None:
 
 
 def change_of(record: dict[str, Any]) -> Change | None:
-    """The status change in one stream record, or None when it is not one."""
+    """None unless the record is a disruption whose status actually changed."""
     if record.get("eventName") not in ("INSERT", "MODIFY"):
         return None
     data = record.get("dynamodb") or {}
@@ -81,7 +80,7 @@ def console_event(change: Change) -> dict[str, Any]:
 
 
 def team_alerts(record: dict[str, Any], change: Change, stage: str) -> list[Alert]:
-    """One alert per operational team the analysis names, once, when it is analysed."""
+    """One alert per team the analysis names. Only fires on REPORTED -> OPTIONS_READY."""
     if not (change.before == STATUS_REPORTED and change.after == STATUS_OPTIONS_READY):
         return []
     if change.report_type == "planned_leave":

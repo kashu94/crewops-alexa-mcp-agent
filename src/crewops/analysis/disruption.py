@@ -1,16 +1,14 @@
-"""Turn a report into a decision-ready analysis: what broke, who must be replaced, and how.
+"""Turn a report into an analysis a controller can decide from.
 
-``analyse`` takes a validated report and the current operation and returns an ``Analysis``:
+``analyse`` takes a validated report and the current operation. The ``Analysis`` lists the
+seats that lost their crew, each with its blast radius and ranked legal options, plus a joint
+plan when several seats need cover at once so one person is never offered twice. For delays
+it says what happens to the duty day and to each rostered crew member, including the trailing
+legs that must come off when the day is too long for anyone. Notes cover the rest (nothing to
+cover, already started, gate already taken).
 
-* the seats that lost their crew, each with its blast radius and ranked legal options;
-* a joint plan when several seats need cover at once, so one person is never offered twice;
-* for delays, what the delay does to the duty day and to each rostered crew member,
-  including the trailing legs that must come off when the day is too long for anyone;
-* plain notes for anything a controller should know (nothing to cover, already started,
-  gate already taken).
-
-Pure and deterministic: no AWS, no model. The disruption Lambda stores the result and
-alerts the controller; the agent later reads it back to answer questions.
+No AWS and no model in here. The disruption Lambda stores the result and alerts the
+controller; the agent reads it back later to answer questions.
 """
 
 from __future__ import annotations
@@ -228,11 +226,6 @@ def _delay_dict(d: DelayEffect) -> dict[str, Any]:
     }
 
 
-# --------------------------------------------------------------------------
-# Helpers
-# --------------------------------------------------------------------------
-
-
 def _hours_up(seconds: float) -> float:
     """Seconds as hours, rounded up to the whole minute, so a delay is never rounded away."""
     return math.ceil(seconds / 60) / 60
@@ -335,9 +328,7 @@ def _delay_outcome(
     )
 
 
-# --------------------------------------------------------------------------
-# Per report type
-# --------------------------------------------------------------------------
+# One builder per report type.
 
 
 def _crew_out_seats(world: World, crew_id: str, dates: set[date]) -> list[tuple[Seat, set[date]]]:
@@ -380,11 +371,10 @@ def off_duty_notes(world: World, crew_id: str, start: date, end: date) -> tuple[
 
 
 def _with_joint(seats: list[SeatAnalysis], world: World) -> JointPlan | None:
-    """A joint plan over seats that can still be re-crewed, using each seat's own options.
+    """Joint plan over the seats that can still be re-crewed.
 
-    Reusing the per-seat options keeps the plan consistent with them, including under a
-    delayed schedule, and avoids searching for every seat twice.
-    """
+    Reuses each seat's own options so the plan agrees with them (delayed schedule included)
+    and nothing is searched twice."""
     open_seats = [s for s in seats if s.options is not None]
     if len(open_seats) < 2:
         return None
@@ -473,9 +463,9 @@ def _joins_mid_day(world: World, seat: SeatAnalysis, part: datetime | None) -> s
 
 
 def _multiple_crew_unavailable(world: World, report: Report) -> Analysis:
-    """Several crew out together. Every one of them is already marked unavailable in the
-    world (the report is open), so none is offered to cover another, and one joint plan
-    covers every seat with a different person."""
+    """Several crew out together. The open report already marks each of them unavailable
+    in the world, so none is offered to cover another, and one joint plan gives every seat a
+    different person."""
     d = report.details
     start, end = date.fromisoformat(d["from_date"]), date.fromisoformat(d["to_date"])
     dates = {start + timedelta(days=i) for i in range((end - start).days + 1)}
@@ -651,8 +641,8 @@ def _station_disruption(world: World, report: Report) -> Analysis:
             hours = _hours_up((ready - moment).total_seconds())
             key = index[f.flight_id]
             if key not in worst:
-                # Flights are visited in departure order, so the first one seen is the
-                # day's earliest affected leg: it and every later leg slip.
+                # departure order, so this is the day's earliest affected leg and every
+                # later leg slips with it
                 worst[key] = (hours, f.flight_no, f.flight_id)
             elif hours > worst[key][0]:
                 worst[key] = (hours, worst[key][1], worst[key][2])
@@ -738,8 +728,8 @@ def _gate_closure(world: World, report: Report, gates: tuple[GateSlot, ...]) -> 
             + f"): no other {station_of(gate)} gate is free for the whole slot"
         )
     index = _flight_index(world)
-    # The earliest bused departure of each duty day sets its slip: it and every later leg
-    # leave late (as the duty check assumes).
+    # earliest bused departure of each duty day sets the slip; it and every later leg leave
+    # late, which is what the duty check assumes
     slips: dict[tuple[str, date], tuple[float, str, str]] = {}
     for m in sorted(bussed, key=lambda m: m.end_utc):
         if m.flight_id in index and index[m.flight_id] not in slips:
@@ -892,8 +882,8 @@ def _aircraft_of(world: World, analysis: Analysis) -> tuple[str, ...]:
         for s in analysis.seats
         if s.seat.pairing_id in world.pairings
     }
-    # The flights the disruption itself is about; a flight only re-gated because of it
-    # stays its own desk's business. (A gate closure's moved flights are its affected ones.)
+    # Only the flights the disruption is about. A flight merely re-gated because of it stays
+    # with its own desk (for a gate closure the moved flights are the affected ones).
     touched |= {
         world.flights[f].aircraft
         for f in (*analysis.affected_flights, *(leg.flight_id for leg in analysis.late))

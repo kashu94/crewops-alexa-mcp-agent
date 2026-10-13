@@ -186,7 +186,7 @@ def test_handler_reports_only_unexpected_failures_for_retry(table, monkeypatch):
     assert get_disruption(table, "r-00000001") is not None
 
 
-# -- Findings from review: inputs that must never become poison messages ----------------
+# -- Inputs that must never become poison messages --------------------------------------
 
 
 def test_oversized_or_malformed_id_is_filed_as_unidentified(table):

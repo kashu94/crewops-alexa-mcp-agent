@@ -170,7 +170,7 @@ def test_template_handles_a_failed_call():
     assert render([failed]) == "no crew C-9"
 
 
-# -- Regression tests for review findings ----------------------------------------------
+# -- Regressions -----------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(

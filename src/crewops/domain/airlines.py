@@ -1,12 +1,12 @@
 """The airlines crew control works for, and the stations' emergency gates.
 
-Three fictional airlines share the operations centre. Each owns its aircraft, its flight
-numbers (the airline code, then three digits) and its crew: cover for a seat only ever
-comes from the same airline's crew, since crew are employed, trained and paid by one
-airline. Controllers work across all three.
+Three fictional airlines share the operations centre, and controllers work across all of
+them. Each owns its aircraft, its flight numbers (airline code plus three digits) and its
+crew. Cover only ever comes from the same airline, since crew are employed, trained and
+paid by one.
 
-Emergency gates are held back at each station for disruptions only: a departure is moved
-to one when every ordinary gate is taken, before falling back to a remote stand.
+Each station holds emergency gates back for disruptions. A departure goes to one when every
+ordinary gate is taken, before falling back to a remote stand.
 """
 
 from __future__ import annotations
@@ -60,15 +60,9 @@ class EmergencyGate:
         return cls(gate=gate, station=station)
 
 
-def airline_of_flight_no(flight_no: str) -> str:
-    """The airline code a flight number starts with."""
-    return flight_no[:2]
-
-
 __all__ = [
     "AIRLINE_CODE_RE",
     "EMERGENCY_GATE_RE",
     "Airline",
     "EmergencyGate",
-    "airline_of_flight_no",
 ]

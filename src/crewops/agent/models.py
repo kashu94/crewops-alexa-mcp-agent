@@ -1,16 +1,16 @@
 """The three model roles, on Amazon Bedrock's Converse API.
 
-* **Triage** (Nova Micro): classifies a question the rules and the semantic match could not.
-  No tools.
-* **Advisor** (Nova 2 Lite): the tool loop. It sees the planned calls' results as its own
-  earlier calls, may call more through the role-checked runner, and drafts the answer. The
-  pipeline verifies the draft; the advisor's word is never final on its own.
-* **Explainer** (Nova 2 Lite): rewrites a verified answer for speech. Verified again.
+Triage (Nova Micro) classifies a question that neither the rules nor the semantic match
+could. It gets no tools.
 
-Also here: Bedrock Guardrails screening of a question and of an answer.
+Advisor (Nova 2 Lite) is the tool loop. It sees the planned calls' results as its own
+earlier calls, may call more through the role-checked runner, and drafts the answer. The
+pipeline verifies the draft, so the advisor never has the last word.
 
-Every model is a setting, called through the model-neutral Converse API, so swapping one is
-configuration, not code.
+Explainer (Nova 2 Lite) rewrites a verified answer for speech, and that gets verified again.
+
+Bedrock Guardrails screening of questions and answers lives here too. Model ids are
+settings and everything goes through Converse, so swapping a model is a config change.
 """
 
 from __future__ import annotations
@@ -29,13 +29,13 @@ from crewops.tools import CrewOpsTools, TraceEntry, bedrock_tool_config
 log = logging.getLogger(__name__)
 
 MAX_RESULT_CHARS = 12_000
-"""Longest tool result passed back to the model. Lookups are already capped at 60 rows;
-this only guards the model's context against an unexpectedly large result."""
+"""Longest tool result passed back to the model. Lookups are already capped at 60 rows, so
+this is just a backstop for the context window."""
 
 
 def bedrock_runtime(region: str, read_timeout: float = 10.0) -> Any:
-    """A Bedrock runtime client with a firm timeout and no retry: a voice answer that waits
-    a minute is not an answer, and every model role has a deterministic fallback."""
+    """Firm timeout, no retry. A voice answer that waits a minute is no answer, and every
+    model role has a deterministic fallback anyway."""
     import boto3
     from botocore.config import Config
 
@@ -55,12 +55,11 @@ def _text(message: dict[str, Any]) -> str:
 
 
 COMPLETE = frozenset({"end_turn", "stop_sequence"})
-"""Stop reasons that mean the model finished. Anything else (cut off by the token limit,
-filtered, malformed) is no answer at all, never half of one."""
+"""Stop reasons that mean the model finished. Anything else (token limit, filtered,
+malformed) counts as no answer. We never use half of one."""
 
 
 def _finished(response: dict[str, Any]) -> str:
-    """The reply's text if the model finished it, otherwise empty."""
     if response.get("stopReason") not in COMPLETE:
         return ""
     return _text(response["output"]["message"])
@@ -68,7 +67,7 @@ def _finished(response: dict[str, Any]) -> str:
 
 @dataclass(slots=True)
 class Usage:
-    """Tokens and calls spent on one question, for the answer record and for cost."""
+    """Tokens and calls spent on one question."""
 
     calls: int = 0
     input_tokens: int = 0
@@ -87,7 +86,7 @@ class Usage:
 
 
 class NovaTriage:
-    """The router's last resort: one tool-free call, a JSON intent back."""
+    """Router's last resort. One call, no tools, JSON intent back."""
 
     def __init__(self, client: Any, model_id: str) -> None:
         self.client = client
@@ -129,16 +128,12 @@ def _signature(name: str, args: Any) -> str:
 
 @dataclass(slots=True)
 class AdvisorRun:
-    """What one advisor turn did, for the answer record."""
-
     rounds: int = 0
     stop: str = ""
     usage: Usage = field(default_factory=Usage)
 
 
 class NovaAdvisor:
-    """The tool loop, as the pipeline's drafter."""
-
     def __init__(
         self,
         client: Any,
@@ -176,7 +171,7 @@ class NovaAdvisor:
         system = [{"text": advisor_system(self.tools, route.intent)}]
 
         while True:
-            # Checked before every call, so a call is never paid for and then thrown away.
+            # check before calling, not after: no paying for a reply we'd throw away
             if time.monotonic() > deadline:
                 self.last.stop = "budget"
                 return ""
@@ -192,8 +187,8 @@ class NovaAdvisor:
             self.last.stop = response.get("stopReason", "")
             if self.last.stop != "tool_use":
                 return _finished(response)
-            # A call to a tool the caller was not offered is dropped from the history: the
-            # next request must not name a tool its tool list lacks.
+            # Drop calls to tools the caller wasn't offered. Converse rejects a history that
+            # names a tool missing from toolConfig.
             content = [
                 b
                 for b in message.get("content", [])
@@ -201,7 +196,7 @@ class NovaAdvisor:
             ]
             uses = [b["toolUse"] for b in content if "toolUse" in b]
             if not uses or self.last.rounds >= self.max_rounds:
-                # Nothing usable to run, or out of rounds: no draft, so the template answers.
+                # no draft; the template answers instead
                 self.last.stop = "budget" if uses else "no_usable_tool"
                 return ""
             self.last.rounds += 1
@@ -211,7 +206,7 @@ class NovaAdvisor:
                 name, args = use["name"], use.get("input") or {}
                 signature = _signature(name, args)
                 if signature in seen:
-                    # A repeated call returns the same thing; saying so ends a loop sooner.
+                    # same args, same result. Saying so breaks the loop sooner.
                     text, status = '{"note": "already called with these arguments"}', "error"
                 else:
                     seen.add(signature)
@@ -230,7 +225,7 @@ class NovaAdvisor:
 
     @staticmethod
     def _opening(question: str, trace: list[TraceEntry]) -> list[dict[str, Any]]:
-        """The question, then the planned calls' results as the model's own earlier calls."""
+        """The question, then the planned calls replayed as if the model had made them."""
         messages: list[dict[str, Any]] = [{"role": "user", "content": [{"text": question}]}]
         if not trace:
             return messages
@@ -259,8 +254,6 @@ class NovaAdvisor:
 
 
 class NovaExplainer:
-    """Rewrites a verified answer for speech. The pipeline verifies the rewrite again."""
-
     def __init__(self, client: Any, model_id: str, max_tokens: int = 1200) -> None:
         self.client = client
         self.model_id = model_id
@@ -292,7 +285,7 @@ class NovaExplainer:
 
 
 class Guardrail:
-    """Bedrock Guardrails screening: returns the blocked message, or None when it passes."""
+    """``screen`` returns the blocked message, or None when the text passes."""
 
     def __init__(self, client: Any, guardrail_id: str, version: str) -> None:
         self.client = client

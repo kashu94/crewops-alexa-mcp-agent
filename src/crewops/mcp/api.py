@@ -1,14 +1,12 @@
-"""What the MCP server can do for a signed-in caller, independent of the MCP plumbing.
+"""What the MCP server can do for a signed-in caller, without the MCP plumbing.
 
-Every operation takes the ``Caller`` made from the request's verified token, never anything
-the user typed about themselves. Questions go through the full answer pipeline (rules,
-tools, verifier, models); plans through ``crewops.plans`` with its four-eyes rules; reports
-onto the ingest queue with the sender's identity set here; the deterministic tools
-through the same role-checked dispatch the advisor uses; and alert addresses through
-``crewops.notify.subscriptions``, for admins only.
+Every operation takes the ``Caller`` built from the request's verified token, never what the
+user typed about themselves. Questions run the full answer pipeline, plans go through
+``crewops.plans`` (four-eyes), and reports are queued with the sender's identity stamped
+here. Crew tools use the same role-checked dispatch as the advisor.
 
-A question asked with a conversation id is answered with that conversation's previous
-turn (``agent.context``), read from and written back to AgentCore Memory.
+With a conversation id, the previous turn of that conversation is read from AgentCore Memory
+and passed in alongside the question (``agent.context``).
 """
 
 from __future__ import annotations
@@ -67,14 +65,14 @@ from crewops.tools import TOOL_SCHEMAS, Caller, allowed_tools, dispatch
 from crewops.tools.errors import INTERNAL
 
 CACHE_SECONDS = 60.0
-FEED_CACHE_SECONDS = 4.0
-"""How long one speaker-feed read serves every screen that polls."""
 """How long one loaded operation answers questions before it is read again. Plan actions
 on this server reload it at once; changes made elsewhere show within this time."""
+FEED_CACHE_SECONDS = 4.0
+"""How long one speaker-feed read serves every screen that polls."""
 log = logging.getLogger(__name__)
 
 REPORT_AHEAD_DAYS = 60
-"""How far ahead a disruption may be reported: further than this is leave planning."""
+"""How far ahead a disruption may be reported. Anything later is leave planning."""
 CREW_LOOK_BACK_DAYS = 5
 """How far back crew see their own flights."""
 READERS = frozenset({Role.CONTROLLER, Role.APPROVER, Role.AUDITOR, Role.ADMIN, Role.SUPER_ADMIN})
@@ -276,8 +274,8 @@ class CrewOpsApi:
         self._feed_cache.clear()  # an action here is heard at once, not after the cache
 
     def ask(self, caller: Caller, question: str, conversation_id: str = "") -> dict[str, Any]:
-        """``conversation_id``: the client's id for this conversation (letters, digits, - and
-        _). With one, the previous turn may fill in what this question leaves out."""
+        """With a ``conversation_id`` (letters, digits, - and _), the previous turn can fill
+        in what this question leaves out."""
         if caller.roles <= {Role.SPEAKER}:
             # A speaker device hears alert briefs; questions are for people.
             raise ApiError("FORBIDDEN", "a speaker device does not ask questions")
@@ -318,7 +316,6 @@ class CrewOpsApi:
         }
 
     def whoami(self, caller: Caller) -> dict[str, Any]:
-        """Who the token says is signed in, as the server sees them."""
         return {
             "user_id": caller.user_id,
             "roles": sorted(r.value for r in caller.roles),
@@ -603,7 +600,7 @@ class CrewOpsApi:
 
     def my_roster(self, caller: Caller) -> dict[str, Any]:
         """The signed-in crew member's pairings, duty days and duty clock. Only ever their
-        own: the crew id comes from the verified profile, not from the request."""
+        own, since the crew id comes from the verified profile and not the request."""
         if not caller.crew_id:
             raise ApiError("FORBIDDEN", "only crew have a roster")
         tools = self.live().pipeline.tools
@@ -842,8 +839,8 @@ class CrewOpsApi:
     # ------------------------------------------------------------------
 
     RECENT_RESOLVED = 10
-    """Resolved disruptions an alert may still be about: the latest few, so the cost of a
-    speaker's poll does not grow with every disruption ever handled."""
+    """Only the latest few resolved disruptions can still raise an alert, otherwise every
+    speaker poll gets slower with each disruption ever handled."""
 
     def _alert_items(self) -> list[dict]:
         def reported(item: Mapping[str, Any]) -> str:
@@ -896,10 +893,8 @@ class CrewOpsApi:
         return {"scope": scope, "alerts": cached[1]}
 
     def ops_board(self, caller: Caller) -> dict[str, Any]:
-        """The ops-room wall display (the Fire TV app): every open disruption, most serious
-        first, with its desk, how long it has waited, whether it was escalated and the
-        recommended cover; each desk's load; and today's flights, crew out and reserves.
-        For the speaker device and crew control; one read serves every screen briefly."""
+        """The ops-room wall display (the Fire TV app). Cached like the speaker feed, since
+        every screen in the room polls it."""
         if not caller.roles & (READERS | {Role.SPEAKER}):
             raise ApiError("FORBIDDEN", "only the ops room and crew control see the board")
         now = time.monotonic()
@@ -1012,7 +1007,7 @@ class CrewOpsApi:
             (f for f in world.flights.values() if f.dep_utc >= world.snapshot_utc),
             key=lambda f: f.dep_utc,
         )[:8]
-        # By airline: cover only ever comes from the disrupted airline's own crew.
+        # keyed by airline too: cover only ever comes from the disrupted airline's own crew
         cover_today: dict[tuple[str, str, str], int] = {}
         for crew_id, duties in world.reserves.items():
             if not any(today in d.dates for d in duties) or crew_id in out_today:
@@ -1177,7 +1172,7 @@ class CrewOpsApi:
             for i in range(7)
             if first + timedelta(days=i) <= hi
         ]
-        # Every status read once, and reused for flights and absences alike.
+        # one read per status, shared by the flights and the absences below
         by_status = {s: disruptions_with_status(self.table, s) for s in UNAVAILABLE_STATUSES}
         open_on: dict[str, list[dict[str, Any]]] = {}
         for status in OPEN_STATUSES:

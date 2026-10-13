@@ -45,8 +45,8 @@ def delete_profile(table: Any, username: str) -> None:
 
 
 def list_profiles(table: Any) -> list[dict[str, Any]]:
-    """Every user profile. A scan, filtered: the team is small and this runs only when the
-    team command does."""
+    """Filtered scan. Fine at this size: the team is small and only the team command calls
+    this."""
     from boto3.dynamodb.conditions import Attr
 
     out: list[dict[str, Any]] = []

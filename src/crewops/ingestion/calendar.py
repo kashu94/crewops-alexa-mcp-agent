@@ -1,18 +1,15 @@
-"""The operating calendar: the seed week carried forward, week by week, to a last date.
+"""Repeats the hand-built seed week (12-18 Oct 2026) forward to ``LAST_DAY``.
 
-The seed is one hand-built week (12 to 18 October 2026). An operation running through the
-judging period needs every week after it, so this repeats it: the same flights at the same
-times each week, with passengers booked varying a little, and the crew rotating within
-their airline, rank and base so nobody flies the same days for ever.
+Same flights at the same times every week. Bookings wobble a little, and crew rotate within
+their airline, rank and base so nobody is stuck on the same days for months.
 
-Each rotated week is checked with the legality engine: every rostered crew member must pass
-every rule on every trip, counting the weeks either side. Anyone who would not is swapped
-with a colleague of the same airline, rank and base for that week (both must then pass), so
-the published roster is legal before any disruption touches it. The same seed always gives
-the same calendar.
+Every generated week goes through the legality engine, including the weeks either side.
+If someone would break a rule they get swapped for that week with a colleague of the same
+airline, rank and base, and both have to pass. That way the roster starts out legal before
+any disruption hits it. Output is deterministic for a given seed.
 
-Trip ids keep their format: P-2291 in the seed week is P-2391 the week after, P-2491 the
-next. Flight ids carry the date, as in the seed.
+Trip numbers go up by 100 a week (P-2291, then P-2391, P-2491, ...). Flight ids carry the
+date, as in the seed.
 """
 
 from __future__ import annotations
@@ -27,9 +24,8 @@ from crewops.domain.models import PairingDay, PairingSeat
 from crewops.ingestion.seed import SeedData
 
 LAST_DAY = date(2026, 12, 31)
-"""The operation runs to here: past the hackathon's judging."""
+"""Far enough to cover the whole judging window."""
 WEEK = timedelta(days=7)
-MAX_REPAIR_ROUNDS = 6
 
 
 def _pairing_id(seed_id: str, week: int) -> str:
@@ -44,7 +40,7 @@ def _flight_id(flight_no: str, on: date) -> str:
 
 
 def _booked(flight_id: str, seats: int, booked: int | None) -> int | None:
-    """The seed's load, nudged by up to 8% either way per flight and week, never over."""
+    """Seed load +/- up to 8%, stable per flight id, capped at the seat count."""
     if booked is None:
         return None
     nudge = int(hashlib.sha256(flight_id.encode()).hexdigest()[:4], 16) % 17 - 8  # -8..8
@@ -52,7 +48,8 @@ def _booked(flight_id: str, seats: int, booked: int | None) -> int | None:
 
 
 def _groups(seed: SeedData) -> dict[str, list[str]]:
-    """Crew id -> their colleagues of the same airline, rank and base (themselves too)."""
+    """Crew id -> everyone with the same airline, rank and base, including themselves.
+    Members of a group share one list object."""
     by_key: dict[tuple, list[str]] = defaultdict(list)
     for c in sorted(seed.crew, key=lambda c: c.crew_id):
         by_key[(c.airline, c.rank, c.base)].append(c.crew_id)
@@ -60,9 +57,8 @@ def _groups(seed: SeedData) -> dict[str, list[str]]:
 
 
 def _fit(seed: SeedData, start: date, end: date) -> set[str]:
-    """Crew who may be rostered at all from ``start`` to ``end``: active, with every
-    certificate still valid on the last day (a lapsed one is renewed before they fly again,
-    which this calendar does not assume)."""
+    """Active crew whose certificates are all still valid on ``end``. We don't assume a
+    lapsed certificate gets renewed, so those people just stop being rostered."""
     expires: dict[str, date] = {}
     for c in seed.certifications:
         expires[c.crew_id] = min(expires.get(c.crew_id, c.valid_to), c.valid_to)
@@ -76,12 +72,11 @@ def _fit(seed: SeedData, start: date, end: date) -> set[str]:
 def _rotation(seed: SeedData, week: int, start: date) -> dict[str, str]:
     """Seed crew id -> who flies that person's seed-week line in ``week``.
 
-    Within each group (airline, rank, base) the lines with flying or on-call duty go to the
-    fit members in turn, shifting along by one person a week; members who may not fly that
-    week (on leave, a certificate lapsed) are given none.
+    Within each airline/rank/base group the lines are handed out to fit members round-robin,
+    moving along one person per week. Anyone unfit that week gets no line.
     """
     fit = _fit(seed, start, start + timedelta(days=6))
-    on_call = {r.crew_id for r in seed.reserves}  # the standing reserve pool: never rotated
+    on_call = {r.crew_id for r in seed.reserves}  # standing reserve pool, never rotated
     busy = {s.crew_id for p in seed.pairings for s in p.crew} - on_call
     out: dict[str, str] = {}
     seen: set[int] = set()
@@ -99,20 +94,20 @@ def _rotation(seed: SeedData, week: int, start: date) -> dict[str, str]:
 
 
 def extend(seed: SeedData, last_day: date = LAST_DAY) -> SeedData:
-    """The seed with every following week up to ``last_day`` (trips ending after it are
-    left out), crew rotated and checked legal."""
+    """Seed plus every later week up to ``last_day``. Trips that would end after it are
+    dropped."""
     first = min(f.date for f in seed.flights)
     weeks = (last_day - first).days // 7
     flights = list(seed.flights)
     pairings = list(seed.pairings)
     gates = list(seed.gates)
-    # The reserve pool stays the same people, on call on the same weekdays every week they
-    # are fit to (one record each, as the seed has).
+    # Reserves are the same people on the same weekdays each week they're fit. Dates get
+    # appended to their one seed record rather than adding new records.
     reserves = list(seed.reserves)
     seed_reserve_dates = {r.crew_id: r.dates for r in seed.reserves}
     week_of: dict[str, int] = {p.pairing_id: 0 for p in seed.pairings}
-    # An aircraft whose seed week does not end where it starts (a two-day rotation over a
-    # seven-day week) keeps its rotation going across weeks instead of repeating by weekday.
+    # A two-day rotation doesn't divide a seven-day week, so that aircraft ends the seed
+    # week somewhere else. Those tails are continued day by day in _continued instead.
     rotating = _rotating_tails(seed)
     for week in range(1, weeks + 1):
         shift = WEEK * week
@@ -197,9 +192,9 @@ def extend(seed: SeedData, last_day: date = LAST_DAY) -> SeedData:
 
 
 def _gated(fixed: list[GateSlot], moving: list[GateSlot]) -> list[GateSlot]:
-    """``fixed`` plus ``moving``, each moving slot at its seed gate when that gate is free
-    then, else at another gate of the same station that is: a rotation shifted to other
-    weekdays must not park at a gate another flight already holds."""
+    """Adds ``moving`` slots to ``fixed``, keeping each at its seed gate if free, else the
+    first free gate at the same station. Continued rotations land on different weekdays
+    from the seed, so their seed gate may already be taken."""
     by_gate: dict[str, list[GateSlot]] = defaultdict(list)
     for g in fixed:
         by_gate[g.gate].append(g)
@@ -227,7 +222,6 @@ def _gated(fixed: list[GateSlot], moving: list[GateSlot]) -> list[GateSlot]:
 
 
 def _rotating_tails(seed: SeedData) -> set[str]:
-    """Aircraft whose seed week ends somewhere other than where it starts."""
     out = set()
     for tail in {f.aircraft for f in seed.flights}:
         legs = sorted((f for f in seed.flights if f.aircraft == tail), key=lambda f: f.dep_utc)
@@ -239,13 +233,12 @@ def _rotating_tails(seed: SeedData) -> set[str]:
 def _continued(
     seed: SeedData, tail: str, last_day: date
 ) -> tuple[list[Flight], list[Pairing], list[GateSlot], dict[str, int]]:
-    """A two-day rotation continued day by day after the seed week.
+    """Continues a two-day rotation day by day past the seed week.
 
-    The seed week shows the rotation (day A ends at the night stop, day B returns), starting
-    with a B day; it simply alternates on, and each A day with the B day after it is one
-    trip, crewed from the seed's two-day trips in turn (rotated by week) and checked legal
-    with the rest of the calendar. Trip ids stay four digits: the seed's ids for this
-    aircraft plus a hundred a week, in the order the trips start.
+    Day A ends at the night stop and day B flies back. The seed week starts on a B day and
+    alternates, so we keep alternating and pair each A day with the following B day as one
+    trip. Crew come from the seed's two-day trips in turn, rotated by week. Trip ids are
+    this aircraft's seed ids plus 100 a week, assigned in start order.
     """
     first = min(f.date for f in seed.flights)
     trips = sorted(
@@ -258,8 +251,7 @@ def _continued(
     by_id = {f.flight_id: f for f in seed.flights}
     gate_of = {g.flight_id: g for g in seed.gates}
     seed_ids = sorted(int(p.pairing_id.split("-")[1]) for p in seed.pairings if p.aircraft == tail)
-    # The seed week alternates B, A, B, ...: day i (from the seed's first day) is an A day
-    # when i is odd. Continue from the day after the seed week.
+    # B, A, B, ... from the seed's first day, so odd i is an A day. Start at day 7.
     flights: list[Flight] = []
     pairings: list[Pairing] = []
     gates: list[GateSlot] = []
@@ -335,7 +327,7 @@ def _continued(
 
 
 def _illegal(seed: SeedData) -> list[tuple[str, str]]:
-    """(pairing id, crew id) for every rostered seat whose holder breaks a rule."""
+    """(pairing id, crew id) for every seat that fails legality."""
     from crewops.engine import build_world
     from crewops.engine.legality import assess
 
@@ -349,8 +341,6 @@ def _illegal(seed: SeedData) -> list[tuple[str, str]]:
 
 
 def _swap(seed: SeedData, week_of: dict[str, int], week: int, a: str, b: str) -> SeedData:
-    """``a`` and ``b`` exchange everything they fly in ``week``."""
-
     def other(crew_id: str) -> str:
         return b if crew_id == a else a if crew_id == b else crew_id
 
@@ -364,15 +354,14 @@ def _swap(seed: SeedData, week_of: dict[str, int], week: int, a: str, b: str) ->
 
 
 def _repaired(seed: SeedData, week_of: dict[str, int]) -> SeedData:
-    """Swap whoever would fly illegally with a fit colleague who can take their week.
+    """Swaps anyone flying illegally with a fit colleague who can take their week.
 
-    One illegal seat at a time: a swap is kept only when it leaves fewer illegal seats
-    overall (counting the weeks either side), so this always ends. The seed week itself is
-    never changed: its exceptions are the demo's.
+    Fixes one seat at a time and only keeps a swap if the total illegal count drops, so the
+    loop terminates. Week 0 is left alone because its rule breaks are the demo scenarios.
     """
     groups = _groups(seed)
     first = min(f.date for f in seed.flights)
-    on_call = {r.crew_id for r in seed.reserves}  # the reserve pool stays on call
+    on_call = {r.crew_id for r in seed.reserves}
 
     def bad_of(s: SeedData) -> list[tuple[str, str]]:
         return [(p, c) for p, c in _illegal(s) if week_of.get(p, 0) > 0]

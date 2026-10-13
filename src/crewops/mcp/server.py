@@ -40,7 +40,7 @@ READ = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
 COMMIT = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)
 OUTWARD = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True)
-"""Reaches outside CrewOps: AWS emails the address."""
+"""Reaches outside CrewOps (SNS emails the address)."""
 
 
 class Gate:
@@ -77,8 +77,8 @@ def build_server(
     )
 
     async def run(ctx: Context, call: Any) -> Any:
-        """Sign-in check and the call, on a worker thread: both block (key fetch, DynamoDB,
-        Bedrock), and the event loop must stay free for other requests and health pings."""
+        # Token check and call both block (key fetch, DynamoDB, Bedrock), so they go to a
+        # worker thread. The event loop has to stay free for health pings.
 
         def work() -> Any:
             try:

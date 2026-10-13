@@ -1,19 +1,21 @@
-"""The CrewOps Alexa skill's HTTPS endpoint (a Lambda function URL in Sydney, where Alexa
-cannot trigger Lambda directly).
+"""HTTPS endpoint for the CrewOps Alexa skill. It's a Lambda function URL because the stack
+is in Sydney, where Alexa can't invoke Lambda directly.
 
-Every request is verified as Alexa's (``crewops.alexa.verify``). A linked account's access
-token is a CrewOps sign-in (Cognito, through the skill's account linking): it is checked
-like any other, and the person then has exactly their role's access, as in the console.
+Every request is checked as coming from Alexa (``crewops.alexa.verify``). Account linking
+goes through Cognito, so a linked account's access token is a normal CrewOps sign-in and is
+verified the same way. The person gets their role's access, same as in the console.
 
-* Open the skill: a greeting by name, or a card to link the account; and, once, a card to
-  allow notifications.
-* "What's waiting?": the latest updates on the person's desk, or for approvers.
-* "Ask CrewOps <question>": any crew-control question, answered by the same pipeline as the
-  console's Alexa+ (every figure from the engine).
-* Notifications allowed or withdrawn, account linked, skill disabled: remembered, so the
-  notifier knows whose Echo to make chime.
-* A message from the notifier (Skill Messaging): set a reminder a few seconds ahead with the
-  alert's words, so the Echo reads it out (a skill cannot otherwise speak unprompted).
+What it handles:
+
+* Launch greets the person by name, or shows a link-account card. The first time it also
+  asks for notification permission.
+* "What's waiting?" reads the latest updates for their desk or approval queue.
+* "Ask CrewOps <question>" goes through the same pipeline as the console's Alexa+, so the
+  figures come from the engine.
+* Notification permission changes, account linking and skill disable are stored so the
+  notifier knows whose Echo to chime.
+* Skill Messaging from the notifier sets a reminder a few seconds out with the alert text.
+  A skill can't otherwise speak unprompted.
 """
 
 from __future__ import annotations
@@ -68,7 +70,7 @@ def system(envelope: dict[str, Any]) -> dict[str, Any]:
 
 
 class Skill:
-    """The skill's logic, with its dependencies passed in so it is testable offline."""
+    """Dependencies are injected so the tests run offline."""
 
     def __init__(
         self, table: Any, api: Any, identify: Any, clock: Any = None, remind: Any = None
@@ -109,7 +111,7 @@ class Skill:
         if token:
             try:
                 caller = self.identify(token)
-            except Exception as exc:  # an expired or foreign token: treated as unlinked
+            except Exception as exc:  # expired or foreign token, treat as unlinked
                 log.info("Alexa access token refused: %s", exc)
         if caller is not None and alexa_user:
             save_link(
@@ -151,9 +153,9 @@ class Skill:
         return response(text, end=False, reprompt=HELP, card=card)
 
     def announce(self, message: dict[str, Any], sys: dict[str, Any], now: datetime) -> dict:
-        """The notifier's words become a reminder that goes off in a few seconds. Only our
-        notifier can send this (it holds the skill's credentials), and the request itself
-        was verified as Alexa's."""
+        """Turns the notifier's text into a reminder a few seconds out. Safe to trust the
+        text, since only our notifier has the skill credentials to send this and the
+        request was already verified as Alexa's."""
         from crewops.alexa.proactive import reminder
 
         text = spoken(str(message.get("announce") or "")).strip()
@@ -165,7 +167,7 @@ class Skill:
                     sys.get("apiAccessToken", ""),
                     reminder(text, locale if locale in LOCALES else "en-IN", now),
                 )
-            except Exception as exc:  # reminders not allowed, or Alexa refused: the chime stands
+            except Exception as exc:  # no reminder permission etc. The chime still happened.
                 log.info("announcement reminder not set: %s", exc)
         return {"version": "1.0", "response": {}}
 
@@ -210,7 +212,7 @@ _skill_id: str | None = None
 
 
 def _build() -> Skill:
-    """The deployed skill: the same pipeline and sign-in checks as the MCP server."""
+    """Same pipeline and token checks as the MCP server."""
     from crewops.agent.service import build
     from crewops.auth.identity import caller_from_claims
     from crewops.auth.tokens import TokenVerifier

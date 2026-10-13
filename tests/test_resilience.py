@@ -1,5 +1,5 @@
-"""Gemini's three: a circuit breaker for Bedrock, an override check with a logged refusal,
-and a four-eyes fingerprint on every plan."""
+"""A circuit breaker for Bedrock, an override check with a logged refusal, and a four-eyes
+fingerprint on every plan."""
 
 import pytest
 from botocore.exceptions import ClientError, ReadTimeoutError

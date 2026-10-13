@@ -66,7 +66,7 @@ function minutes(m: number): string {
 }
 
 /** Departures that moved gate, and those that board by bus from a remote stand. */
-export function StandTable({ stands }: { stands: StandMove[] }) {
+function StandTable({ stands }: { stands: StandMove[] }) {
   if (stands.length === 0) return null;
   const booked = stands.reduce((n, m) => n + (m.booked ?? 0), 0);
   return (
@@ -156,7 +156,7 @@ export function StandTable({ stands }: { stands: StandMove[] }) {
 }
 
 /** The flights a disruption touches, with new times for the late ones and who is booked. */
-export function FlightTable({ flights, next }: { flights: FlightRow[]; next: NextAtGate[] }) {
+function FlightTable({ flights, next }: { flights: FlightRow[]; next: NextAtGate[] }) {
   if (flights.length === 0 && next.length === 0) return null;
   const late = flights.filter((f) => f.late_minutes > 0);
   const booked = flights.reduce((n, f) => n + (f.booked ?? 0), 0);

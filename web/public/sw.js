@@ -1,7 +1,7 @@
-// CrewOps desktop alerts: shows the notification the notifier pushed (encrypted for this
-// browser alone), and opens the disruption when it is clicked. Nothing else runs here.
+// Service worker for desktop alerts. Shows what the notifier pushed and opens the disruption
+// on click. Nothing else.
 
-/** A page of this site, or the home page: never another site, however the path is written. */
+/** Path on this origin, falling back to "/". Stops a crafted push from opening another site. */
 function samePage(value) {
   try {
     const url = new URL(typeof value === "string" ? value : "/", self.location.origin);
@@ -11,7 +11,7 @@ function samePage(value) {
   }
 }
 
-// Take charge of tabs opened before this worker, so a click can bring one to the page.
+// claim tabs opened before install, otherwise a click can't focus them
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
 self.addEventListener("push", (event) => {

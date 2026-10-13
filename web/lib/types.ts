@@ -100,7 +100,7 @@ export type MyReport = {
   details: Record<string, unknown>;
   handled: string | null;
   remark: string | null;
-  /** The controller desk it went to: empty until it is analysed, or if it was refused. */
+  /** Controller desk it was routed to. Empty until analysed, or if it was refused. */
   desks?: { desk_id: string; controller: string }[];
 };
 
@@ -136,8 +136,8 @@ export type Option = {
 };
 
 export type Seat = {
-  /** Filled since the analysis by an approved plan (say for the same seat on another day):
-   * who flies it now, or that the trip was cancelled. No cover is needed. */
+  /** Set when an approved plan filled this seat after the analysis (e.g. the same seat on
+   * another day). Says who flies it now, or that the trip was cancelled. */
   re_crewed?: { cancelled: boolean; holders: { crew_id: string; name: string | null }[] } | null;
   pairing_id: string;
   role: string;

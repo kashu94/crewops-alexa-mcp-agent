@@ -35,10 +35,9 @@ def documents():
 
 
 class FakeS3Vectors:
-    """In-memory stand-in for the S3 Vectors calls we use: put_vectors and query_vectors.
+    """In-memory put_vectors and query_vectors.
 
-    moto stores vectors but does not implement querying, so search tests use this instead.
-    It never touches the network. Distances are cosine distances, as the real indexes use.
+    moto stores vectors but can't query them. Distances are cosine, like the real indexes.
     """
 
     def __init__(self) -> None:

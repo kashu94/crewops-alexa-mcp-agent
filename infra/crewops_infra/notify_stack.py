@@ -1,16 +1,18 @@
 """Notifications: live console updates (AppSync Events) and admin-managed email alerts (SNS).
 
-* **Notifier.** A Lambda on the table's change stream, filtered to disruption items. Each
-  status change is published to the console channel, and the ones that need someone's
-  attention are published to the alerts topic, tagged with the role they are for.
-* **Live console.** An AppSync Events API. People subscribe with their Cognito sign-in, and
-  the namespace's handler admits only the roles that may read disruptions. Only IAM can
-  publish, and only the notifier has that right.
-* **Alerts.** An SNS topic with no subscribers until an admin adds an address for a role;
-  the address must confirm, and each subscription is filtered to its role.
+The notifier is a Lambda on the table's stream, filtered to disruption items. Every status
+change goes to the console channel. The ones someone has to act on also go to the alerts
+topic, tagged with the role they're for.
 
-Events and alerts name a disruption and its status, never a person. Everything here is
-billed per use: nothing while no disruption changes and nobody is connected.
+The console is an AppSync Events API. People subscribe with their Cognito sign-in and the
+namespace handler (console_events.js) only admits roles that can read disruptions.
+Publishing is IAM only, and only the notifier has it.
+
+The SNS topic starts with no subscribers. An admin adds an address for a role, the address
+has to confirm, and each subscription is filtered to that role.
+
+Events and alerts carry a disruption id and status, never a person's name. All of it is
+pay per use, so a quiet day with nobody connected costs nothing.
 """
 
 from __future__ import annotations

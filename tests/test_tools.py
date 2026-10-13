@@ -467,7 +467,7 @@ def test_issue_counts_need_the_store(tools):
     assert err(tools, "controller_issue_counts")[0] == "UNAVAILABLE"
 
 
-# -- Regression tests for review findings ----------------------------------------------
+# -- Regressions -----------------------------------------------------------------------
 
 
 def test_a_stated_rank_is_never_swapped_for_another(tools):

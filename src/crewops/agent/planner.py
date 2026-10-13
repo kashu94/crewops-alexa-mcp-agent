@@ -7,8 +7,8 @@ anything. Calls that follow from a first result (a pairing found by aircraft and
 cover for it) are made here too, because carrying an id from one result to the next call is
 bookkeeping a model does badly.
 
-Also here: the check that what a question *states* is true. "FO C-2087" when the roster says
-C-2087 is a captain changes the answer, so it is asked about, never silently accepted.
+The false-premise check lives here too. "FO C-2087" when the roster says C-2087 is a
+captain changes the answer, so we ask instead of silently going along with it.
 """
 
 from __future__ import annotations
@@ -59,8 +59,8 @@ def _clean(**args: Any) -> dict[str, Any]:
 
 
 def _window(ents: Entities) -> tuple[str | None, str | None]:
-    """ "closed 08:00-14:00Z on 15 Oct" -> two UTC instants. A window ending before it starts
-    runs past midnight."""
+    """ "closed 08:00-14:00Z on 15 Oct" -> two UTC instants. An end before the start means
+    the window runs past midnight."""
     if not (ents.date and len(ents.times) >= 2):
         return None, None
     start = f"{ents.date}T{ents.times[0]}:00Z"
@@ -92,8 +92,8 @@ def _crew_filters(ents: Entities, bare_names: bool = True) -> dict[str, Any]:
     if ents.crew:
         filters["crew_id"] = ents.crew
     elif len(ents.names) == 1 and (bare_names or NAMED_PERSON_RE.search(ents.names[0])):
-        # "A. Nair" always; a bare capitalised word ("Nair") only when a rule recognised a
-        # crew question, never for a question that matched nothing ("Play some music").
+        # "A. Nair" always. A bare capitalised word ("Nair") only when a rule matched a crew
+        # question, otherwise "Play some music" would look up a crew member called Play.
         filters["name"] = ents.names[0]
     if ents.role:
         filters["rank"] = ents.role
@@ -115,20 +115,19 @@ def _flight_ref(ents: Entities) -> dict[str, Any]:
 def seed_calls(
     route: Route, question: str, vocab: Vocabulary, tools: CrewOpsTools
 ) -> list[ToolCall]:
-    """The opening calls for this question, from its entities and the roster."""
     ents, intent = route.entities, route.intent
     if route.decided_by == "default" and not (ents.crew_ids or ents.pairing_ids or ents.flight_ids):
-        # Nothing recognised the question, and it names no exact id: a city or a capitalised
-        # word alone ("a hotel in Mumbai") is no reason to read out the roster. Only a
-        # malformed id still gets its real neighbours offered.
+        # Nothing recognised the question and it names no exact id. A city or capitalised
+        # word alone ("a hotel in Mumbai") is no reason to read out the roster, so only
+        # offer neighbours for a malformed id.
         offers = [
             ("suggest_crew_ids", ents.malformed_crew_ids),
             ("suggest_pairing_ids", ents.malformed_pairing_ids),
             ("suggest_flight_nos", ents.malformed_flight_nos),
         ]
         return [ToolCall(name, {"near": near[0]}) for name, near in offers if near]
-    # "Can C-3305 cover P-2291?" names someone not on the pairing: a legality question
-    # about them, not a request to replace them.
+    # "Can C-3305 cover P-2291?" names someone who isn't on the pairing, so it's really a
+    # legality check on them, not a request to replace them.
     if (
         intent in COVER_INTENTS | {Intent.SIMULATE_WHATIF}
         and ents.crew
@@ -190,8 +189,8 @@ def seed_calls(
                 add("lookup", entity="flights", filters=_flight_filters(ents))
 
         case Intent.LOOKUP_CERT if ents.crew or ents.cert_types or ents.horizon_days:
-            # Never every certificate on file: a question naming no one, no certificate and
-            # no horizon is asked back (MISSING), not answered with 600 rows.
+            # Guard is on the case above. With no one, no cert type and no horizon we ask back
+            # (MISSING) rather than dump 600 rows.
             filters = _clean(
                 crew_id=ents.crew, cert_type=ents.cert_types[0] if ents.cert_types else None
             )
@@ -284,7 +283,7 @@ def seed_calls(
         ):
             add("explain_rule", rule_id="RULE-REST-04")
         case Intent.CHECK_LEGALITY if ents.role and (ents.pairing or flight):
-            # "Who is legal for the Captain seat on P-2291?": the legal options for that seat.
+            # "Who is legal for the Captain seat on P-2291?"
             target = {"pairing_id": ents.pairing} if ents.pairing else flight
             add("find_options", **target, role=ents.role)
 
@@ -356,7 +355,8 @@ def seed_calls(
 
 
 def followup_calls(route: Route, trace: Sequence[TraceEntry]) -> list[ToolCall]:
-    """Calls that follow from what the seeds returned, so no model has to carry ids across."""
+    """Calls that follow from what the seed calls returned, so no model has to carry ids
+    across."""
     intent, ents = route.intent, route.entities
     done = {e.tool for e in trace}
     ok = [e for e in trace if e.ok]
@@ -414,11 +414,11 @@ def false_premise(
     vocab: Vocabulary,
     may_see: Callable[[str], bool] = lambda crew_id: True,
 ) -> str | None:
-    """Something the question states that the roster contradicts, as a question back.
+    """A question back when something the question states contradicts the roster.
 
-    Returns None when everything stated checks out (or names nobody real: the tools report
-    an unknown id themselves). ``may_see`` says whether the caller may learn a crew member's
-    rank, base and rating; for anyone else, nothing is checked, so nothing is revealed.
+    None when everything checks out, or when it names nobody real (the tools report unknown
+    ids themselves). ``may_see`` says whether the caller may learn a crew member's rank,
+    base and rating. For anyone they can't see we check nothing, so nothing leaks.
     """
     crew = {cid: c for cid, c in tools.world.crew.items() if may_see(cid)}
     for crew_id, claimed in stated_ranks(question):

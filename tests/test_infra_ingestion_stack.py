@@ -124,7 +124,7 @@ def test_report_worker_gets_only_the_table_actions_it_uses():
         "dynamodb:PutItem",
         "dynamodb:UpdateItem",
     }
-    # Whatever storing a sick report sends must be allowed: moto does not enforce IAM, so
+    # Whatever storing a sick report sends must be allowed. moto doesn't enforce IAM, so
     # this is the only check that the deployed worker may do what the tests do.
     assert worker_writes() <= dynamo
     resources = str(worker["Properties"]["PolicyDocument"])

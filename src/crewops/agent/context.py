@@ -1,19 +1,20 @@
 """What the previous turn of a conversation lends the next one.
 
-Only two things carry over, both deterministic, and both noted on the answer:
+Two things carry over, both deterministic and both noted on the answer.
 
-* **A reply to a question back.** When the last answer asked for a missing detail ("Which
-  seat needs cover on P-2291?") and the reply is only that detail, a few words giving a
-  seat, a date or one id ("Captain", "13 Oct") and asking nothing of its own, it is read
-  together with the question it answers. Anything else is a new question.
-* **He or she.** A question that refers to one person without naming one, right after a
-  turn about exactly one crew member, is about that crew member, unless it speaks of the
-  asker ("I", "my"), of several people ("reserves", "crew") or of a plan's decision ("has
-  she approved it?"), or names a role beside the pronoun ("her captain"), where the pronoun
-  may mean someone else. "They" is never carried: it
-  is as often plural as singular. "That pairing" and "that flight" work the same way.
+A reply to a question back. When the last answer asked for a missing detail ("Which seat
+needs cover on P-2291?") and the reply is only that detail, a few words giving a seat, a
+date or one id ("Captain", "13 Oct") and asking nothing of its own, it is read together
+with the question it answers. Anything else is a new question.
 
-Nothing else is remembered or inferred. The carried ids go through the same role checks as
+He or she. A question that refers to one person without naming one, right after a turn
+about exactly one crew member, is about that crew member. Not when it speaks of the asker
+("I", "my"), of several people ("reserves", "crew") or of a plan's decision ("has she
+approved it?"), and not when it names a role beside the pronoun ("her captain"), since the
+pronoun may then mean someone else. "They" is never carried because it is as often plural
+as singular. "That pairing" and "that flight" work the same way.
+
+Nothing else is remembered or inferred. Carried ids go through the same role checks as
 typed ones, and a turn older than ``FRESH_SECONDS`` lends nothing.
 """
 
@@ -41,7 +42,7 @@ POSSESSIVE_ROLE_RE = re.compile(
     r"crew|colleague|replacement|cover|reserve)\b",
     re.I,
 )
-""""Her captain" is someone else: the person named by the role, not the one asked about."""
+""""Her captain" is the person named by the role, not the one asked about."""
 PAIRING_RE = re.compile(r"\b(that|this|the same) (pairing|trip)\b", re.I)
 FLIGHT_RE = re.compile(r"\b(that|this|the same) flight\b", re.I)
 
@@ -63,8 +64,7 @@ class Turn:
 
     @classmethod
     def of(cls, answer: Any, at: datetime) -> Turn:
-        """The turn an answer records: its question, whether it asked something back, and
-        the ids its route used."""
+        """Question, whether it asked something back, and the ids its route used."""
         ents = answer.route.entities if answer.route else None
         return cls(
             question=answer.question[:MAX_REMEMBERED],
@@ -87,7 +87,7 @@ class Turn:
 
     @classmethod
     def from_dict(cls, data: Any) -> Turn | None:
-        """A stored turn, or None when it is not one (never trusted further than that)."""
+        """None for anything that doesn't look like a stored turn. Stored data isn't trusted."""
         if not isinstance(data, dict):
             return None
         question, at = data.get("question"), data.get("at")
@@ -122,8 +122,9 @@ def as_reply(
     """The question to route when ``question`` answers the previous turn's question back,
     or None when it stands on its own.
 
-    ``entities``: what the reply names on its own; ``asks_something``: whether it matches
-    a question rule on its own ("duty hours C-3310" does, "Captain" does not)."""
+    ``entities`` is what the reply names by itself. ``asks_something`` says whether it
+    matches a question rule by itself ("duty hours C-3310" does, "Captain" does not).
+    """
     if previous is None or previous.awaiting != "detail" or asks_something:
         return None
     if len(question.split()) > MAX_REPLY_WORDS:
@@ -140,8 +141,7 @@ def as_reply(
 
 
 def carry_ids(question: str, entities: Any, previous: Turn | None) -> list[str]:
-    """Add to ``entities`` the ids that "he", "that pairing" or "that flight" refer to.
-    Returns a note for each one carried over."""
+    """Add the ids that "he", "that pairing" or "that flight" refer to. One note per id."""
     if previous is None:
         return []
     notes = []

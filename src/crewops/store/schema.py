@@ -40,10 +40,11 @@ Alert audit event               ALERTS / AUDIT#ts#action#id
 The operational records above are written by ``crewops.store.items``; disruptions, audit
 events and rejected reports by ``crewops.store.reports``; plans and their decisions by
 ``crewops.store.plans``; user profiles by ``crewops.store.users``; alert addresses by
-``crewops.notify.subscriptions``. A disruption is stored
-exactly once by a conditional write on its id, so no separate idempotency marker is needed.
-``gsi2`` is reserved for a second overloaded view (for example a controller's desk), so it
-can be added without recreating the table.
+``crewops.notify.subscriptions``.
+
+A disruption is written once, by a conditional put on its id, so there is no separate
+idempotency marker. ``gsi2`` is unused for now; it exists so a second view (a controller's
+desk, say) can be added later without recreating the table.
 """
 
 from __future__ import annotations

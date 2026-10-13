@@ -1,12 +1,12 @@
-"""Desktop alerts (web push) for the people a disruption needs, even with CrewOps closed.
+"""Desktop (web push) alerts, so people hear about a disruption with CrewOps closed.
 
-Run by the notifier Lambda next to the Alexa notifications, for the same people: the
-controller of the desk an analysed or sent-back disruption is on, and every approver when a
-plan is submitted (``crewops.alexa.notifier.recipients``). Each browser they turned desktop
-alerts on in gets one notification; clicking it opens the disruption.
+The notifier Lambda runs this alongside the Alexa notifications and picks the same people
+via ``crewops.alexa.notifier.recipients``. That is the desk controller for an analysed or
+sent-back disruption, and every approver when a plan is submitted. Each browser they turned
+alerts on in gets one notification, and clicking it opens the disruption.
 
-Best effort, like the Alexa chime: a failure is logged, never retried (the console and email
-carry the same news). A browser the push service says is gone is forgotten.
+Best effort like the Alexa chime. Failures are logged and not retried, since console and
+email carry the same news. Subscriptions the push service reports as gone are deleted.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ log.setLevel(logging.INFO)
 
 
 def message(record: dict[str, Any]) -> dict[str, Any] | None:
-    """What the notification says. Names the disruption, never a crew member."""
+    """Names the disruption only, never a crew member."""
     change = change_of(record)
     if change is None:
         return None
@@ -51,8 +51,8 @@ def message(record: dict[str, Any]) -> dict[str, Any] | None:
 
 
 BUDGET_SECONDS = 20
-"""How long the notifier spends on desktop alerts: a slow push service must not run the
-Lambda out of time (that would retry the whole batch, emails and all)."""
+"""Cap on time spent pushing. If a slow push service ran the Lambda out of time, the whole
+batch would be retried, emails included."""
 
 
 def process(
@@ -62,9 +62,9 @@ def process(
     forget: Any,
     budget: float = BUDGET_SECONDS,
 ) -> int:
-    """``send(subscription, message)`` returns "sent", "gone" or "failed"; ``forget`` drops a
-    gone one. Sends side by side, and gives up on any not done within ``budget`` seconds.
-    Returns how many were sent."""
+    """``send(subscription, message)`` returns "sent", "gone" or "failed", and ``forget``
+    drops a gone subscription. Sends in parallel and abandons whatever is still running
+    after ``budget`` seconds. Returns the number sent."""
     people = [s | {"notifications": True} for s in subscriptions]
     jobs = [
         (sub, note)
@@ -95,7 +95,6 @@ def process(
 
 
 def notify(records: list[dict[str, Any]], settings: Any) -> int:
-    """Send the desktop alerts these stream records call for. Best effort."""
     import boto3
 
     from crewops.notify.webpush import Sender
@@ -107,7 +106,7 @@ def notify(records: list[dict[str, Any]], settings: Any) -> int:
     found = current(push.subscriptions(table), lambda u: get_profile(table, u))
     people = [s | {"notifications": True} for s in found]
     if not any(recipients(r, people) for r in records):
-        return 0  # nobody to notify: no keys fetched
+        return 0  # skip the SSM calls when nobody is listening
     ssm = boto3.Session(region_name=settings.aws_region).client("ssm")
     prefix = settings.push_parameter_prefix
     private = ssm.get_parameter(Name=f"{prefix}/vapid-private", WithDecryption=True)

@@ -32,8 +32,8 @@ class LivePipeline:
     explainer: NovaExplainer | None
 
     def ask(self, question: str, caller: Any, previous: Any = None) -> tuple[Any, dict[str, int]]:
-        """One question, and the model calls and tokens it alone used. ``previous`` is the
-        conversation's last turn (``agent.context.Turn``), when there is one."""
+        """Answer plus the model calls and tokens used for this question only. ``previous``
+        is the conversation's last turn (``agent.context.Turn``), if any."""
         for role in (self.triage, self.explainer):
             if role is not None:
                 role.reset()
@@ -43,7 +43,7 @@ class LivePipeline:
         return answer, self.usage()
 
     def usage(self) -> dict[str, int]:
-        """Model calls and tokens since the last ``ask``, all roles together."""
+        """Calls and tokens since the last ``ask``, summed over all roles."""
         total = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
         for u in (
             self.triage.usage if self.triage else None,
@@ -58,16 +58,15 @@ class LivePipeline:
 
 
 def build(settings: Settings, table: Any, *, models: bool = True) -> LivePipeline:
-    """The pipeline over the live table and search index; with ``models``, Nova for triage,
-    the advisor and the explainer, and the guardrail when one is configured."""
+    """Pipeline over the live table and search index. ``models`` adds Nova for triage,
+    advisor and explainer; the guardrail is added whenever one is configured."""
     import boto3
 
     session = boto3.Session(region_name=settings.aws_region)
-    # One attempt per call and two timeouts: short calls (triage, embeddings, guardrail
-    # screening) get QUICK_CALL_SECONDS, the advisor and explainer at most the response
-    # budget. A late answer is replaced by the template rather than waited for.
-    # Both behind the process's one circuit breaker: while Bedrock is failing, answers come
-    # straight from the roster instead of each waiting out a timeout (crewops.agent.breaker).
+    # One attempt per call. Short calls (triage, embeddings, guardrail) get
+    # QUICK_CALL_SECONDS, the advisor and explainer get the response budget; past that the
+    # template answers. Both clients share MODEL_BREAKER so a Bedrock outage doesn't make
+    # every question wait out its own timeout.
     quick = GuardedClient(bedrock_runtime(settings.aws_region, QUICK_CALL_SECONDS), MODEL_BREAKER)
     runtime = GuardedClient(
         bedrock_runtime(settings.aws_region, settings.response_budget_seconds), MODEL_BREAKER

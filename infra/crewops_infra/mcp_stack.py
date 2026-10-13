@@ -1,22 +1,22 @@
 """The MCP server on AgentCore Runtime, and the rule that only it may file reports.
 
-* **Runtime.** The code package built by ``python -m crewops.mcp.package``, on Python 3.12,
-  speaking MCP (stateless streamable HTTP). No container image, so no Docker.
-* **Sign-in.** AgentCore's authorizer admits only access tokens from the team's Cognito
-  pool and web client, and passes the ``Authorization`` header through so the server can
-  verify the token again and act as that user.
-* **Memory.** An AgentCore Memory, short-term events only, kept for seven days: each
-  conversation's previous turn, so a follow-up question can be read with it.
-* **Permissions.** Read and write the operations table, send to the ingest queue, call the
-  configured Nova and Titan models, screen with the guardrail, query the search indexes,
-  write and read conversation events, and manage the alert topic's subscriptions (the
-  admin-only alert tools). Nothing else.
-* **Role.** A fixed name (``crewops-<stage>-mcp-runtime``): the ingest queue's policy, in
-  the ingestion stack, refuses reports from every principal but this role and the operator
-  ARNs listed in ``CREWOPS_QUEUE_SENDERS``.
+The runtime runs the code package from ``python -m crewops.mcp.package`` on Python 3.12 and
+speaks stateless streamable HTTP. It's a code asset, not a container image, so no Docker.
 
-Billed per second while a session is active; nothing while unused. Idle sessions end
-after five minutes.
+AgentCore's authorizer only lets in access tokens from the team's Cognito pool and web
+client. It passes the ``Authorization`` header through, and the server checks the token
+again and acts as that user.
+
+Memory is short-term events only, kept seven days (the minimum). We only need each
+conversation's previous turn so a follow-up question makes sense.
+
+The execution role gets the table, the ingest queue, the configured Nova and Titan models,
+the guardrail, the search indexes, conversation events, and subscribe/unsubscribe on the
+alert topic for the admin alert tools. Nothing else. Its name is fixed
+(``crewops-<stage>-mcp-runtime``) because the ingest queue's policy, over in the ingestion
+stack, refuses reports from anyone but this role and the ARNs in ``CREWOPS_QUEUE_SENDERS``.
+
+Billed per second while a session is active. Idle sessions end after five minutes.
 """
 
 from __future__ import annotations

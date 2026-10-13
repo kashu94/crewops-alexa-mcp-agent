@@ -1,15 +1,15 @@
-"""Alert addresses, managed by the admin alone.
+"""Email alert addresses. Only admins can manage them.
 
-An admin subscribes an email address to one role's alerts (controller or approver) or one
-operational team's (gate control, flight information and so on); an address holds one
-role, because SNS keeps one subscription per address and topic. SNS asks the address to
-confirm before anything is delivered, and every alert is filtered by role, so an address
-only ever receives what its role is about. Nobody else can add or
-remove addresses, and at most ``DAILY_CAP`` can be added a day and ``MAX_ADDRESSES`` held
-at once, so a public demo account cannot be used to send mail to strangers.
+An admin subscribes an address to one role (controller, approver) or one operational team
+(gate control, flight information, ...). One role per address, because SNS keeps a single
+subscription per address and topic. SNS makes the address confirm before it delivers
+anything, and alerts are filtered by role.
 
-Each subscription is also recorded in the table (``ALERTS / SUB#id``) with who added it,
-and every change leaves an audit event (``ALERTS / AUDIT#ts#action#id``).
+The caps (``DAILY_CAP`` added per day, ``MAX_ADDRESSES`` held) are there so a public demo
+account can't be turned into a way to mail strangers.
+
+Each subscription is also stored as ``ALERTS / SUB#id`` with who added it, and every change
+writes an audit event under ``ALERTS / AUDIT#ts#action#id``.
 """
 
 from __future__ import annotations
@@ -31,11 +31,8 @@ from crewops.store.schema import SEPARATOR as S
 from crewops.tools import Caller
 
 ALERT_ROLES = ("controller", "approver", "duty_supervisor", *(t.value for t in Team))
-"""Who an alert address may follow: a crew-control role, the duty supervisor (disruptions
-left untouched on a desk), or an operational team."""
-"""Crew control's two roles, then the operational teams told about disruptions
-(``crewops.domain.contacts``): gate control, station duty managers, flight information,
-operations monitoring, maintenance control, training and crew records, customer care."""
+"""Crew-control roles, the duty supervisor (gets escalations), then the operational teams
+from ``crewops.domain.contacts``."""
 DAILY_CAP = 5
 MAX_ADDRESSES = 20
 ADMINS = frozenset({Role.ADMIN, Role.SUPER_ADMIN})
@@ -107,8 +104,8 @@ class AlertSubscriptions:
             )["SubscriptionArn"]
         except ClientError as exc:
             try:
-                self._count_today(now, -1)  # nothing was added: give the day's slot back
-            except Exception:  # never hide why the address was refused
+                self._count_today(now, -1)  # nothing was added, give the slot back
+            except Exception:  # don't mask the real reason the address was refused
                 log.exception("could not give back today's alert slot")
             if _code(exc) == "InvalidParameter":
                 message = exc.response.get("Error", {}).get("Message", "")
@@ -160,7 +157,7 @@ class AlertSubscriptions:
             self.sns.unsubscribe(SubscriptionArn=record["subscription_arn"])
         except ClientError as exc:
             if _code(exc) == "InvalidParameter":
-                # SNS cannot remove a subscription nobody has confirmed yet.
+                # SNS won't unsubscribe a pending confirmation
                 raise AlertError(
                     "PENDING",
                     "that address has not confirmed yet; it can be removed once confirmed, "
@@ -187,8 +184,7 @@ class AlertSubscriptions:
         return page.get("Items", [])
 
     def _count_today(self, now: datetime, step: int) -> None:
-        """One more address today (``step`` 1), refused once the day's cap is reached, or
-        one fewer (``step`` -1) when an addition failed."""
+        """step=1 takes a slot (AlertError once the cap is hit), step=-1 hands one back."""
         day = now.astimezone(UTC).strftime("%Y-%m-%d")
         key = {schema.PK: PK, schema.SK: f"DAY{S}{day}"}
         if step < 0:

@@ -161,8 +161,8 @@ def test_loader_writes_with_profile(monkeypatch, capsys, seed):
     monkeypatch.setenv("CREWOPS_STAGE", "test")
     monkeypatch.setenv("AWS_REGION", "ap-southeast-2")
     monkeypatch.setenv("AWS_PROFILE", "crewops")
-    # The loader must see a named profile, but boto3 must not look it up: hand it the moto
-    # table directly, so no profile or credentials on this machine are ever read.
+    # The loader must see a named profile, but boto3 must not look it up. Hand it the moto
+    # table directly so no local profile or credentials get read.
     monkeypatch.setattr("crewops.store.ops_store.table_for", lambda settings: table)
     assert loader.main(["--week-only"]) == 0
     assert f"Done: {EXPECTED_ITEMS} items." in capsys.readouterr().out

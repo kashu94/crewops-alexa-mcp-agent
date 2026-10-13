@@ -1,17 +1,17 @@
-"""Alexa notifications (the Proactive Events API): what makes an Echo chime and show its
-yellow ring, and the Alexa app list a notification, for one linked person.
+"""Proactive Events API calls. These make one linked person's Echo chime with the yellow
+ring and put a notification in their Alexa app.
 
-The skill's Login with Amazon client credentials buy a short-lived token; each event goes
-to the Alexa API endpoint of that person's region, which the skill recorded from their own
-requests (never guessed). ``AMAZON.MessageAlert.Activated`` makes Alexa say "you have a new
-message from CrewOps"; asking the skill "what's waiting" then gives the details.
+The skill's Login with Amazon client credentials get a short-lived token. Events go to the
+API endpoint for the person's region, taken from their own skill requests rather than
+guessed. ``AMAZON.MessageAlert.Activated`` makes Alexa say "you have a new message from
+CrewOps", and asking the skill "what's waiting" gives the details.
 
-A notification cannot carry words for the Echo to say. So the notifier also sends the skill
-a message (the Skill Messaging API) with the alert in words; the skill, woken by it, sets an
-Alexa reminder a few seconds ahead with that text, and the Echo reads it out when it goes
-off. This needs the person to have allowed CrewOps reminders.
+Notifications can't carry text for the Echo to speak. To work around that the notifier also
+sends the skill a Skill Messaging API message with the wording. The skill wakes up, sets a
+reminder a few seconds out with that text, and the Echo reads it when it fires. Only works
+if the person allowed CrewOps reminders.
 
-Standard library only, so it runs in the plain Lambda runtime.
+Stdlib only, so it runs on the plain Lambda runtime.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def _post(url: str, body: bytes, headers: dict[str, str]) -> tuple[int, bytes]:
 
 
 class Tokens:
-    """A Login with Amazon access token for sending events, renewed before it expires."""
+    """Cached LWA token, refreshed a minute before expiry."""
 
     def __init__(
         self, client_id: str, client_secret: str, post: Post = _post, scope: str = SCOPE
@@ -89,7 +89,7 @@ class Tokens:
 
 
 def message_alert(alexa_user_id: str, now: datetime, minutes: int = 120) -> dict[str, Any]:
-    """One unread, urgent message from CrewOps, for one person, kept for ``minutes``."""
+    """Unicast, urgent, unread message alert that expires after ``minutes``."""
     return {
         "timestamp": now.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
         "referenceId": uuid.uuid4().hex,
@@ -146,7 +146,7 @@ def message_skill(
     data: dict[str, Any],
     post: Post = _post,
 ) -> None:
-    """Wake the skill for one person with ``data`` (``tokens`` with the messaging scope)."""
+    """``tokens`` must carry MESSAGING_SCOPE, not the proactive events one."""
     url = (
         f"{_base(api_endpoint)}/v1/skillmessages/users/{urllib.parse.quote(alexa_user_id, safe='')}"
     )
@@ -160,7 +160,6 @@ def message_skill(
 
 
 def reminder(text: str, locale: str, now: datetime) -> dict[str, Any]:
-    """A reminder that goes off in a few seconds and says ``text``."""
     return {
         "requestTime": now.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000"),
         "trigger": {"type": "SCHEDULED_RELATIVE", "offsetInSeconds": REMINDER_DELAY_SECONDS},
@@ -174,7 +173,7 @@ def reminder(text: str, locale: str, now: datetime) -> dict[str, Any]:
 def set_reminder(
     api_endpoint: str, api_access_token: str, body: dict[str, Any], post: Post = _post
 ) -> None:
-    """Set a reminder with the token Alexa gave the skill for this request."""
+    """Uses the per-request apiAccessToken, not an LWA token."""
     status, raw = post(
         f"{_base(api_endpoint)}/v1/alerts/reminders",
         json.dumps(body).encode(),

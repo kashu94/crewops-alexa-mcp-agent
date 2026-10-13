@@ -1,14 +1,13 @@
-"""Lambda handler: disruption status changes on the table's stream.
+"""Lambda handler for disruption status changes on the table's stream.
 
-The event source mapping passes only disruption items; this handler keeps the records
-whose status actually changed. Each change is published to the console channel, and the
-ones that need someone's attention also go out as an alert to the role concerned, and an
-analysed disruption to each operational team it names.
+The event source mapping already filters to disruption items. Here we keep the records
+whose status actually changed and publish each to the console channel. Changes that need
+someone also go out as a role alert, and an analysed disruption alerts every team it names.
 
-Console updates are best effort: a failure is logged and the console catches up on its
-next read. An alert that cannot be sent is a batch item failure, so Lambda retries from
-that record (a console event may then be sent twice, which is harmless: it only tells the
-console to read again; an alert sent before the failure may also go twice).
+Console updates are best effort. If one fails the console catches up on its next read. A
+failed alert is reported as a batch item failure so Lambda retries from that record. That
+can send a console event twice, which is harmless since it only makes the console re-read,
+and an alert that went out before the failure may also be sent twice.
 """
 
 from __future__ import annotations
@@ -35,8 +34,7 @@ def process(
     stage: str,
     escalate: Any = None,
 ) -> dict[str, Any]:
-    """``events`` publishes to the console (or is None); ``alerts`` sends alerts (or None);
-    ``escalate(change)`` schedules the untouched-disruption check (or None)."""
+    """Any of ``events``, ``alerts`` and ``escalate`` may be None when that channel is off."""
     changes = [(r, change_of(r)) for r in records]
     if escalate is not None:
         for _, change in changes:
@@ -45,7 +43,7 @@ def process(
             try:
                 escalate(change)
             except Exception:
-                # Best effort: the desk still has its alerts; only the escalation is missed.
+                # the desk still gets its alerts, we only lose the escalation
                 log.exception("escalation check for %s not scheduled", change.disruption_id)
     if events is not None:
         payload = [console_event(c) for _, c in changes if c is not None]
@@ -109,7 +107,7 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
 
     result = process(event.get("Records", []), events, alerts, settings.stage, escalate)
     if settings.alexa_skill_id:
-        # Linked Echos chime for their desk; never fails the batch (see crewops.alexa.notifier).
+        # never fails the batch, see crewops.alexa.notifier
         try:
             from crewops.alexa.notifier import notify
 
@@ -117,7 +115,6 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         except Exception:
             log.exception("Alexa notifications failed")
     if settings.push_enabled:
-        # Desktop alerts in the browsers controllers and approvers turned them on in.
         try:
             from crewops.notify.push_alerts import notify as push_notify
 

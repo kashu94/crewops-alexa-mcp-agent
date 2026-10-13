@@ -1,7 +1,5 @@
-// The sign-in page's backdrop: a runway at night seen on final approach. Soft aurora light
-// drifts over the sky, out-of-focus airfield lights float past, and a lead-in sweep runs
-// down the centreline towards the horizon. Pure SVG and CSS, held behind a slight blur so
-// the text above stays the subject; motion stops for anyone who prefers reduced motion.
+// Sign-in backdrop: a night runway seen on final approach. Plain SVG and CSS, slightly
+// blurred so the form on top stays readable. Animation stops under prefers-reduced-motion.
 
 const HORIZON = 430;
 const NEAR = 830;

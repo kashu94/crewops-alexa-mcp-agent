@@ -173,12 +173,12 @@ def test_gate_change_for_flight_without_slot(world, seed):
     assert "no boarding slot on record" in a.summary
 
 
-# -- Regression tests for review findings ----------------------------------------------
+# -- Regressions -----------------------------------------------------------------------
 
 
 def test_joint_plan_agrees_with_per_seat_answers_under_a_delay(world, seed):
-    # 3h on KS412 breaks the overnight rest for every rostered crew member, and for anyone
-    # who would cover them: no seat has legal cover, so the joint plan assigns nobody.
+    # 3h on KS412 breaks the overnight rest for every rostered crew member and for anyone
+    # who would cover them. No seat has legal cover, so the joint plan assigns nobody.
     a = run(world, seed, "flight_delay", {"flight_id": "KS412-2026-10-13", "delay_minutes": 180})
     assert len(a.seats) == 6
     assert all(s.to_dict()["status"] == "no_legal_cover" for s in a.seats)
@@ -273,7 +273,7 @@ def test_gate_closure_regates_onto_free_then_emergency_gates(world, seed):
     )
     moves = {m.flight_no: m for m in a.stands}
     # KS433 finds an ordinary free gate. KS431's overnight slot fits no ordinary BLR gate,
-    # so it takes the station's emergency gate rather than a remote stand: nobody slips.
+    # so it takes the station's emergency gate rather than a remote stand. Nobody slips.
     assert moves["KS433"].to_gate == "BLR-G3" and not moves["KS433"].emergency
     assert moves["KS431"].to_gate == "BLR-E1" and moves["KS431"].emergency
     assert moves["KS431"].delay_minutes == 0 and moves["KS431"].alternatives == ("BLR-E2",)
@@ -290,7 +290,7 @@ def test_gate_closure_regates_onto_free_then_emergency_gates(world, seed):
 def test_with_every_gate_taken_a_departure_boards_by_bus(world, seed):
     from dataclasses import replace
 
-    # No emergency gates at BLR: KS431 has nowhere but a remote stand, 15 minutes later,
+    # No emergency gates at BLR, so KS431 gets a remote stand, 15 minutes later,
     # and operations monitoring tells its captain.
     a = run(
         replace(world, emergency_gates={}),

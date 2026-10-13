@@ -12,14 +12,15 @@ import {
   Route,
   Search,
   ShieldCheck,
+  X,
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-// How well the question pipeline answers, from the held-out evaluation
-// (`python -m crewops.agent.evaluate --json web/public/evals/<mode>.json`). Public, like the
-// speaker: it shows synthetic crew data only, and no one signs in to read it.
+// Held-out eval results for the question pipeline, regenerated with
+// `python -m crewops.agent.evaluate --json web/public/evals/<mode>.json`.
+// No sign-in needed. Everything on it is synthetic crew data.
 
 type Result = {
   case_id: string;
@@ -380,8 +381,19 @@ export default function Evaluation() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search questions and answers"
-                  className="w-full rounded-lg border border-slate-200 py-1.5 pl-8 pr-3 text-sm outline-none focus:border-sky-400"
+                  className="w-full rounded-lg border border-slate-200 py-1.5 pl-8 pr-8 text-sm outline-none focus:border-sky-400"
                 />
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => setQuery("")}
+                    aria-label="Clear the search"
+                    title="Clear"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
               </label>
               <select
                 value={kind}

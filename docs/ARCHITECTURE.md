@@ -2,7 +2,7 @@
 
 ## Principle
 
-**The model selects, sequences and narrates. It never calculates.**
+The model selects, sequences and narrates. It never calculates.
 
 In crew control, a hallucinated number is a real person sent to the wrong aircraft. So every
 crew id, duty hour, cost and legality verdict comes from a deterministic tool call. Models are
@@ -71,21 +71,21 @@ speech and is discarded unless it keeps every fact.
 
 | Stage | Model calls | Job |
 |---|---|---|
-| **Guardrail on input** | 0 | Bedrock Guardrails screens the question for harmful content and prompt attacks. |
-| **Spoken ids** | 0 | Ids as voice input writes them ("see 3231", "C 32 31", "pee 2291", "D X 412") become C-3231, P-2291, DX412. Only the exact shape of an id is rewritten; a date or "see you at 10" is left alone. |
-| **Conversation** | 0 | Greetings, thanks, goodbyes and "who am I" are answered from the sign-in, before routing, so "hello" is never read as a lookup. |
-| **Router** | 0 | Ordered regex rules classify the question; ids, dates and stations are extracted by pattern only. |
-| **Semantic fallback** | 0 | Embedding match against the example questions. Borrows the closest one's intent, never its ids or answer, and only above a similarity floor measured on paraphrases. |
-| **Triage** | 0–1 (Nova Micro) | Classifies intent only when both stages above abstain. No tools. A reply it cannot parse means a lookup. |
-| **Whose records** | 0 | "My" means the asker. Crew may look up their own profile, certificates and trips. Anyone else asking about "my certificate" or "my duty" is told they are not on the crew roster, rather than shown everyone's; a certificate question naming no one, no kind and no horizon is asked back. |
-| **Premise check** | 0 | Something the question states that the roster contradicts ("FO C-1042" for a captain, an unknown station) is asked about before anything runs. |
-| **Planner** | 0 | Makes the obvious first tool calls for the intent, and the calls that follow from their results, with the caller's own role checks. |
-| **Advisor** | 0–9 (Nova 2 Lite) | Consulted only when the planned calls produced nothing usable (the question named no exact ids, or every planned call failed). It sees the planned results as its own earlier calls, calls more through the caller's role checks, and drafts the answer, which must state at least one sourced fact. At most 8 rounds of tool calls, with the time budget checked before each model call; each call has one attempt and a firm timeout. Only a finished reply counts: a cut-off or filtered one is no answer. Cannot submit, approve or commit anything. |
-| **Verifier** | 0 | Every id, number, time, name and rule verdict in the draft must appear in a tool result of the same turn. On failure the draft is replaced by the template. |
-| **Template** | 0 | The tool results as short sentences. Copied, never computed, so it always verifies. |
-| **Explainer** | 0–1 (Nova 2 Lite) | Rewrites a judgement answer (tier 2 and 3) for speech, while half the time budget remains. The rewrite must pass the verifier and keep every id, time and number of the template, or the template stands. |
-| **PII redaction** | 0 | Removes contact and government-id data at the output boundary, after verification. |
-| **Guardrail on output** | 0 | Bedrock Guardrails screens the final answer. |
+| Guardrail on input | 0 | Bedrock Guardrails screens the question for harmful content and prompt attacks. |
+| Spoken ids | 0 | Ids as voice input writes them ("see 3231", "C 32 31", "pee 2291", "D X 412") become C-3231, P-2291, DX412. Only the exact shape of an id is rewritten; a date or "see you at 10" is left alone. |
+| Conversation | 0 | Greetings, thanks, goodbyes and "who am I" are answered from the sign-in, before routing, so "hello" is never read as a lookup. |
+| Router | 0 | Ordered regex rules classify the question; ids, dates and stations are extracted by pattern only. |
+| Semantic fallback | 0 | Embedding match against the example questions. Borrows the closest one's intent, never its ids or answer, and only above a similarity floor measured on paraphrases. |
+| Triage | 0–1 (Nova Micro) | Classifies intent only when both stages above abstain. No tools. A reply it cannot parse means a lookup. |
+| Whose records | 0 | "My" means the asker. Crew may look up their own profile, certificates and trips. Anyone else asking about "my certificate" or "my duty" is told they are not on the crew roster, rather than shown everyone's; a certificate question naming no one, no kind and no horizon is asked back. |
+| Premise check | 0 | Something the question states that the roster contradicts ("FO C-1042" for a captain, an unknown station) is asked about before anything runs. |
+| Planner | 0 | Makes the obvious first tool calls for the intent, and the calls that follow from their results, with the caller's own role checks. |
+| Advisor | 0–9 (Nova 2 Lite) | Consulted only when the planned calls produced nothing usable (the question named no exact ids, or every planned call failed). It sees the planned results as its own earlier calls, calls more through the caller's role checks, and drafts the answer, which must state at least one sourced fact. At most 8 rounds of tool calls, with the time budget checked before each model call; each call has one attempt and a firm timeout. Only a finished reply counts: a cut-off or filtered one is no answer. Cannot submit, approve or commit anything. |
+| Verifier | 0 | Every id, number, time, name and rule verdict in the draft must appear in a tool result of the same turn. On failure the draft is replaced by the template. |
+| Template | 0 | The tool results as short sentences. Copied, never computed, so it always verifies. |
+| Explainer | 0–1 (Nova 2 Lite) | Rewrites a judgement answer (tier 2 and 3) for speech, while half the time budget remains. The rewrite must pass the verifier and keep every id, time and number of the template, or the template stands. |
+| PII redaction | 0 | Removes contact and government-id data at the output boundary, after verification. |
+| Guardrail on output | 0 | Bedrock Guardrails screens the final answer. |
 
 Every model call has a fallback that still answers: a failed or unverifiable draft gives
 the template, a failed triage gives a lookup, and an unreachable guardrail is logged and
@@ -99,9 +99,10 @@ the other 3 need the advisor and say what they need instead. A set of 38 paraphr
 not an unbiased score. The held-out set (`data/eval/heldout.json`, see
 [Evaluation](#evaluation)) was written afterwards and is never used for tuning.
 
-Safety therefore has independent layers: Bedrock Guardrails for harmful content and prompt
-injection, the verifier for unsourced claims, PII redaction for sensitive data, and role
-checks in the MCP server for authorization (see [Roles and approvals](#roles-and-approvals)).
+So safety does not rest on one layer. Bedrock Guardrails handle harmful content and prompt
+injection, the verifier catches unsourced claims, PII redaction removes sensitive data, and
+role checks in the MCP server decide authorization (see
+[Roles and approvals](#roles-and-approvals)).
 
 ## The legality engine
 
@@ -120,7 +121,7 @@ Seven rules, each returning the numbers behind its verdict rather than a bare pa
 
 Multi-day pairings are checked day by day, with earlier days of the same pairing counted in
 the windows. Duty already rostered later in the week counts too, so a cover that looks legal
-today cannot quietly breach a limit on a trip the crew member already has: every window the
+today cannot quietly breach a limit on a trip the crew member already has. Every window the
 new duty falls into is checked, including those ending on their later rostered days. Duty
 flown on the snapshot day counts even when the duty-clock history has not recorded it yet.
 Rest is checked on both sides of the new duty, and between the days of the pairing itself
@@ -167,24 +168,26 @@ question, because acting on the wrong id dispatches the wrong person.
 
 The demo runs with a small team, so anyone trying it can sign in as each role and see the
 cross-controller safety at work: three controllers, one per desk, three approvers, two
-reporters, four crew members, an auditor, an admin and a super admin
+reporters, eleven crew members across the three airlines, an auditor, an admin and a super admin
 (`data/team/demo_team.json`). Usernames are first name and surname (`rohit.malhotra`); a crew
 member's starts with their crew number (`c1042.nair`). Crew control works for three airlines
 (Deccan Express, Konkan Skyways and Nilgiri Connect), each with its own aircraft and crew.
 
-- **Accounts** are created by an admin command, never by sign-up. They sign in with a
-  username; no email or phone is stored, so nothing can ever be sent to them. Where an alert
-  should really arrive, the admin subscribes an address to a role (see Notifications).
-- **Roles** are Cognito groups, which only an admin can change, and they reach the tools as
-  the caller's roles.
-- **A crew member's own crew id and a controller's desk** live in a user profile in the
-  operations table, written only by that command. They are kept out of Cognito because a
-  user can, by default, edit their own Cognito attributes.
-- **A request's identity** comes from the signed-in user's access token, whose signature
-  the front door (AgentCore's JWT authorizer) verifies. The pool and app client it was issued
-  for and its expiry are then checked again, and the groups and profile make the caller.
-- **Removing someone** from the team file takes their roles and profile away on the next run.
-  A crew login holds no other role, and nobody is both a controller and an approver.
+Accounts are created by an admin command, never by sign-up. People sign in with a
+username. No email or phone is stored, so nothing can ever be sent to them; where an alert
+should really arrive, the admin subscribes an address to a role (see Notifications). Roles
+are Cognito groups, which only an admin can change, and they reach the tools as the caller's
+roles.
+
+A crew member's own crew id and a controller's desk live in a user profile in the
+operations table, written only by that command. They are kept out of Cognito because a user
+can, by default, edit their own Cognito attributes.
+
+A request's identity comes from the signed-in user's access token, whose signature the front
+door (AgentCore's JWT authorizer) verifies. The pool and app client it was issued for and
+its expiry are then checked again, and the groups and profile make the caller. Removing
+someone from the team file takes their roles and profile away on the next run. A crew login
+holds no other role, and nobody is both a controller and an approver.
 
 Cross-controller safety, built in stages:
 
@@ -201,101 +204,126 @@ Cross-controller safety, built in stages:
 ## Notifications
 
 A notifier Lambda reads the table's change stream, filtered to disruption items, and keeps
-the records whose status changed. Each change goes to two places:
+the records whose status changed. Each change goes to the live console and, where an admin
+has set them up, to email alerts.
 
-- **Live console.** Published to the `/ops/disruptions` channel of an AppSync Events API.
-  Only IAM can publish, and only the notifier may. People subscribe with their Cognito
-  sign-in, and the channel's subscribe handler admits only the roles that may read
-  disruptions (controller, approver, auditor, admin, super admin). The console reads the
-  details through the MCP server, with its role checks. Best effort: a failed publish is
-  logged, and the console catches up on its next read.
-- **Email alerts, optional and managed by the admin.** Three changes alert a role:
-  REPORTED to OPTIONS_READY (controllers: options ready), OPTIONS_READY to SUBMITTED
-  (approvers: a plan waiting) and SUBMITTED back to OPTIONS_READY (controllers: the plan was
-  rejected, withdrawn or went stale). Alerts go to an SNS topic tagged with the role, and an
-  address receives only the one role it was subscribed to. Only an admin can add or remove
-  addresses (MCP tools), AWS asks each address to confirm before anything is delivered, and
-  at most five addresses can be added a day and twenty held, so a public demo cannot be used
-  to send mail to strangers. A failed alert is retried from that record.
-- **Team alerts.** When a disruption is analysed (REPORTED to OPTIONS_READY), each
-  operational team its analysis names gets one email with every notice for it (see
-  [Who is told](#who-is-told)). An admin subscribes addresses to a team exactly as to a
-  role: the SNS filter is the team's name.
+#### Live console
 
-- **Severity** (`crewops.analysis.severity`). High, medium or low with the reasons, worked out
-  from the stored analysis when read, so older disruptions are rated too: hard factors (no
-  legal cover, cancel or fly short recommended, an unfilled joint seat, a duty-limit breach)
-  make it high; softer ones (cover only from outside today's reserves, flying within a day,
-  300 or more passengers, three or more seats, late departures) make it medium, and three of
-  them high. Spoken first by the speaker, Alexa and desktop alerts.
-- **Escalation.** When a change leaves a disruption waiting on a desk (REPORTED or SUBMITTED
-  to OPTIONS_READY), the notifier creates a one-time EventBridge Scheduler schedule
-  (`at(...)`, deleted after it runs) for `CREWOPS_ESCALATE_AFTER_MINUTES` later (10). The
-  escalation Lambda it runs looks again: still OPTIONS_READY with no audit event since the
-  clock started means untouched, so it emails the `duty_supervisor` audience and writes an
-  ESCALATED audit event, which the speakers announce. Anything else (a plan submitted, the
-  disruption closed, an earlier escalation) means handled, and it does nothing. No timer
-  exists while nothing happens. The scheduler's role may only invoke that one function, and
-  the notifier may only create schedules named `<prefix>-esc-*`.
-- **Desktop alerts (web push).** Controllers and approvers can turn them on per browser. The
-  service worker's push subscription (endpoint and keys) is stored at `PUSH /
-  <endpoint hash>`, owned by whoever last turned alerts on in that browser (so a shared desk
-  computer never gets the previous person's alerts), five browsers per person, and only endpoints of the browser
-  push services are accepted, so the notifier never posts to an address a user made up. The
-  notifier sends to the same people as the Alexa chime (the desk's controller, or every
-  approver), each message encrypted for that browser (RFC 8291, aes128gcm) and signed with the
-  app's VAPID key (RFC 8292, ES256), whose private half is a SecureString in Parameter Store.
-  The message names the disruption and links to it, never a crew member. A browser the push
-  service reports gone, or refuses because the keys were replaced, is forgotten; signing out
-  unsubscribes the browser. The notifier sends side by side and gives up after 20 s, so a slow
-  push service cannot run it out of time. Encryption needs
-  the cryptography library, so the notifier runs the MCP server's package when it is built;
-  without it, the notifier runs the plain source and desktop alerts stay off.
+Each change is published to the `/ops/disruptions` channel of an AppSync Events API. Only
+IAM can publish, and only the notifier may. People subscribe with their Cognito sign-in, and
+the channel's subscribe handler admits only the roles that may read disruptions
+(controller, approver, auditor, admin, super admin). The console reads the details through
+the MCP server, with its role checks. Publishing is best effort: a failed publish is
+logged, and the console catches up on its next read.
+
+#### Email alerts
+
+Email alerts are optional and managed by the admin. Three changes alert a role. REPORTED to
+OPTIONS_READY tells controllers that options are ready, OPTIONS_READY to SUBMITTED tells
+approvers a plan is waiting, and SUBMITTED back to OPTIONS_READY tells controllers the plan
+was rejected, withdrawn or went stale. Alerts go to an SNS topic tagged with the role, and
+an address receives only the one role it was subscribed to. Only an admin can add or remove
+addresses (MCP tools), and AWS asks each address to confirm before anything is delivered.
+At most five addresses can be added a day and twenty held, so a public demo cannot be used
+to send mail to strangers. A failed alert is retried from that record.
+
+#### Team alerts
+
+When a disruption is analysed (REPORTED to OPTIONS_READY), each operational team its
+analysis names gets one email with every notice for it (see [Who is told](#who-is-told)).
+An admin subscribes addresses to a team exactly as to a role; the SNS filter is the team's
+name.
+
+#### Severity
+
+`crewops.analysis.severity` rates each disruption high, medium or low, with the reasons. It
+works from the stored analysis when the disruption is read, so older disruptions are rated
+too. Hard factors make it high: no legal cover, cancel or fly short recommended, an
+unfilled joint seat, a duty-limit breach. Softer ones make it medium: cover only from
+outside today's reserves, flying within a day, 300 or more passengers, three or more seats,
+late departures. Three soft factors together make it high. The speaker, Alexa and desktop
+alerts say the severity first.
+
+#### Escalation
+
+When a change leaves a disruption waiting on a desk (REPORTED or SUBMITTED to
+OPTIONS_READY), the notifier creates a one-time EventBridge Scheduler schedule (`at(...)`,
+deleted after it runs) for `CREWOPS_ESCALATE_AFTER_MINUTES` later (10). The escalation
+Lambda it runs looks again. If the disruption is still OPTIONS_READY with no audit event
+since the clock started, nobody has touched it, so the Lambda emails the `duty_supervisor`
+audience and writes an ESCALATED audit event, which the speakers announce. Anything else (a
+plan submitted, the disruption closed, an earlier escalation) means it was handled, and the
+Lambda does nothing. No timer exists while nothing happens. The scheduler's role may only
+invoke that one function, and the notifier may only create schedules named
+`<prefix>-esc-*`.
+
+#### Desktop alerts (web push)
+
+Controllers and approvers can turn them on per browser. The service worker's push
+subscription (endpoint and keys) is stored at `PUSH / <endpoint hash>`, owned by whoever
+last turned alerts on in that browser, so a shared desk computer never gets the previous
+person's alerts. Each person can have five browsers. Only endpoints of the browser push
+services are accepted, so the notifier never posts to an address a user made up.
+
+The notifier sends to the same people as the Alexa chime (the desk's controller, or every
+approver). Each message is encrypted for that browser (RFC 8291, aes128gcm) and signed with
+the app's VAPID key (RFC 8292, ES256), whose private half is a SecureString in Parameter
+Store. The message names the disruption and links to it, never a crew member. A browser the
+push service reports gone, or refuses because the keys were replaced, is forgotten; signing
+out unsubscribes the browser. The notifier sends side by side and gives up after 20 s, so a
+slow push service cannot run it out of time. Encryption needs the cryptography library, so
+the notifier runs the MCP server's package when it is built. Without it, the notifier runs
+the plain source and desktop alerts stay off.
+
+#### What alerts carry
 
 Events and alerts carry the disruption id, its report type and the statuses; team alerts
 also carry the flights, gates, stations and times the team acts on. None carries a crew
-member's name or id. Accounts still hold no email address: an alert address belongs to a
-role or a team, not to a person's login. A crew member is told in CrewOps itself: a lapsing
-certificate shows as a notice on their own page.
+member's name or id. Accounts still hold no email address, because an alert address belongs
+to a role or a team, not to a person's login. A crew member is told in CrewOps itself, where
+a lapsing certificate shows as a notice on their own page.
 
 ### Spoken alerts: the desk speaker, "welcome back" and Alexa
 
 An alert is a disruption's latest audit event (reported, analysed, submitted, sent back,
 approved, closed) in one or two sentences built from the stored analysis, with ids, dates
-and amounts written for a voice (`crewops.alerts`). Three listeners use the same alerts:
+and amounts written for a voice (`crewops.alerts`). Three listeners use the same alerts.
 
-- **The desk speaker** (`/speaker`), a device rather than a person: its own Cognito account,
-  with a random password of its own, holds the speaker role. Of the data tools it can call
-  only `speaker_feed`; it cannot read records, ask questions or change anything. The web
-  app's server keeps that sign-in, so no user's sign-in or sign-out touches it. A speaker
-  serves one desk, approvals, or the whole room. A hosted (production) app hears alerts only
-  on screens paired once with a code, through a cookie signed with a server-side secret;
-  request headers are never trusted for this. The feed reads every open disruption and only
-  the latest resolved ones, and one read serves all screens for a few seconds. It chimes and
-  turns amber for an unheard alert, announces it, and repeats it up to three times in all,
-  15 s after each announcement ends, until the disruption leaves the desk's list or someone
-  acknowledges it; alerts take turns, oldest first. A report the analysis could not handle has no desk yet, so only the
-  whole-room speaker announces it.
-- **"Welcome back"**: fetched once per sign-in, it lists, and can read, what reached a
-  controller's desk or approvals since they last had CrewOps open (`USER#name / LAST_SEEN`,
-  refreshed every few minutes by an open, visible console).
-- **The Alexa skill**: linked through Cognito account linking (a second app client, the
-  authorization-code flow, Alexa's redirect URLs), so the skill acts as the person with their
-  role's access. Its HTTPS endpoint verifies every request as Alexa's; a certificate URL
-  with a query is refused and only a few chains are cached, so the public URL cannot be used
-  to make it fetch at will. When a disruption is
-  analysed or sent back to a desk, or a plan waits for approval, the notifier sends an
-  `AMAZON.MessageAlert.Activated` event to each linked person who allowed notifications, at
-  their account's Alexa API endpoint, with the skill's Login with Amazon credentials from
-  Parameter Store. Whose Echo chimes follows each person's current profile (role and desk),
-  not what they were when they last spoke to the skill. A notification cannot carry words,
-  so the notifier also sends the skill a message (Skill Messaging API, LWA scope
-  `alexa:skill_messaging`) with the alert in words; the skill, woken by that verified
-  request, sets an Alexa reminder five seconds ahead with them (the Reminders API, with the
-  request's own access token), and the Echo reads it out. Without the reminders permission
-  Alexa refuses the reminder and only the chime remains. A failed notification is logged, not retried: the console and email carry
-  the same news. The notifier sends these itself because a stream should have no more than
-  two readers, and the analysis and the notifier already read it.
+The desk speaker (`/speaker`) is a device rather than a person. Its own Cognito account,
+with a random password of its own, holds the speaker role. Of the data tools it can call
+only `speaker_feed`; it cannot read records, ask questions or change anything. The web app's
+server keeps that sign-in, so no user's sign-in or sign-out touches it. A speaker serves one
+desk, approvals, or the whole room. A hosted (production) app hears alerts only on screens
+paired once with a code, through a cookie signed with a server-side secret; request headers
+are never trusted for this. The feed reads every open disruption and only the latest
+resolved ones, and one read serves all screens for a few seconds. The speaker chimes and
+turns amber for an unheard alert, announces it, and repeats it up to three times in all,
+15 s after each announcement ends, until the disruption leaves the desk's list or someone
+acknowledges it. Alerts take turns, oldest first. A report the analysis could not handle has
+no desk yet, so only the whole-room speaker announces it.
+
+"Welcome back" is fetched once per sign-in. It lists, and can read, what reached a
+controller's desk or approvals since they last had CrewOps open (`USER#name / LAST_SEEN`,
+refreshed every few minutes by an open, visible console).
+
+The Alexa skill is linked through Cognito account linking (a second app client, the
+authorization-code flow, Alexa's redirect URLs), so it acts as the person with their role's
+access. Its HTTPS endpoint verifies every request as Alexa's. A certificate URL with a query
+is refused and only a few chains are cached, so the public URL cannot be used to make it
+fetch at will. When a disruption is analysed or sent back to a desk, or a plan waits for
+approval, the notifier sends an `AMAZON.MessageAlert.Activated` event to each linked person
+who allowed notifications, at their account's Alexa API endpoint, with the skill's Login
+with Amazon credentials from Parameter Store. Whose Echo chimes follows each person's
+current profile (role and desk), not what they were when they last spoke to the skill.
+
+A notification cannot carry words, so the notifier also sends the skill a message (Skill
+Messaging API, LWA scope `alexa:skill_messaging`) with the alert in words. The skill, woken
+by that verified request, sets an Alexa reminder five seconds ahead with those words (the
+Reminders API, with the request's own access token), and the Echo reads it out. Without the
+reminders permission Alexa refuses the reminder and only the chime remains. A failed
+notification is logged, not retried, since the console and email carry the same news. The
+notifier sends these itself because a stream should have no more than two readers, and the
+analysis and the notifier already read it.
 
 ## Disruption analysis
 
@@ -312,11 +340,11 @@ Every report becomes a decision-ready analysis, computed by the engine with no m
 
 Each analysis also says how the disruption gets resolved, in one sentence on its record:
 
-- **Re-crew:** some seat has legal cover; a controller submits a plan and a different
+- Re-crew: some seat has legal cover; a controller submits a plan and a different
   approver approves it.
-- **Decision:** no legal cover, or a duty day too long for anyone; crew control decides with
+- Decision: no legal cover, or a duty day too long for anyone; crew control decides with
   operations (delay, swap or cancel) and closes it saying what was done.
-- **Handled internally:** nothing to re-crew (a gate closure re-gated, a delay every crew
+- Handled internally: nothing to re-crew (a gate closure re-gated, a delay every crew
   member absorbs). The desk's controller marks it resolved with a remark, which goes on the
   audit trail and to whoever reported it.
 
@@ -325,7 +353,7 @@ desk with the fewest open disruptions, then the fewest in all, then desk order. 
 aircraft. A controller on another desk may suggest cover for a seat; the suggestion goes on
 the record for the owning desk, which alone may submit a plan.
 
-A crew member taken ill part-way through a day may be reported from a time: flights that
+A crew member taken ill part-way through a day may be reported from a time. Flights that
 left before it stay with them, and the cover joins at the next departure, positioned there
 if based elsewhere.
 
@@ -348,10 +376,10 @@ address follows a team, not a team at one station), and the reason a reporter ty
 gate or station closure goes into the emails as written.
 
 A trip that has already started is reported as such rather than re-crewed. Crew taken out by
-other open disruptions (reported unavailable, or a reported certificate lapse) are excluded on
-the dates those reports cover, so two disruptions never recommend the same absent person. Covering only the
-trailing legs of a delayed day with a fresh crew (a split duty) is not costed yet; the analysis
-names the legs and the cancellation cost instead.
+other open disruptions (reported unavailable, or a reported certificate lapse) are excluded
+on the dates those reports cover, so two disruptions never recommend the same absent
+person. Covering only the trailing legs of a delayed day with a fresh crew (a split duty)
+is not costed yet; the analysis names the legs and the cancellation cost instead.
 
 ## Search
 
@@ -369,9 +397,8 @@ with any document), it is dropped rather than allowed to cap the score.
 The blended score is relative within an index, so every hit also carries its absolute
 semantic similarity. The router requires a minimum similarity as well (the floor measured
 by `crewops.agent.calibrate`), so a question unlike anything indexed is not matched to the
-least-unlike example. Evaluations score
-paraphrased and held-out questions, not the indexed gold prompts, so routing accuracy is not
-inflated by questions matching themselves.
+least-unlike example. Evaluations score paraphrased and held-out questions, not the indexed
+gold prompts, so routing accuracy is not inflated by questions matching themselves.
 
 ## Tools
 
@@ -394,17 +421,17 @@ The advisor and the MCP server reach the operation through 17 tools in
 | `suggest_crew_ids`, `suggest_pairing_ids`, `suggest_flight_nos` | Real ids near a wrong one, for the user to choose from |
 | `list_controllers`, `controller_issue_counts`, `list_open_disruptions` | The three controller desks, open disruptions per desk, and the open disruptions themselves (on the asker's desk when asked), all from the live store |
 
-Three rules hold for every tool:
+No tool guesses. An id that does not exist returns the nearest real ones, and asks for
+confirmation when it looks like a typo (C-1024 for C-1042). A flight number without a date,
+or a crew member flying several pairings, returns a question naming the choices.
 
-- **Never guess.** An id that does not exist returns the nearest real ones, and asks for
-  confirmation when it looks like a typo (C-1024 for C-1042). A flight number without a date,
-  or a crew member flying several pairings, returns a question naming the choices.
-- **Never raise.** `dispatch` returns an error code and a message the model can act on, so a
-  failed call never ends the turn.
-- **Check the caller first.** Arguments are checked against each tool's JSON Schema, then the
-  caller's verified roles decide what may run. Crew may ask only about themselves. Reporters
-  see gates, rules and desks. Admins see desks, issue counts and rules, not crew records.
-  The model is shown only the tools its caller may use.
+No tool raises. `dispatch` returns an error code and a message the model can act on, so a
+failed call never ends the turn.
+
+The caller is checked first. Arguments are checked against each tool's JSON Schema, then
+the caller's verified roles decide what may run. Crew may ask only about themselves.
+Reporters see gates, rules and desks. Admins see desks, issue counts and rules, not crew
+records. The model is shown only the tools its caller may use.
 
 ## MCP server
 
@@ -436,9 +463,9 @@ streamable HTTP, a code package on Linux ARM64, billed per second while a sessio
   one id) is read with that question ("Which seat?" then "Captain"), and "he", "she",
   "that pairing" or "that flight" mean the one crew member, pairing or flight of the
   previous turn. "They" is never carried, nor "he" or "she" in a question about the asker,
-  about several people or about a plan's decision. A turn older than 15 minutes
-  lends nothing, carried ids pass the same role checks as typed ones, and a memory failure
-  only means the question stands on its own. What is waiting for whom is always read from
+  about several people or about a plan's decision. A turn older than 15 minutes lends
+  nothing, carried ids pass the same role checks as typed ones, and a memory failure only
+  means the question stands on its own. What is waiting for whom is always read from
   the table, never from memory.
 - **Alert addresses.** Admins manage the email alert addresses with `alert_addresses`,
   `add_alert_address` and `remove_alert_address` (see [Notifications](#notifications)).
@@ -449,8 +476,8 @@ streamable HTTP, a code package on Linux ARM64, billed per second while a sessio
   needs a reason, rewrites the rule's sentence, and is audited; the engine uses it the next
   time it loads the operation, within a minute. A disruption's stored options keep the rules
   they were analysed under until it is analysed again; approval always re-checks against the
-  rules as they are then. `activity_log` lists the latest audit
-  events across the system for admins.
+  rules as they are then. `activity_log` lists the latest audit events across the system for
+  admins.
 - **Views for the web app.** `whoami` (who is signed in), `disruptions` (the desk's
   chronological feed), `my_roster` (a crew member's own pairings and duty clock), and
   `show_disruption`, which includes each seat's ranked options from the analysis, the desks
@@ -492,9 +519,17 @@ the signed-in user, so every role rule stays in one place.
 - **Conversations.** Each assistant session has its own conversation id, so short replies
   and "she" are read with the question before.
 - **Reporting.** Reporters record any of the eight disruption types on one page (a
-  controller or approver who hears of one first can still report it through Alexa+), picking crew, flights, gates and stations from the operation
-  (`report_reference`), and follow their own reports (`my_reports`): how each stands, and
-  for one handled internally, what was done.
+  controller or approver who hears of one first can still report it through Alexa+),
+  picking crew, flights, gates and stations from the operation (`report_reference`). They
+  follow their own reports (`my_reports`): how each stands and, for one handled internally,
+  what was done.
+
+## Fire TV wall display
+
+The ops-room wall display (`tv/`) is a React Native app for Vega OS. Every 10 seconds it
+reads the web app's `/api/tv/board`, which calls the MCP server's `ops_board` tool as the
+speaker device, so nobody signs in on the TV. A hosted web app answers only a paired
+screen. Building and running it is in [tv/README.md](../tv/README.md).
 
 ## Flows
 
@@ -551,8 +586,7 @@ Friday" in a question means the next one from today. Reports cover today to 60 d
 
 One DynamoDB table holds the whole operation: crew, certifications, duty clocks, reserves,
 flights (with passengers booked), pairings, gates, configuration, team contacts,
-disruptions, plans and audit events. Each item has a
-partition and sort key, and two overloaded secondary indexes serve the lookups a key cannot,
+disruptions, plans and audit events. Each item has a partition and sort key, and two overloaded secondary indexes serve the lookups a key cannot,
 such as flights by date or plans awaiting approval. The full key layout is documented in
 `src/crewops/store/schema.py`, which both the CDK stack and the data-access code import.
 
@@ -617,17 +651,18 @@ withdrawn or stale plan sends the disruption back to OPTIONS_READY for a new pla
 A disruption belongs to the desk it was assigned when analysed, and only that desk's
 controller may plan it. A seat is a pairing, a role and the crew member being replaced; each
 chosen cover must be a legal option when submitted, or, after a warning, cancelling the trip
-or operating one cabin crew short where the analysis offered it, and the default is the analysis's
-recommendation (its joint plan when several seats compete). Cancelling a seat cancels its
+or operating one cabin crew short where the analysis offered it. The default is the
+analysis's recommendation (its joint plan when several seats compete). Cancelling a seat cancels its
 whole trip: every seat of that trip in the plan is cancelled, the cost is counted once, and
 approval releases the trip's whole crew, so no aircraft is left with one pilot. From then on
 its flights are cancelled everywhere: nobody positions on them, they hold no gate, lookups
 mark them cancelled, and the trip has nothing to re-crew. Flying one cabin crew short is
 refused if the trip would fall below one cabin crew per 50 seats, counting the whole plan
 and everyone on the trip reported unavailable (except someone who fell ill only after its
-last leg), at submission and again at approval. A seat with no legal crew may still be cancelled or flown short; one that
-is neither, or already started, is listed in the plan as uncovered and must be acknowledged;
-a disruption with nothing coverable is closed with a reason instead.
+last leg), at submission and again at approval. A seat with no legal crew may still be
+cancelled or flown short. One that is neither, or has already started, is listed in the
+plan as uncovered and must be acknowledged. A disruption with nothing coverable is closed
+with a reason instead.
 
 Each crew member a commit moves has a roster version that the commit bumps, conditioned on
 the version read before the re-check; storing a report that takes someone out bumps it too.
@@ -641,14 +676,15 @@ a pairing can overwrite a committed change (uploads are an admin action).
 Rules enforced in code (`crewops.plans`, which the MCP server calls with the signed-in
 caller):
 
-- **Four eyes.** The approver must be a different person from the submitter.
-- **Re-check at approval.** Legality and crew availability are evaluated again when the plan is
-  approved. If anything changed since submission, the plan becomes STALE instead of committing.
-- **Agents never decide.** The advisor and the disruption analysis only prepare options. Submit,
+- Four eyes: the approver must be a different person from the submitter.
+- Re-check at approval: legality and crew availability are evaluated again when the plan is
+  approved. If anything changed since submission, the plan becomes STALE instead of
+  committing.
+- Agents never decide. The advisor and the disruption analysis only prepare options. Submit,
   approve and reject require a signed-in person with the right role.
-- **Admins configure, they do not operate.** Admin and super admin cannot submit or approve
+- Admins configure; they do not operate. Admin and super admin cannot submit or approve
   plans unless they also hold that role. Every role change is audited.
-- **Everything is logged.** Each transition records who, when, which plan, and why.
+- Each transition is logged with who, when, which plan and why.
 
 ## Demo flow
 

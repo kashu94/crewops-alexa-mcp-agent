@@ -112,7 +112,7 @@ with their hands full, but proactive voice alerts need a simpler, supported path
 **Used for.** Evaluated as the way to bring the CrewOps MCP server into Alexa+ directly.
 
 **What worked well.** The direction (bring your own MCP server, discovered as tools) is
-exactly what a business agent needs.
+what a business agent needs.
 
 **What needs work.** The integration is in Preview, needs OAuth 2.1 with PKCE and a
 protected-resource metadata document rather than an authorizer-protected server, asks for
@@ -201,9 +201,9 @@ disruptions, notify (console, email, Alexa, desktop alerts) and escalate; SNS ca
 admin-managed email alerts filtered by role; one-time EventBridge schedules check whether
 a disruption was left untouched; Parameter Store holds the Alexa credentials and push keys.
 
-**What worked well.** One-time schedules that delete themselves are a perfect fit for
+**What worked well.** One-time schedules that delete themselves are a good fit for
 "check again in 10 minutes", with no timer running while nothing happens. SNS filter
-policies made per-role alerts trivial.
+policies made per-role alerts simple.
 
 **What needs work.** The Lambda Python runtime has no cryptography library (FL-213); a
 function's logs can live outside `/aws/lambda/<name>` with no hint from the CLI (FL-195);

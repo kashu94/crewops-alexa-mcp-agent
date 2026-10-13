@@ -1,15 +1,15 @@
 """Controller desks: who plans which disruption.
 
-Three controllers share the operation. Each new disruption goes to the controller with the
-fewest open disruptions when it is analysed (ties: the one given fewest overall, then desk
-order), so the load evens out and no reporter ever chooses. Any desk can read and suggest
-on every disruption; only the owning desk plans it. Cover is still checked across desks:
-two disruptions on different desks can want the same reserve crew member.
+Three controllers share the operation. A new disruption goes to whoever has the fewest
+open ones when it's analysed (ties go to fewest overall, then desk order), so load evens
+out and the reporter never picks. Any desk can read and suggest on any disruption, but only
+the owning desk plans it. Cover is still checked across desks, because two disruptions on
+different desks can want the same reserve.
 
-Disruptions analysed before desks were assigned keep the old rule: the desk watching the
-aircraft they touch (``Desk.aircraft``).
+Disruptions analysed before desks were assigned fall back to the desk watching the aircraft
+they touch (``Desk.aircraft``).
 
-Controllers dispatch; none of them fly. Their names are not on the crew roster.
+Controllers don't fly; their names aren't on the crew roster.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def desk(desk_id: str | None) -> Desk | None:
 
 
 def assign_desk(open_counts: Mapping[str, int], totals: Mapping[str, int]) -> Desk:
-    """The desk a new disruption goes to: fewest open, then fewest overall, then desk order."""
+    """Fewest open, then fewest overall, then desk order."""
     return min(
         DESKS,
         key=lambda d: (open_counts.get(d.desk_id, 0), totals.get(d.desk_id, 0), d.desk_id),
@@ -53,8 +53,8 @@ def assign_desk(open_counts: Mapping[str, int], totals: Mapping[str, int]) -> De
 def owning_desks(
     analysis: Mapping[str, Any], aircraft_of_pairing: Callable[[str], str | None]
 ) -> list[Desk]:
-    """Who plans a disruption: its assigned desk; for one analysed before desks were
-    assigned, the desks watching the aircraft it touches."""
+    """The assigned desk, or for older analyses without one, the desks watching the aircraft
+    it touches."""
     assigned = desk(analysis.get("desk"))
     if assigned is not None:
         return [assigned]

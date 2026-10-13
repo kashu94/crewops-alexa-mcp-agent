@@ -1,19 +1,16 @@
 """Gates and stands: where each departure boards when a gate closes or a flight runs late.
 
-A gate is held for a departure from boarding start (or from the aircraft's arrival, when it
-parks overnight) until it leaves (``GateSlot``). Two things take a gate away from a flight:
+A ``GateSlot`` holds a gate from boarding start (or from the aircraft's arrival when it
+parks overnight) until departure. A flight loses its gate in two ways. The gate closes (jet
+bridge fault, security sweep), and every departure holding it during the closure moves to a
+gate at the same station that is free for its whole slot. Or the flight before it at that
+gate leaves late and is still there when boarding should start, so the next one moves.
 
-* the gate closes (a jet bridge fault, a security sweep): every departure holding it in the
-  closure moves to a gate at the same station that is free for its whole slot;
-* the flight before it at that gate leaves late, and still holds the gate when the next
-  one should start boarding: the next one moves instead.
-
-When no ordinary gate is free, the station's emergency gate takes it: each station keeps
-one or two gates back for exactly this (``emergency_gates.json``). Only when those are taken
-too does the flight board from a remote stand, with passengers taken out by
-bus, which takes ``REMOTE_BOARDING`` longer. That small delay is then checked against the
-crew's duty like any other. Pure and deterministic: gates are tried in order, and each
-move is counted before the next is placed.
+If no ordinary gate is free it gets the station's emergency gate; each station keeps one or
+two back for this (``emergency_gates.json``). Only when those are taken too does it board
+from a remote stand by bus, which takes ``REMOTE_BOARDING`` longer, and that delay is checked
+against crew duty like any other. Deterministic: gates are tried in order and each move is
+booked before the next is placed.
 """
 
 from __future__ import annotations
@@ -28,8 +25,8 @@ REMOTE_STAND = "remote stand"
 REMOTE_BOARDING = timedelta(minutes=15)
 """Bus boarding from a remote stand takes this much longer than boarding at a gate."""
 NEXT_WITHIN = timedelta(hours=3)
-"""The next departure at a late flight's gate is told when it boards within this long of
-the late one leaving; later ones are not affected."""
+"""The next departure at a late flight's gate is only told if it boards within this long of
+the late one leaving."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,14 +197,13 @@ class NextAtGate:
 def late_departures(
     board: GateBoard, late: list[tuple[str, timedelta]]
 ) -> tuple[list[StandMove], list[NextAtGate]]:
-    """Each late departure keeps its gate until it leaves. The next departure due at each of
-    those gates is named (its gate agent and passengers are told), and moved when the gate
-    is still taken when it should start boarding.
+    """Each late departure keeps its gate until it leaves. The next departure due at that
+    gate is named (its gate agent and passengers get told) and moved if the gate is still
+    taken when it should start boarding.
 
-    Departures that are late themselves (the same aircraft's later legs, or other flights
-    in the same disruption) board later too, so they clash only by their own late times,
-    and move with their own late departure. A departure moved once is then held at its new
-    gate, and is never moved onto the gate it is already at."""
+    Departures that are late themselves (the same aircraft's later legs, other flights in the
+    same disruption) board later too, so they clash only on their own late times. Once moved,
+    a departure is held at its new gate and never moved onto the gate it is already at."""
     delay_of = dict(late)
     gate_of: dict[str, str] = {}  # where each moved departure now boards
     moves: list[StandMove] = []

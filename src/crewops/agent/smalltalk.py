@@ -1,9 +1,9 @@
 """Greetings, thanks and "who am I": answered from the sign-in, before any routing.
 
-These are not crew-control questions, so no tool runs and no roster fact is stated
-except the caller's own identity, which comes from their verified sign-in (and, for crew,
-their own crew record). Without this, "hello" reads as a lookup with nothing to look up,
-and "what is my name" can be routed by similarity to a question about certificates.
+Not crew-control questions, so no tool runs. The only roster fact stated is the caller's
+own identity, taken from their verified sign-in (and their crew record, for crew). Without
+this, "hello" becomes a lookup with nothing to look up, and "what is my name" can match a
+certificates question by similarity.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ HELP = (
 
 
 def _bare(text: str) -> str:
-    """The utterance without fillers and punctuation, for whole-phrase matching."""
+    """Drop fillers and punctuation so the phrase regexes can match the whole thing."""
     out = _PUNCT.sub(" ", _FILLER.sub(" ", text))
     return re.sub(r"\s+", " ", out).strip()
 
@@ -57,7 +57,6 @@ def _name(caller: Caller, world: World) -> str | None:
 
 
 def who(caller: Caller, world: World) -> str:
-    """The caller as their sign-in says, in one sentence."""
     roles = ", ".join(sorted(r.value.replace("_", " ") for r in caller.roles))
     if caller.crew_id:
         crew = world.crew.get(caller.crew_id)
@@ -76,7 +75,7 @@ def who(caller: Caller, world: World) -> str:
 
 
 def small_talk(question: str, caller: Caller, world: World) -> str | None:
-    """The reply to a greeting, thanks, goodbye or "who am I", or None for anything else."""
+    """Reply to a greeting, thanks, goodbye or "who am I". None for anything else."""
     bare = _bare(question)
     if IDENTITY_RE.search(question):
         return who(caller, world)

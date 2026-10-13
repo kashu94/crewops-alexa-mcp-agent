@@ -1,1 +1,1 @@
-"""Getting data into the system: the seed week, roster uploads, and later live reports."""
+"""Seed loading, roster uploads and the live report worker."""

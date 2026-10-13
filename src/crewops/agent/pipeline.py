@@ -55,19 +55,19 @@ ABOUT_A_CREW_MEMBER = frozenset(
         Intent.CHECK_LEGALITY,
     }
 )
-"""Questions about one crew member's own records: "my" means the asker only for crew."""
+"""Questions about one crew member's records. "My" only means the asker when they're crew."""
 
 ToolRunner = Callable[[str, dict[str, Any]], TraceEntry]
 """(tool name, arguments) -> the recorded call, run for the signed-in caller."""
 Drafter = Callable[[str, Route, list[TraceEntry], ToolRunner, frozenset[str]], str]
 """(question, route, trace so far, run a tool, tools the caller may use) -> draft answer.
-The model advisor plugs in here. Its only way to a tool is the runner it is given, so every
-call it makes goes through the caller's role checks and lands in the trace the draft is
-verified against. An empty draft means "no answer": the template is used."""
+The model advisor plugs in here. It can only reach tools through the runner it's given, so
+every call goes through the caller's role checks and lands in the trace the draft is
+verified against. An empty draft means no answer and the template is used."""
 Polisher = Callable[[str, str], str]
-"""(question, verified answer) -> the same answer reworded for speech. Verified again."""
+"""(question, verified answer) -> the same answer reworded for speech, then re-verified."""
 Screen = Callable[[str], str | None]
-"""text -> the message to give instead when it is blocked, or None when it passes."""
+"""text -> replacement message if blocked, None if it passes."""
 
 
 @dataclass(slots=True)
@@ -85,7 +85,7 @@ class Answer:
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        """What leaves the process: personal data removed from everything, at any depth."""
+        """Everything that leaves the process goes through ``redact``."""
         return redact(
             {
                 "question": self.question,
@@ -124,14 +124,14 @@ class Pipeline:
 
     @classmethod
     def offline(cls, tools: CrewOpsTools, examples: Mapping[str, str]) -> Pipeline:
-        """Rules and templates only: no embeddings, no model calls."""
+        """Rules and templates only. No embeddings, no model calls."""
         return cls(tools, Router(Vocabulary.from_world(tools.world), examples))
 
     def answer(self, question: str, caller: Caller, previous: Turn | None = None) -> Answer:
-        """``previous``: the caller's last turn in this conversation, already checked to be
-        recent. It can only fill in what this question leaves out (see ``agent.context``)."""
+        """``previous`` is the caller's last turn in this conversation, already checked to be
+        recent. It only fills in what this question leaves out (see ``agent.context``)."""
         started = time.monotonic()
-        # Voice input writes "C-3231" as "see 3231": read ids in the form they are written.
+        # voice input gives "see 3231" for C-3231
         question = spoken_ids((question or "").strip())
         if not question:
             return Answer(
@@ -145,8 +145,7 @@ class Pipeline:
                 source="refused",
             )
 
-        # A plain override attempt is refused before any model or guardrail call, and the
-        # refusal is logged by the API (crewops.agent.injection).
+        # Refused before any model or guardrail call. The API logs the refusal.
         if attempt := injection.detect(question):
             return Answer(
                 question,
@@ -168,8 +167,8 @@ class Pipeline:
                         notes=["blocked: guardrail (prompt attack or denied topic)"],
                     )
             except Exception as exc:
-                # Fail open: the verifier, role checks and redaction still stand, and an
-                # unreachable screening service must not take the desk offline.
+                # Fail open. Verifier, role checks and redaction still apply, and a screening
+                # outage shouldn't take the desk offline.
                 log.exception("question screening failed")
                 screening_note = f"question screening unavailable ({type(exc).__name__})"
 
@@ -191,7 +190,7 @@ class Pipeline:
             and not route.entities.names
             and FIRST_PERSON_RE.search(question)
         ):
-            # "my duty hours", "am I legal for P-2291": the signed-in crew member themselves.
+            # "my duty hours", "am I legal for P-2291"
             route.entities.crew_ids.append(caller.crew_id)
             route.notes.append(f"'I' and 'my' read as the signed-in crew member, {caller.crew_id}")
         elif (
@@ -202,8 +201,8 @@ class Pipeline:
             and not route.entities.pairing_ids
             and FIRST_PERSON_RE.search(question)
         ):
-            # "is my certification valid?" from a controller: they are not on the roster,
-            # so there is nothing of theirs to look up, and listing everyone's is wrong.
+            # A controller asking "is my certification valid?" isn't on the roster. Listing
+            # everyone's instead would be wrong.
             return Answer(
                 question,
                 "You're not on the crew roster, so you hold no certificates, duty hours or "
@@ -229,7 +228,6 @@ class Pipeline:
                 if call.name == "suggest_crew_ids":
                     call.args["prefer"] = list(previous.crew_ids[:3])
         if caller.desk and MY_DESK_RE.search(question):
-            # "on my desk": the signed-in controller's desk, from their sign-in.
             for call in planned:
                 if call.name == "list_open_disruptions":
                     call.args["desk"] = caller.desk
@@ -240,12 +238,12 @@ class Pipeline:
                 break
             trace += self._run(more, caller, allowed, notes)
 
-        # The model is consulted only when the planned calls produced nothing usable. When
-        # they did, the template says exactly what they returned, and nothing a model could
-        # add (a conclusion with no id or number in it) can slip past the verifier.
+        # Only ask the model when the planned calls produced nothing usable. Otherwise the
+        # template says exactly what they returned, and a model's extra conclusion (no id or
+        # number in it) could slip past the verifier.
         wants_model = not any(e.ok for e in trace)
         if not trace and (seat := self._which_seat(route)):
-            # Which seat is the asker's to say: a model must never pick one for them.
+            # the asker says which seat, never a model
             return Answer(question, seat, route, source="clarify", awaiting="detail", notes=notes)
         if self.drafter is not None and allowed and wants_model:
 
@@ -267,7 +265,7 @@ class Pipeline:
                 elif checked.ok:
                     notes.append("model draft stated no sourced fact; not used")
                 else:
-                    # The unsourced values go to the log only: they may be anything.
+                    # unsourced values only go to the log, they could be anything
                     log.info("model draft rejected: %s", checked.summary())
                     kinds = sorted({c.kind for c in checked.unsupported})
                     notes.append(
@@ -294,7 +292,7 @@ class Pipeline:
 
         text = render(trace)
         checked = verify(text, trace)
-        if not checked.ok:  # a template bug: still say only what the tools said, and log it
+        if not checked.ok:  # template bug; still only says what the tools said
             log.error("template failed verification: %s", checked.summary())
             notes.append(checked.summary())
         elif (
@@ -303,8 +301,8 @@ class Pipeline:
             and all(e.ok for e in trace)
             and time.monotonic() - started < self.budget_seconds / 2
         ):
-            # Only judgement answers are reworded: they read worst as templates. Lookups are
-            # lists, already plain. Skipped when half the time budget is gone.
+            # Only judgement answers get reworded since they read worst as templates. Lookups
+            # are plain lists already. Skip if half the budget is gone.
             try:
                 spoken = self.polisher(question, text)
                 again = verify(spoken, trace)
@@ -361,8 +359,8 @@ class Pipeline:
 
     @staticmethod
     def _which_seat(route: Route) -> str | None:
-        """The question back when cover is asked for a pairing or flight without saying the
-        seat or who is out, or None."""
+        """Ask which seat when cover is wanted for a pairing or flight but neither the seat
+        nor who is out was given."""
         ents = route.entities
         if route.intent not in (Intent.FIND_REPLACEMENT, Intent.RANK_OPTIONS):
             return None
@@ -375,7 +373,7 @@ class Pipeline:
         )
 
     def _nothing_ran(self, route: Route, planned: list[ToolCall], allowed: frozenset[str]) -> str:
-        """Why nothing was checked: never an empty answer, which would sound like "all clear"."""
+        """Never return empty here. Silence would sound like "all clear"."""
         if planned and not allowed & {c.name for c in planned}:
             return "Your role doesn't give access to that information."
         ents = route.entities

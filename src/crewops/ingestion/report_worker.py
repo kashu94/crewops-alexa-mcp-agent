@@ -1,20 +1,18 @@
-"""Lambda handler: live reports arriving on the SQS ingest queue.
+"""Lambda handler for live reports on the SQS ingest queue.
 
-For each message:
+Per message:
 
-1. parse and validate the report (``crewops.domain.reports``);
-2. if its id is already stored: the same content is a duplicate delivery (done), different
-   content is an id conflict (rejected);
-3. check its time is not in the future, and that the roles it states may file it;
-4. check every id it names exists in the operation, so nothing is guessed;
-5. store it as a REPORTED disruption, exactly once.
+1. parse and validate (``crewops.domain.reports``)
+2. if the id is already stored, identical content is a duplicate delivery and we're done,
+   different content is an id clash and gets rejected
+3. timestamp not in the future, and the stated roles are allowed to file it
+4. every id it references exists, so nothing is guessed later
+5. store as a REPORTED disruption, exactly once
 
-A report refused at any step would be refused the same way on every retry, so it is
-recorded as a rejection and the message is consumed. Rejection records are bounded in size
-and keyed safely, so recording one cannot itself fail on bad input. Only unexpected
-failures (DynamoDB unavailable, for example) are returned as batch item failures: SQS
-redelivers just those messages, and after the queue's maximum receive count they move to
-the dead-letter queue.
+A refused report would be refused the same way on every retry, so we record the rejection
+and consume the message. Rejection records are size-capped and safely keyed so writing one
+can't itself blow up on garbage input. Only unexpected errors (DynamoDB down, say) become
+batch item failures. SQS redelivers those, and after maxReceiveCount they go to the DLQ.
 """
 
 from __future__ import annotations
@@ -70,7 +68,7 @@ def _exists(table: Any, pk: str, sk: str) -> bool:
 
 
 def check_references(table: Any, report: Report) -> str | None:
-    """None if every id the report names exists, otherwise what is missing."""
+    """None if all referenced ids exist, else a reason naming the missing one."""
     d = report.details
     kind = report.report_type
     for crew_id in crew_out_of(kind, d):
@@ -102,7 +100,7 @@ def check_references(table: Any, report: Report) -> str | None:
 
 
 def handle_message(table: Any, body: str, received: datetime, message_id: str = "local") -> Outcome:
-    """Decide and store one message. Raises only for unexpected (retryable) failures."""
+    """Raises only for unexpected, retryable failures. Bad input becomes a rejection."""
 
     def reject(report_id: str | None, reason: str) -> Outcome:
         reason = reason[:MAX_STORED_REASON]
@@ -122,9 +120,8 @@ def handle_message(table: Any, body: str, received: datetime, message_id: str = 
     except DataError as exc:
         return reject(claimed_id, str(exc))
 
-    # A resend of a report already stored is answered from the stored copy, before any
-    # check whose outcome could have changed since (a crew member removed, say). An id
-    # reused for different content is refused rather than silently dropped.
+    # Check for a resend before the other checks. Their answer may have changed since the
+    # first delivery (crew member removed, say) and we want the same outcome both times.
     if existing := get_disruption(table, report.report_id):
         return _resend(existing, report, reject)
 
@@ -136,7 +133,7 @@ def handle_message(table: Any, body: str, received: datetime, message_id: str = 
 
     outcome = store_report(table, report, received)
     if outcome is StoreOutcome.DUPLICATE:
-        # Another delivery stored it between our read and our write.
+        # SQS delivered it twice and the other copy won the race
         return _resend(get_disruption(table, report.report_id) or {}, report, reject)
     log.info("report %s %s", report.report_id, outcome)
     return Outcome(str(outcome), report.report_id)

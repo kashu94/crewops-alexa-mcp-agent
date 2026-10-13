@@ -1,12 +1,11 @@
 """The seven legality rules.
 
-Each rule returns a ``RuleVerdict`` carrying the numbers behind it, never a bare boolean.
-"Exceeds 60h/7d by 1h20m" is something a controller can act on; "illegal" is not.
+Each rule returns a ``RuleVerdict`` with the numbers behind it rather than a bool, because
+"exceeds 60h/7d by 1h20m" is something a controller can act on and "illegal" isn't.
 
-Rules are pure functions of a ``CrewState`` and the duty days being checked, so they behave
-the same whichever store supplies the data and can be tested without one. Thresholds come
-from a ``RuleBook`` built from the rule parameters in the data, so an admin changing a limit
-changes behaviour without a code change.
+Rules only look at a ``CrewState`` and the duty days being checked, so they can be tested
+without a store. Thresholds come from a ``RuleBook`` built from the rule parameters in the
+data, which lets an admin change a limit without a code change.
 """
 
 from __future__ import annotations
@@ -58,11 +57,6 @@ def fail(rule_id: str, detail: str, **numbers: object) -> RuleVerdict:
     return RuleVerdict(rule_id, Verdict.FAIL, detail, **numbers)  # type: ignore[arg-type]
 
 
-# --------------------------------------------------------------------------
-# Thresholds
-# --------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class RuleBook:
     base_fdp_hours: float = 13.0
@@ -103,11 +97,6 @@ class RuleBook:
         )
 
 
-# --------------------------------------------------------------------------
-# What the rules know about a crew member
-# --------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class Duty:
     """A duty day already on someone's roster."""
@@ -143,12 +132,10 @@ class CrewState:
     def _per_day(
         self, history: Mapping[date, float], hours_of, exclude_pairing: str | None
     ) -> dict[date, float]:
-        """Hours per calendar day: recorded history and rostered duty, never both.
+        """Hours per calendar day from recorded history or rostered duty, never both.
 
-        The duty-clock history can stop short of a day the crew member is rostered on (the
-        snapshot day, for example, records 0 for a duty flown that morning). Taking the
-        larger of the two per day counts that duty once, whether or not the history
-        already includes it.
+        History can stop short of a rostered day (the snapshot day records 0 for a duty flown
+        that morning). Taking the larger of the two counts the duty once either way.
         """
         rostered: dict[date, float] = {}
         for d in self.duties:
@@ -167,11 +154,6 @@ class CrewState:
 
     def rostered_dates(self, exclude_pairing: str | None = None) -> set[date]:
         return {d.date for d in self.duties if d.pairing_id != exclude_pairing}
-
-
-# --------------------------------------------------------------------------
-# The rules
-# --------------------------------------------------------------------------
 
 
 def check_fdp(day: DutyDay, book: RuleBook) -> RuleVerdict:
@@ -196,11 +178,10 @@ def _worst_window(
     hours_of,
     exclude_pairing: str | None,
 ) -> tuple[float, date]:
-    """The largest total across every window the new duty can push over the limit.
+    """Largest total across every window the new duty can push over the limit.
 
-    That is the window ending on the duty date, plus each window ending on a later day the
-    crew member is already rostered for: adding a duty today can breach the limit on a
-    trip they fly in three days' time.
+    Not only the window ending on the duty date but also each one ending on a later rostered
+    day, since a duty added today can breach the limit on a trip three days out.
     """
     new_days = [*earlier, day]
     horizon = day.date + timedelta(days=window_days - 1)
@@ -240,8 +221,8 @@ def check_duty_window(
 ) -> RuleVerdict:
     """Duty hours in every calendar window the new duty falls into.
 
-    Earlier days of the *same* pairing count too: a two-day cover can be legal on each day
-    alone and still breach once day one sits inside day two's window.
+    Earlier days of the same pairing count too. A two-day cover can be legal on each day alone
+    and still breach once day one sits inside day two's window.
     """
     total, end = _worst_window(
         crew,
@@ -277,13 +258,10 @@ def check_flight_window(
 def check_rest(
     crew: CrewState, day: DutyDay, book: RuleBook, exclude_pairing: str | None = None
 ) -> RuleVerdict:
-    """Minimum rest before this duty *and* before whatever they are rostered for next.
-
-    Covering tonight's trip can strand tomorrow's departure, so the downstream side is
-    checked as carefully as the upstream one.
-    """
+    """Minimum rest before this duty and before whatever they're rostered for next, since
+    covering tonight's trip can strand tomorrow's departure."""
     minimum = book.min_rest_hours
-    # last_rest_ended is when rest *finished*: the earliest they may report again.
+    # last_rest_ended = earliest they may report again
     if crew.last_rest_ended is not None and day.report_utc < crew.last_rest_ended:
         short = hours_between(day.report_utc, crew.last_rest_ended)
         return fail(
@@ -295,8 +273,7 @@ def check_rest(
         )
 
     duties = [d for d in crew.duties if d.pairing_id != exclude_pairing]
-    # A clash is the decisive fact, so it is named before any short rest around it: flying
-    # two trips at once is impossible however the rest falls.
+    # report an overlap before any short rest around it; two trips at once is the real problem
     for duty in duties:
         if duty.report_utc < day.release_utc and day.report_utc < duty.release_utc:
             return fail(
@@ -341,8 +318,8 @@ def check_qualification(crew: CrewState, day: DutyDay) -> RuleVerdict:
 def check_certifications(crew: CrewState, day: DutyDay) -> RuleVerdict:
     """Every certification still valid on the duty date.
 
-    Expiry only. Start dates are not enforced: several licence records in the data carry a
-    ``valid_from`` years ahead, which would ground every pilot without being a real breach.
+    Only expiry is checked. Several licence records in the data have a ``valid_from`` years in
+    the future, and enforcing it would ground every pilot over a data quirk.
     """
     for cert_type, _valid_from, valid_to in crew.certs:
         if day.date > valid_to:
@@ -374,8 +351,8 @@ def evaluate(
 ) -> list[RuleVerdict]:
     """All rules against every day of a pairing.
 
-    Base applies to the first day only, because that is where the crew has to get to.
-    Later days start wherever the pairing overnighted.
+    Base only applies to day one, that's where the crew has to get to. Later days start
+    wherever the pairing overnighted.
     """
     verdicts: list[RuleVerdict] = []
     for i, day in enumerate(days):

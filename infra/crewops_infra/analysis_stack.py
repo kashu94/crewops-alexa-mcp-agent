@@ -53,7 +53,7 @@ class AnalysisStack(Stack):
             architecture=lambda_.Architecture.ARM_64,
             handler="crewops.analysis.stream_handler.handler",
             code=_code(),
-            # The whole operation is loaded and every candidate assessed: give it CPU.
+            # loads the whole operation and scores every candidate; memory buys CPU here
             memory_size=1024,
             timeout=ANALYSIS_TIMEOUT,
             environment={"CREWOPS_STAGE": settings.stage, "CREWOPS_REAL_TIME": "1"},

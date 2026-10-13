@@ -1,22 +1,21 @@
 """A fast first check for attempts to override the assistant's rules.
 
-The real defences are elsewhere and do not depend on this: the assistant has only
-read-only tools filtered by the caller's role, so no wording can make it submit, approve or
-change anything, and the Bedrock Guardrail screens every question for prompt attacks. This
-check runs before both. It catches the common override phrasings at once, without a model
-call, and still works while the model service is paused (``crewops.agent.breaker``), when
-the guardrail cannot be reached. Every refusal is recorded in the admin's activity log.
+The real defences don't depend on this. The assistant only has read-only tools filtered by
+the caller's role, so no wording can make it submit, approve or change anything, and the
+Bedrock Guardrail screens every question for prompt attacks. This runs before both. It
+catches the usual override phrasings without a model call, and keeps working while the
+model service is paused (``crewops.agent.breaker``) and the guardrail can't be reached.
+Every refusal goes in the admin's activity log.
 
-It is a pattern list, so it can be got round with new wording; that is why it is a first
-check, not the defence.
+It's a pattern list, so new wording gets round it. Treat it as a first check only.
 """
 
 from __future__ import annotations
 
 import re
 
-# An instruction aimed at the assistant: at the start of a sentence (or after "please" or
-# "now"), not a question about crew control that happens to use the same verbs.
+# Anchors an order to the start of a sentence (or after "please", "now"...), so a crew
+# control question that happens to use the same verbs doesn't match.
 _ORDER = r"(?:^|[.!?;]\s+|\b(?:please|now|then|and)\s+)"
 
 PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
@@ -24,7 +23,7 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     for name, rx in (
         (
             "ignore instructions",
-            # "ignore your/previous instructions", never "can we ignore the rest rule?".
+            # "ignore your/previous instructions", but not "can we ignore the rest rule?"
             r"\b(ignore|disregard|forget|override)\s+(all\s+)?(of\s+)?(your|previous|prior"
             r"|above|earlier)\s+(\w+\s+)?(instructions?|rules|prompts?|guidelines"
             r"|restrictions|guardrails?)\b",
@@ -65,7 +64,6 @@ REFUSAL = (
 
 
 def detect(text: str) -> str | None:
-    """The name of the first override pattern ``text`` matches, or None."""
     for name, pattern in PATTERNS:
         if pattern.search(text):
             return name

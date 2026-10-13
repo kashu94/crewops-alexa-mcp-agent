@@ -6,8 +6,8 @@ export function declaredTooLarge(request: Request, maxBytes: number): boolean {
   return !Number.isFinite(length) || length > maxBytes;
 }
 
-/** At most `max` uses per key in any `windowMs`. In memory, per server instance: a brake on
- * one signed-in user running up Polly charges, not a distributed quota. */
+/** At most `max` uses per key in any `windowMs`. In-memory and per instance, so it only stops
+ * one user running up Polly charges; it isn't a distributed quota. */
 export class RateLimit {
   private uses = new Map<string, number[]>();
 

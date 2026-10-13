@@ -46,8 +46,9 @@ export default function DisruptionPage() {
 
   useEffect(load, [load]);
 
-  // The recommendation per seat is the analysis's joint plan (one person never covers two
-  // seats), matched by trip and role in order as the server does; else the live top option.
+  // Recommended pick per seat comes from the analysis's joint plan, which never puts one
+  // person on two seats. Matched by trip and role in order, same as the server. Falls back to
+  // the live top option.
   const recommended = useMemo(() => {
     const joint: Record<string, { crew_id: string; name?: string }[]> = {};
     for (const a of (detail?.joint_plan?.assignments ?? []) as {
@@ -73,8 +74,8 @@ export default function DisruptionPage() {
     return out;
   }, [detail]);
 
-  // What Submit shows and sends. Only seats the controller changed are sent: the server
-  // falls back to the joint plan for the rest. A pick no longer in the live list is stale.
+  // Only seats the controller changed get sent; the server uses the joint plan for the rest.
+  // A pick that has dropped out of the live list is stale.
   const choices: Choice[] = useMemo(
     () =>
       (detail?.seats ?? []).flatMap((s): Choice[] => {
@@ -82,7 +83,7 @@ export default function DisruptionPage() {
         const rec = recommended[key];
         const mine = chosen[key];
         if (!rec) {
-          // No legal crew: the seat can only be cancelled or flown short, and only on purpose.
+          // no legal crew, so cancel or fly short, and only if the controller chose it
           if (s.status !== "no_legal_cover" || (mine !== CANCEL && mine !== SHORT)) return [];
           const label = mine === CANCEL ? "Cancel the flights" : "Operate one cabin crew short";
           return [
@@ -109,7 +110,7 @@ export default function DisruptionPage() {
   );
   useLiveListener(useCallback((e) => e.disruption_id === id && load(), [id, load]));
 
-  // Back to where this role works: approvers come here from their queue.
+  // approvers arrive from their queue, so send them back there
   const approverOnly =
     me.roles.includes("approver") && !me.roles.includes("controller") && !me.roles.includes("auditor");
   const back = (
@@ -226,8 +227,8 @@ export default function DisruptionPage() {
                       detail.status === "OPTIONS_READY" &&
                       (s.status === "options" || s.status === "no_legal_cover")
                         ? (crewId) => {
-                            // A seat the analysis found no legal crew for may only be
-                            // cancelled or flown short; the server refuses anything else.
+                            // no legal crew found: cancel or fly short only, the server
+                            // rejects anything else
                             if (s.status === "options" || crewId === CANCEL || crewId === SHORT)
                               setChosen((c) => ({ ...c, [seatKey(s)]: crewId }));
                           }

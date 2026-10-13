@@ -4,10 +4,9 @@ import { synthesize } from "@/lib/polly";
 import { claimsOf } from "@/lib/tokens";
 import { sameOrigin } from "@/lib/tools";
 
-const perUser = new RateLimit(30, 10 * 60 * 1000); // 30 answers spoken per 10 minutes
+const perUser = new RateLimit(30, 10 * 60 * 1000);
 
-/** Speaks an answer with Amazon Polly, for signed-in users only. Run locally, the server uses
- * the AWS profile in .env.local. */
+/** Polly for signed-in users only. Locally it picks up the AWS profile from .env.local. */
 export async function POST(request: Request) {
   if (!sameOrigin(request)) {
     return Response.json({ error: "Bad origin." }, { status: 403 });

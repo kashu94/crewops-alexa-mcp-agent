@@ -14,7 +14,7 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from crewops.domain.desks import DESKS, desks_for, owning_desks
+from crewops.domain.desks import DESKS, owning_desks
 from crewops.store import plans as plan_store
 from crewops.store.items import from_dynamo
 from crewops.store.reports import disruptions_with_status
@@ -34,15 +34,6 @@ def _rows(tools: Any, entity: str, filters: Mapping[str, Any]) -> list[dict[str,
         return tools.lookup(entity, dict(filters))["rows"]
     except Exception:  # an id the operation no longer has: show what is known
         return []
-
-
-def desks_of(tools: Any, pairing_ids: Iterable[str]) -> list[dict[str, str]]:
-    aircraft = {
-        p["aircraft"]
-        for pid in set(pairing_ids)
-        for p in _rows(tools, "pairings", {"pairing_id": pid})
-    }
-    return [{"desk_id": d.desk_id, "controller": d.controller} for d in desks_for(aircraft)]
 
 
 def desks_of_disruption(
@@ -303,10 +294,10 @@ LIVE_OPTION_KEYS = (
 
 
 def re_crewed(tools: Any, seat: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Whether this seat was filled since the analysis, by an approved plan for this or
-    another disruption (the same person out on another day of the same trip): the person
-    out no longer holds it. Then it needs no cover, and offering options would mislead.
-    Says who holds the seat now, or that the trip was cancelled. None while it is open."""
+    """Who holds the seat now, if an approved plan filled it after the analysis (often a
+    plan for the same person out on another day of the trip), or that the trip was
+    cancelled. None while the person out still holds it. A filled seat needs no cover, and
+    listing options for it would mislead the desk."""
     pairing = tools.world.pairings.get(seat.get("pairing_id"))
     out, role = seat.get("crew_out"), seat.get("role")
     if pairing is None or not out or not role:
@@ -326,10 +317,9 @@ def re_crewed(tools: Any, seat: Mapping[str, Any]) -> dict[str, Any] | None:
 
 
 def live_options(tools: Any, seat: Mapping[str, Any]) -> dict[str, Any] | None:
-    """The engine's option search for a seat as things stand now (current rules and
-    roster): every legal option, the picks by policy, the best of each strategy, the
-    candidate funnel and every excluded candidate with its reason. Approval re-checks the
-    chosen option against the same."""
+    """The option search for a seat against today's rules and roster, which is what
+    approval re-checks against. None when the trip has started or been cancelled, or the
+    search fails."""
     if seat.get("status") in ("already_started", "cancelled"):
         return None
     try:
@@ -386,9 +376,9 @@ def contention(
     """For each crew id, the other open disruptions that rank them as an option, and the
     submitted plans that already use them, each with its desk. ``wants`` pairs each seat's
     option crew with that seat's dates, so a person is flagged only against trips on the
-    same or adjacent days as the seat they could cover. ``mine`` is this disruption's seats
-    (trip, role, crew member out): another disruption needing the very same seat does not
-    compete for its cover, it needs that same cover (see ``same_seat``)."""
+    same or adjacent days as the seat they could cover. ``mine`` holds this disruption's seats
+    as (trip, role, crew out). Another disruption needing one of those exact seats is not a
+    rival; it needs the same cover (see ``same_seat``)."""
     found: dict[str, list[dict[str, Any]]] = defaultdict(list)
     wants = [(ids, dates) for ids, dates in wants if ids and dates]
     if not wants:

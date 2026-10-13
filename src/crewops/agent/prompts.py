@@ -1,5 +1,5 @@
-"""What the models are told. The facts in it (rules, costs, stations, fleet) are written from
-the loaded operation, never typed in, so a changed rule or price changes the prompt too."""
+"""What the models are told. Rules, costs, stations and fleet come from the loaded operation
+rather than being typed in, so a changed rule or price changes the prompt too."""
 
 from __future__ import annotations
 
@@ -71,7 +71,6 @@ INTENT_GUIDANCE: dict[Intent, str] = {
 
 
 def operation_facts(tools: CrewOpsTools) -> str:
-    """The rulebook, costs, stations and fleet, from the loaded data."""
     w = tools.world
     stations = sorted({f.dep_station for f in w.flights.values()})
     fleet: dict[str, str] = {}

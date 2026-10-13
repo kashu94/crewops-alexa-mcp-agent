@@ -13,11 +13,11 @@ name and write only the user's locale.
 
 The Lite feature plan has no monthly charge for this number of users.
 
-Alexa account linking, when ``CREWOPS_ALEXA_REDIRECT_URLS`` is set: a hosted sign-in page
-and a second app client, for Alexa only, using the authorization-code flow with Alexa's
-redirect URLs. A person links once in the Alexa app by signing in to CrewOps; the skill then
-receives their access token and they have exactly their role's access. The web client stays
-as it is, with no hosted page.
+If ``CREWOPS_ALEXA_REDIRECT_URLS`` is set we also add a hosted sign-in page and a second app
+client just for Alexa account linking (authorization-code flow, Alexa's redirect URLs). A
+person signs in to CrewOps once from the Alexa app, and after that the skill gets their
+access token and the same role access they have anywhere else. The web client keeps direct
+sign-in with no hosted page.
 """
 
 from __future__ import annotations

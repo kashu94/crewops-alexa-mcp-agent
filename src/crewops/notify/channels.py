@@ -13,12 +13,12 @@ from crewops.notify.changes import Alert
 log = logging.getLogger(__name__)
 
 MAX_EVENTS_PER_PUBLISH = 5
-"""AppSync Events accepts at most five events in one publish request."""
+"""AppSync Events rejects a publish with more than five events."""
 
 
 class EventPublisher:
-    """Publishes to an AppSync Events channel over HTTP, signed with the function's own
-    IAM credentials (the API accepts publishes only from IAM)."""
+    """Plain HTTP publish to an AppSync Events channel, SigV4-signed with the function's
+    role. The API only takes IAM-authorised publishes."""
 
     def __init__(self, http_domain: str, region: str, credentials: Any, timeout: float = 5.0):
         self.url = f"https://{http_domain}/event"
@@ -52,8 +52,8 @@ class EventPublisher:
 
 
 class AlertPublisher:
-    """Publishes an alert to the topic, tagged with its role, so only addresses the admin
-    subscribed to that role receive it."""
+    """SNS publish with a ``role`` attribute. Subscription filter policies use it so an
+    address only gets the roles the admin signed it up for."""
 
     def __init__(self, sns: Any, topic_arn: str) -> None:
         self.sns = sns

@@ -1,11 +1,9 @@
 """Duty-time arithmetic.
 
-Two conventions quietly produce plausible but wrong legality answers if missed:
-
-1. Duty and flight-hour limits use **calendar-day windows** (UTC dates, inclusive of the
-   duty date), not rolling 168- or 672-hour windows from an instant.
-2. The flight duty period limit **shrinks with sector count**: 13 h minus half an hour for
-   every sector beyond the second, so a four-sector day caps at 12 h.
+Two conventions give plausible but wrong legality answers if you miss them. Duty and
+flight-hour limits use calendar-day windows (UTC dates, including the duty date), not rolling
+168- or 672-hour windows from an instant. And the flight duty period limit shrinks with
+sector count, 13 h minus half an hour per sector beyond the second, so four sectors cap at 12 h.
 """
 
 from __future__ import annotations
@@ -22,24 +20,22 @@ def hours_between(start: datetime, end: datetime) -> float:
 
 
 def calendar_window(end: date, days: int) -> tuple[date, date]:
-    """The inclusive window of ``days`` calendar days ending on ``end``.
+    """Inclusive window of ``days`` calendar days ending on ``end``.
 
-    Seven days ending the 14th run from the 8th to the 14th, not from the 7th. This
-    off-by-one is the most likely source of a wrong verdict, so it lives in one place.
+    Seven days ending the 14th run 8th to 14th, not from the 7th. Easiest off-by-one in the
+    engine to get wrong, so it lives here and nowhere else.
     """
     return end - timedelta(days=days - 1), end
 
 
 def format_hours(value: float) -> str:
-    """``1.33`` -> ``'1h20m'``. How a breach is said aloud."""
+    """``1.33`` -> ``'1h20m'``, the way a breach is read out."""
     total_minutes = round(abs(value) * 60)
     return f"{total_minutes // 60}h{total_minutes % 60:02d}m"
 
 
 @dataclass(frozen=True, slots=True)
 class DutyDay:
-    """One duty day: when it starts and ends, how many legs, and where it begins."""
-
     date: date
     report_utc: datetime
     release_utc: datetime
@@ -53,13 +49,12 @@ class DutyDay:
         return hours_between(self.report_utc, self.release_utc)
 
     def delayed(self, hours: float) -> DutyDay:
-        """The same day with a late departure: the crew still reports on time, so the
-        day gets longer. Only release moves, which is how a delay breaches FDP."""
+        """Late departure. Crew still report on time, so only release moves and the day gets
+        longer; that's how a delay breaches FDP."""
         return replace(self, release_utc=self.release_utc + timedelta(hours=hours))
 
     def shifted(self, hours: float) -> DutyDay:
-        """The whole day moved later, for a crew member positioning in from another base.
-        Report and release both move, so the day's length is unchanged."""
+        """Whole day moved later (crew positioning in from another base). Length unchanged."""
         shift = timedelta(hours=hours)
         return replace(
             self, report_utc=self.report_utc + shift, release_utc=self.release_utc + shift

@@ -65,8 +65,8 @@ function same(a: string, b: string): boolean {
   return timingSafeEqual(x, y);
 }
 
-/** The paired screen's cookie: an HMAC under a server-side secret (the speaker's own random
- * password), so it cannot be computed or guessed from the pairing code alone. */
+/** The paired screen's cookie. HMAC keyed on the speaker's random password, so knowing the
+ * pairing code isn't enough to forge it. */
 function pairingToken(): string | null {
   const code = process.env.CREWOPS_SPEAKER_PAIRING_CODE;
   const secret = process.env.CREWOPS_SPEAKER_PASSWORD;
@@ -74,9 +74,9 @@ function pairingToken(): string | null {
   return createHmac("sha256", secret).update(`crewops-speaker-paired:${code}`).digest("hex");
 }
 
-/** Run as "npm run dev" on your own machine, a speaker needs nothing. A hosted app (a
- * production build) hears alerts only on screens paired with the code, like a new Echo.
- * Request headers are never trusted for this: anyone can send "Host: localhost". */
+/** Under `npm run dev` on your own machine a speaker needs nothing. A production build only
+ * plays alerts on screens paired with the code, like a new Echo. Don't use request headers
+ * to decide this; anyone can send "Host: localhost". */
 export async function paired(): Promise<boolean> {
   if (process.env.NODE_ENV !== "production") return true;
   const token = pairingToken();
@@ -84,8 +84,8 @@ export async function paired(): Promise<boolean> {
   return Boolean(token && cookie && same(token, cookie));
 }
 
-/** A device app (the Fire TV wall display) has no browser cookie: it may send the pairing
- * code itself in ``x-crewops-pairing``, compared in constant time. Otherwise as `paired`. */
+/** The Fire TV wall display has no cookie, so it can send the pairing code itself in
+ * `x-crewops-pairing` (compared in constant time). Otherwise same as `paired`. */
 export async function pairedDevice(request: Request): Promise<boolean> {
   if (await paired()) return true;
   const expected = process.env.CREWOPS_SPEAKER_PAIRING_CODE;
@@ -93,8 +93,8 @@ export async function pairedDevice(request: Request): Promise<boolean> {
   return Boolean(expected && given && same(given, expected));
 }
 
-/** Pairs this screen if the code is right: a device cookie, kept for 30 days and separate
- * from any person's sign-in. */
+/** Pairs this screen if the code is right. The device cookie lasts 30 days and is separate
+ * from anyone's sign-in. */
 export async function pair(code: string): Promise<boolean> {
   const expected = process.env.CREWOPS_SPEAKER_PAIRING_CODE;
   const token = pairingToken();

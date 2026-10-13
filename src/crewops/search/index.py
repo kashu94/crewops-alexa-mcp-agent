@@ -73,8 +73,8 @@ def main(argv: list[str] | None = None) -> int:
             stored = search.put(name, docs)
             print(f"{name}: {stored} documents stored in {settings.vector_bucket}")
     except (ClientError, BotoCoreError) as exc:
-        # Indexing is idempotent: fix the cause (stack not deployed, model access, ...)
-        # and run it again; documents already stored are simply replaced.
+        # Safe to rerun once the cause is fixed (stack not deployed, model access...).
+        # Stored documents just get replaced.
         print(f"AWS error: {exc}", file=sys.stderr)
         return 1
     return 0

@@ -49,8 +49,8 @@ async function publicKey(): Promise<string> {
   return data?.key ?? "";
 }
 
-/** On sign-out: this browser stops receiving the person's alerts (a shared desk computer
- * must not show the next person someone else's). Best effort, and quick. */
+/** On sign-out, unsubscribe this browser from the person's alerts so a shared desk computer
+ * doesn't show the next person someone else's. Best effort and quick. */
 export async function forgetDesktopAlerts(): Promise<void> {
   if (!supported()) return;
   const reg = await navigator.serviceWorker.getRegistration("/").catch(() => undefined);

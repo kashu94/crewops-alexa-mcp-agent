@@ -106,7 +106,7 @@ def test_made_up_flight_shape_fails():
     assert not verify("Put them on flight X134.", [OPTIONS]).ok
 
 
-# -- Regression tests for review findings ----------------------------------------------
+# -- Regressions -----------------------------------------------------------------------
 
 
 def test_full_timestamps_are_checked():

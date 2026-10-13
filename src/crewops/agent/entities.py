@@ -2,10 +2,8 @@
 
 ``C-1042`` and ``C-1024`` look almost identical to an embedding model, and resolving the
 wrong captain is the worst mistake this system can make. So identifiers are never found by
-similarity or by asking a model. The split of labour is:
-
-* patterns (this module): **which** things the question names, exactly;
-* the router: **what kind** of question it is.
+similarity or by asking a model. Patterns here decide which things the question names; the
+router decides what kind of question it is.
 
 Nothing here decides that a name is a person or that an id exists. The tools do that, and
 ask when something does not match.
@@ -29,14 +27,14 @@ from crewops.engine import World
 
 @dataclass(frozen=True, slots=True)
 class Vocabulary:
-    """The stations, tails and dates of the loaded operation: what a bare word can mean."""
+    """Stations, tails and dates of the loaded operation, i.e. what a bare word can mean."""
 
     stations: frozenset[str]
     aircraft: frozenset[str]
     week_start: date
     week_end: date
     today: date
-    """The operation's "now": the snapshot date the duty clocks were computed at."""
+    """The operation's "now", the snapshot date the duty clocks were computed at."""
 
     @classmethod
     def from_world(cls, world: World) -> Vocabulary:
@@ -57,11 +55,11 @@ class Vocabulary:
 # --------------------------------------------------------------------------
 
 _D = r"(\d)[\s,.-]*"
-_END = r"\b(?![\s,./-]*\d)"  # the id's last digit: no more digits follow (not a date)
+_END = r"\b(?![\s,./-]*\d)"  # last digit of the id; more digits would make it a date
 SPOKEN_CREW_RE = re.compile(rf"\b(?:c|see|sea|cee|si)\b[\s.-]*{_D}{_D}{_D}(\d){_END}", re.I)
 SPOKEN_PAIRING_RE = re.compile(rf"\b(?:p|pee|pea)\b[\s.-]*{_D}{_D}{_D}(\d){_END}", re.I)
 AIRLINE_CODES = ("DX", "KS", "NG")
-"""The airlines' codes, as in ``data/seed/airlines.json`` (a test keeps them in step)."""
+"""Same codes as ``data/seed/airlines.json``. A test keeps them in step."""
 _SPOKEN_CODE = {
     "DX": r"d\.?\s*x|dee\s*ex|d\s*ex",
     "KS": r"k\.?\s*s|kay\s*ess|k\s*ess",
@@ -82,12 +80,13 @@ def _spoken_flight(m: re.Match[str]) -> str:
 
 
 def spoken_ids(text: str) -> str:
-    """Ids as speech recognition writes them, in the form the patterns read.
+    """Rewrite ids the way speech recognition writes them into the form the patterns read.
 
     Voice input turns "C-3231" into "see 3231", "C 32 31" or "c3231", and "DX412" into
     "D X 412". Only the exact shapes of an id are rewritten (a letter or its sound, then
     four digits for crew and pairings, three for flights), so "see you at 10" is left
-    alone. Whether the id exists is still the tools' call."""
+    alone. Whether the id exists is still up to the tools.
+    """
     text = SPOKEN_CREW_RE.sub(lambda m: "C-" + "".join(m.groups()), text)
     text = re.sub(r"\bc(\d{4})\b", r"C-\1", text, flags=re.I)
     text = SPOKEN_PAIRING_RE.sub(lambda m: "P-" + "".join(m.groups()), text)
@@ -110,8 +109,8 @@ def spoken_ids(text: str) -> str:
 
 CREW_RE = re.compile(r"\bC-\d{4}\b")
 MALFORMED_CREW_RE = re.compile(r"\bC-(?!\d{4}\b)\d+\b")
-"""The crew prefix with the wrong number of digits ("C-10"): offered near matches, never
-looked up."""
+"""Crew prefix with the wrong number of digits ("C-10"). Gets near matches offered, is
+never looked up."""
 PAIRING_RE = re.compile(r"\bP-\d{4}\b")
 MALFORMED_PAIRING_RE = re.compile(r"\bP-(?!\d{4}\b)\d+\b")
 FLIGHT_ID_RE = re.compile(r"\b[A-Z]{2}\d{3}-\d{4}-\d{2}-\d{2}\b")
@@ -124,7 +123,7 @@ AC_TYPE_RE = re.compile(r"\b(A320|ATR[- ]?72)\b", re.I)
 STATION_RE = re.compile(r"\b[A-Z]{3}\b")
 GATE_RE = re.compile(r"\b([A-Z]{3}-G\d{1,2})\b", re.I)
 ISO_DATE_RE = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)")
-"""Also inside a timestamp: "2026-10-14T08:30:00Z" names 14 Oct."""
+"""Matches inside a timestamp too, so "2026-10-14T08:30:00Z" names 14 Oct."""
 TIME_RE = re.compile(r"\b(\d{1,2}):(\d{2})\s*Z?\b", re.I)
 TODAY_RE = re.compile(r"\b(today|right now|currently|as of now)\b", re.I)
 TOMORROW_RE = re.compile(r"\btomorrow\b", re.I)
@@ -146,15 +145,15 @@ _MONTH_FIRST_ALT = "|".join(m for m in sorted(_MONTHS, key=len, reverse=True) if
 MONTH_DAY_RE = re.compile(
     rf"\b({_MONTH_FIRST_ALT})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?\b(?:,?\s+(\d{{4}}))?", re.I
 )
-"""Month first ("Oct 15"). Never "may": "who may 3 captains..." is not 3 May."""
+"""Month first ("Oct 15"). Leaves out "may", since "who may 3 captains..." is not 3 May."""
 BETWEEN_DAYS_RE = re.compile(
     rf"\bbetween\s+(\d{{1,2}})(?:st|nd|rd|th)?\s+and\s+(\d{{1,2}})(?:st|nd|rd|th)?\s+"
     rf"({_MONTH_ALT})\b",
     re.I,
 )
-""""between 13 and 15 Oct": both ends."""
+""""between 13 and 15 Oct" gives both ends."""
 DAY_RANGE_RE = re.compile(rf"\b(\d{{1,2}})\s*[–-]\s*(\d{{1,2}})\s+({_MONTH_ALT})\b", re.I)
-""""13–14 Oct": both days."""
+""""13–14 Oct" gives both days."""
 DATE_TEXT = (
     rf"(?:\d{{4}}-\d{{2}}-\d{{2}}|\d{{1,2}}(?:st|nd|rd|th)?\s+(?:{_MONTH_ALT})\b"
     rf"|(?:{_MONTH_ALT})\.?\s+\d{{1,2}}\b)"
@@ -238,7 +237,7 @@ STATION_ALIASES: dict[str, str] = {
     "chennai": "MAA",
     "madras": "MAA",
 }
-"""City names people say instead of codes. A fixed lookup: "Mumbai" means BOM."""
+"""City names people say instead of codes. Fixed lookup, no fuzzy matching."""
 CITY_RE = re.compile(
     r"\b(" + "|".join(sorted(STATION_ALIASES, key=len, reverse=True)) + r")\b", re.I
 )
@@ -332,10 +331,8 @@ NOT_A_NAME = frozenset(
         "Produce",
         "Outline",
         "Resolve",
-        "Give",
         "Recovery",
         "Total",
-        "Crew",
         "Control",
         "Controller",
         "Controllers",
@@ -353,7 +350,6 @@ NOT_A_NAME = frozenset(
         "Our",
         "My",
         "Its",
-        "Any",
         "Need",
         "Needs",
         "Will",
@@ -371,7 +367,6 @@ NOT_A_NAME = frozenset(
         "Reports",
         "Pairings",
         "Hours",
-        "Duty",
         "Rest",
         "Legality",
         "Cover",
@@ -413,8 +408,8 @@ DATE_OPS: tuple[tuple[str, str], ...] = (
     ("before", "lt"),
     ("after", "gt"),
 )
-"""A comparison word beside a date makes it a range. Longest phrase first, so "on or
-before" is not read as a bare "before"."""
+"""A comparison word beside a date makes it a range. Longest phrase first, or "on or
+before" would match as a bare "before"."""
 
 
 # --------------------------------------------------------------------------
@@ -438,8 +433,9 @@ class Entities:
     aircraft_types: list[str] = field(default_factory=list)
     stations: list[str] = field(default_factory=list)
     unknown_stations: list[str] = field(default_factory=list)
-    """Upper-case three-letter words that look like a station code but are not one. Asked
-    about, never dropped: "flights from BLR to XYZ" must not quietly become "from BLR"."""
+    """Upper-case three-letter words that look like a station code but aren't one. We ask
+    about these rather than drop them, or "flights from BLR to XYZ" quietly becomes
+    "from BLR"."""
     dates: list[str] = field(default_factory=list)
     date_range: dict[str, str] | None = None
     times: list[str] = field(default_factory=list)
@@ -489,8 +485,8 @@ def _mk_date(day: int, month: int, year: int) -> str | None:
 
 def extract_dates(text: str, vocab: Vocabulary) -> list[str]:
     """ISO dates. A day without a year is in the operation's year. "The 15th", "on Friday"
-    and "today" look ahead from the operation's "now": the next such day on or after it,
-    within the rostered period."""
+    and "today" look ahead from the operation's "now" to the next such day in the rostered
+    period."""
     year = max(vocab.today, vocab.week_start).year
     found: list[tuple[int, str]] = []
     for m in ISO_DATE_RE.finditer(text):
@@ -519,7 +515,7 @@ def extract_dates(text: str, vocab: Vocabulary) -> list[str]:
             if iso := _next_day_of_month(int(m.group(1)), vocab):
                 found.append((m.start(), iso))
     if not found:
-        # "on Friday": the next day of that name, from today.
+        # "on Friday" means the next Friday from today
         for m in WEEKDAY_RE.finditer(text):
             wanted = WEEKDAYS.index(m.group(1).lower())
             day = max(vocab.today, vocab.week_start)
@@ -536,7 +532,7 @@ def extract_dates(text: str, vocab: Vocabulary) -> list[str]:
 
 
 def _next_day_of_month(day: int, vocab: Vocabulary) -> str | None:
-    """ "The 15th": this month's if it is still to come, else next month's, in the period."""
+    """ "The 15th" is this month's if still to come, else next month's, within the period."""
     start = max(vocab.today, vocab.week_start)
     month, year = start.month, start.year
     for _ in range(3):
@@ -555,8 +551,8 @@ def extract_date_range(text: str, dates: list[str]) -> dict[str, str] | None:
         lo, hi = sorted(dates[:2])
         return {"gte": lo, "lte": hi}
     for phrase, op in DATE_OPS:
-        # Only a comparison word directly before a date: "delayed before DX401 on 14 Oct"
-        # is about one day, not a range.
+        # Only when the word sits right before a date. "delayed before DX401 on 14 Oct" is
+        # about one day, not a range.
         if re.search(rf"\b{re.escape(phrase)}\s+(?:the\s+)?{DATE_TEXT}", text, re.I):
             return {op: dates[0]}
     return None
@@ -600,7 +596,6 @@ def extract_names(text: str) -> list[str]:
 
 
 def extract(text: str, vocab: Vocabulary) -> Entities:
-    """Everything recognisable in a question."""
     flight_ids = FLIGHT_ID_RE.findall(text)
     in_ids = " ".join(flight_ids)
     flight_nos = [n for n in FLIGHT_NO_RE.findall(text) if n not in in_ids]
@@ -621,8 +616,8 @@ def extract(text: str, vocab: Vocabulary) -> Entities:
         elif STATION_CONTEXT_RE.search(text[max(0, m.start() - 14) : m.start()]) or (
             difflib.get_close_matches(word, sorted(vocab.stations), n=1, cutoff=0.67)
         ):
-            # Only an attempt at a station: after "from", "to", "at"... or one letter off a
-            # real code. "FYI the CEO asked" is not about stations.
+            # Count it as a station attempt only after "from", "to", "at"... or when it's one
+            # letter off a real code. "FYI the CEO asked" is not about stations.
             unknown.append(word)
     stations += [STATION_ALIASES[c.lower()] for c in CITY_RE.findall(text)]
 
@@ -678,7 +673,8 @@ RANK_OF = {
     "flight attendant": "Cabin Crew",
 }
 STATED_RANK_RE = re.compile(rf"\b({RANK_WORDS})\s+(C-\d{{4}})\b", re.I)
-"""A rank describing a named crew member ("FO C-2087"), not a seat to fill ("as Captain")."""
+"""A rank describing a named crew member ("FO C-2087"), as opposed to a seat to fill
+("as Captain")."""
 _BASE_BEFORE_ID_RE = re.compile(r"\b([A-Z]{3})-based\b[^.?!]{0,40}?\b(C-\d{4})\b")
 _ID_BEFORE_BASE_RE = re.compile(
     r"\b(C-\d{4})\b[^.?!]{0,40}?\bbased\s+(?:at|in|out of)\s+([A-Z]{3})\b"
@@ -703,7 +699,7 @@ def stated_ranks(text: str) -> list[tuple[str, str]]:
 
 
 def stated_bases(text: str, vocab: Vocabulary) -> list[tuple[str, str]]:
-    """(crew id, station the question says they are based at): "C-2210 (DEL base)"."""
+    """(crew id, station the question says they are based at), e.g. "C-2210 (DEL base)"."""
     out = [(c, s) for s, c in _BASE_BEFORE_ID_RE.findall(text)]
     out += [(c, s) for c, s in _ID_BEFORE_BASE_RE.findall(text)]
     out += [(c, s) for c, s in _ID_PAREN_BASE_RE.findall(text)]

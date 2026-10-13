@@ -1,20 +1,16 @@
-import 'react-native';
-import {render} from '@testing-library/react-native';
-import * as React from 'react';
+import {rupees, waited} from '../src/theme';
 
-import {App} from '../src/App';
-
-describe('App', () => {
-  it('matches snapshot', () => {
-    const screen = render(<App />);
-    expect(screen).toMatchSnapshot();
+describe('waited', () => {
+  it('reads minutes, then hours, then days', () => {
+    expect(waited(12)).toBe('12 min');
+    expect(waited(135)).toBe('2 h 15 min');
+    expect(waited(60 * 72)).toBe('3 days');
   });
+});
 
-  it('renders all tiles', () => {
-    const screen = render(<App />);
-    expect(screen.getByTestId('tile-home')).toBeTruthy();
-    expect(screen.getByTestId('tile-get-started')).toBeTruthy();
-    expect(screen.getByTestId('tile-debug')).toBeTruthy();
-    expect(screen.getByTestId('tile-learn-more')).toBeTruthy();
+describe('rupees', () => {
+  it('groups the Indian way and leaves an unknown cost blank', () => {
+    expect(rupees(125000)).toBe('₹1,25,000');
+    expect(rupees(null)).toBe('');
   });
 });

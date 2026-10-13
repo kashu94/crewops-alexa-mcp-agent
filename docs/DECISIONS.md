@@ -23,9 +23,9 @@ The data is relational in shape, but small: 150 crew, 39 pairings, one operating
 rules engine loads what it needs with a few key lookups and evaluates in memory, so joins are
 not needed at query time. Streams give the event-driven disruption analysis for free.
 
-**Traded away:** ad-hoc SQL. Every access pattern is designed up front.
+Traded away: ad-hoc SQL. Every access pattern is designed up front.
 
-**Not chosen:** Aurora DSQL (no foreign keys, new), DocumentDB (VPC and a running instance),
+Not chosen: Aurora DSQL (no foreign keys, new), DocumentDB (VPC and a running instance),
 Neptune (overkill), ElastiCache or MemoryDB (caches, not a system of record).
 
 ## D3. S3 Vectors with Titan Text Embeddings V2
@@ -71,7 +71,7 @@ The advisor's tool loop is a short Converse loop in this repository rather than 
 framework. Every tool call it makes goes through the caller's role checks, the round limit
 and a time check before each model call, and its answer through the verifier.
 
-**Fallback:** the MCP server is stateless between requests, so it can move to Lambda behind a
+Fallback: the MCP server is stateless between requests, so it can move to Lambda behind a
 Function URL without code changes if AgentCore blocks progress.
 
 ## D6. Models: Amazon Nova, chosen by evaluation
@@ -83,7 +83,7 @@ triage. Both are called through Bedrock's model-neutral Converse API, so every m
 setting, not code. Nova Micro runs in the deployment region; Nova 2 Lite is only offered
 through Bedrock's global cross-region profile.
 
-**Traded away:** some fluency. A smaller model chooses tools less reliably, so more answers
+Traded away: some fluency. A smaller model chooses tools less reliably, so more answers
 fall back to the verified template wording. That is safe by construction, and the evaluation
 set measures how often it happens. Larger models or fine-tuning can be tried later by
 changing configuration and re-running the evaluation.
@@ -134,7 +134,7 @@ transaction. Legality is re-checked at approval, because the roster may have cha
 plan waited. Admins configure the system but cannot operate it unless they also hold an
 operational role. All of this is enforced in code in the MCP server, never by a prompt.
 
-**Traded away:** speed on routine cover. One extra human step is accepted because a crew change
+Traded away: speed on routine cover. One extra human step is accepted because a crew change
 moves a real person and is costly to undo. An admin-set auto-approval threshold for low-cost
 reserve callouts is a possible later addition, not part of the first build.
 
@@ -154,7 +154,7 @@ This project's home region is Asia Pacific (Sydney), and everything the system u
 available there: DynamoDB, SQS, SNS, Lambda, S3 Vectors, AgentCore and Bedrock with Nova and
 Titan. Model IDs were chosen so they also work unchanged in other regions.
 
-**Not chosen:** activating the account's advanced features to lift the region policy. It is
+Not chosen: activating the account's advanced features to lift the region policy. It is
 irreversible and removes the spend limit, for no gain this project needs.
 
 ## D14. Tools answer or ask; they never guess
@@ -166,5 +166,5 @@ name or flight number with several matches is a question naming them. Who may ca
 tool is decided in code from the caller's verified roles, and the model is only shown the
 tools its caller may use.
 
-**Traded away:** a turn or two of back-and-forth when the user was vague. A wrong confident
+Traded away: a turn or two of back-and-forth when the user was vague. A wrong confident
 answer costs far more than one clarifying question.

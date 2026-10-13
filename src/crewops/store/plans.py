@@ -1,16 +1,16 @@
 """Plans: a controller's proposed cover for a disruption, and every decision on it.
 
-A plan lives beside its disruption (``DISRUPTION#id / PLAN#id``) and is indexed by status
-(``PLAN#status``), so an approver's queue is one query. Every transition is one transaction
-that also moves the disruption and writes an audit event, each conditioned on the status it
-expects, so two people acting at once cannot both succeed.
+A plan sits under its disruption (``DISRUPTION#id / PLAN#id``) and gsi1 indexes it by status
+(``PLAN#status``), so an approver's queue is a single query. Each transition is one
+transaction that also moves the disruption and writes an audit event. Every write in it is
+conditioned on the status it expects, so if two people act at once only one wins.
 
-Committing writes the roster itself: each affected pairing's crew list is replaced, on the
-condition that it is still exactly the list the plan was made against. Every crew member the
-plan moves also has a roster version (``CREW#id / ROSTER_VERSION``) that the commit bumps,
-conditioned on the version read before the legality re-check; storing a report that takes
-someone out bumps it too. So two commits, or a commit and a sick report, that touch the same
-person at the same moment cannot both succeed: one is refused, and the plan is checked again.
+Committing writes the roster too. Each affected pairing's crew list is replaced only if it is
+still exactly the list the plan was made against. Each crew member the plan moves also has a
+roster version (``CREW#id / ROSTER_VERSION``). The commit bumps it, conditioned on the value
+read before the legality re-check, and storing a report that takes someone out bumps it as
+well. Two commits touching the same person, or a commit racing a sick report, therefore
+can't both go through; the loser is refused and the plan gets checked again.
 """
 
 from __future__ import annotations
@@ -26,19 +26,18 @@ from crewops.store import schema
 from crewops.store.items import from_dynamo, to_dynamo
 from crewops.store.reports import STATUS_OPTIONS_READY, disruption_pk
 from crewops.store.schema import SEPARATOR as S
-from crewops.store.versions import bump_version, read_versions, version_key  # noqa: F401
+from crewops.store.versions import read_versions, version_key  # noqa: F401
 
 STATUS_SUBMITTED = "SUBMITTED"
 STATUS_COMMITTED = "COMMITTED"
 STATUS_CLOSED = "CLOSED"
-"""Closed without a plan: no legal cover existed, and the controller recorded what was done
-instead (for example, the flights were cancelled)."""
+"""Closed with no plan, because there was no legal cover. The controller records what was
+done instead (flights cancelled, say)."""
 PLAN_SUBMITTED = "SUBMITTED"
 PLAN_COMMITTED = "COMMITTED"
 PLAN_REJECTED = "REJECTED"
 PLAN_WITHDRAWN = "WITHDRAWN"
 PLAN_STALE = "STALE"
-CLOSED = {PLAN_REJECTED, PLAN_WITHDRAWN, PLAN_STALE}
 
 
 class Conflict(Exception):
@@ -50,8 +49,8 @@ class Conflict(Exception):
 
     @property
     def transient(self) -> bool:
-        """Another transaction touched the same items at that moment: retry, nothing is
-        known to have changed."""
+        """Lost a race with another transaction on the same items. Nothing is known to have
+        changed, so a retry is safe."""
         return "TransactionConflict" in self.codes and "ConditionalCheckFailed" not in self.codes
 
 
@@ -129,8 +128,8 @@ def _move_plan(
     }
     condition = "#status = :from"
     if fingerprint:
-        # The fingerprint checked is still the one stored (approval has already recomputed
-        # it from the plan and compared it with the audit trail's).
+        # approve() already recomputed the fingerprint and compared it with the audit
+        # trail's; this makes sure the stored one hasn't changed since.
         names["#fp"] = "fingerprint"
         values[":fp"] = fingerprint
         condition += " AND #fp = :fp"
@@ -233,9 +232,9 @@ def commit(
     actor: str,
     at: datetime,
 ) -> None:
-    """Approve and commit in one transaction: every pairing's new crew (only if its crew is
-    still exactly what the plan was made against), each moved crew member's roster version
-    (only if unchanged since it was read), the plan, the disruption and the audit."""
+    """Approve and commit as one transaction. Pairing crews are replaced only if unchanged
+    since the plan was made, roster versions bumped only if unchanged since they were read,
+    and the plan, disruption and audit events written alongside."""
     when = _iso(at)
     actions: list[dict[str, Any]] = []
     for crew_id, seen in sorted(versions.items()):
@@ -269,8 +268,7 @@ def commit(
                 }
             }
         )
-    # Four-eyes evidence: the approval sealed to the plan's fingerprint, the approver and
-    # the time (crewops.plans.fingerprint).
+    # four-eyes evidence: seal = hash(plan fingerprint, approver, time), see plans.fingerprint
     seal = approval_seal(plan["fingerprint"], actor, when) if plan.get("fingerprint") else None
     decided = {"decided_by": actor, "decided_utc": when}
     if seal:

@@ -28,7 +28,6 @@ from crewops.domain.reports import Report, ReportType, Role
 
 
 def sqs_client(settings: Settings):
-    """An SQS client for the active AWS profile and the configured region."""
     import boto3
 
     return boto3.Session(region_name=settings.aws_region).client("sqs")
@@ -72,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         message = build_report(args, datetime.now(UTC))
-        Report.from_dict(message)  # the same validation the worker applies
+        Report.from_dict(message)  # fail here rather than as a rejection in the worker
     except DataError as exc:
         print(f"Invalid report: {exc}", file=sys.stderr)
         return 1

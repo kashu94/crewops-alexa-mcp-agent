@@ -3,13 +3,13 @@
 Problems hit while building CrewOps, across the whole stack, each written when it happened
 with the real error text. Entries are grouped by where the problem was:
 
-1. **Amazon ecosystem:** Alexa, Amazon Bedrock and Nova, AgentCore, and the Model Context
+1. Amazon ecosystem: Alexa, Amazon Bedrock and Nova, AgentCore, and the Model Context
    Protocol (MCP) server and SDK.
-2. **AWS backend infrastructure:** accounts, CDK, Cognito, DynamoDB, SQS, SNS, AppSync,
+2. AWS backend infrastructure: accounts, CDK, Cognito, DynamoDB, SQS, SNS, AppSync,
    Lambda, streams, the AWS SDK.
-3. **Core software stack and local tooling:** Python, uv, Node, moto and other test
+3. Core software stack and local tooling: Python, uv, Node, moto and other test
    tooling.
-4. **Our own code:** every significant bug that tests, reviews, reference data or live runs
+4. Our own code: every significant bug that tests, reviews, reference data or live runs
    found in what we wrote, and how it was fixed: the legality engine, the question pipeline,
    auth and plans, ingestion and search, the MCP server, evaluation, and the docs.
 
@@ -17,10 +17,9 @@ Entry numbers run in the order the entries were written, across all four groups.
 FL-020 onwards were written on 2026-10-08 from the build's full record (review reports,
 failing test output and live runs), for problems found and fixed since 2026-10-06.
 
-Severity: **Blocker** (no way forward without a workaround), **High** (cost hours),
-**Medium** (cost under an hour), **Low** (annoyance). For our own code (section 4), severity
-is the harm the bug would have done had it shipped: **High** means a wrong answer, a
-security gap or lost data.
+Severity: Blocker (no way forward without a workaround), High (cost hours), Medium (cost
+under an hour), Low (annoyance). For our own code (section 4), severity is the harm the bug
+would have done had it shipped, and High means a wrong answer, a security gap or lost data.
 
 ## Template
 

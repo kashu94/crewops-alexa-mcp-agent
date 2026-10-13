@@ -57,8 +57,8 @@ function Kpi({
     accent: "from-sky-50 text-accent border-sky-100",
     ok: "from-emerald-50 text-ok border-emerald-100",
   };
-  // A border, not a ring: a ring is drawn outside the box, and the workspace clips it at
-  // the outer edges.
+  // border rather than ring: rings draw outside the box and the workspace clips them at the
+  // edges
   return (
     <div
       className={cx(
@@ -249,7 +249,7 @@ export default function ControllerWorkspace() {
   useLiveListener(load);
 
   const onDesk = useMemo(() => new Set(queue.map((q) => q.disruption_id)), [queue]);
-  // One disruption can be both ready and sent back (its plan was rejected): count it once.
+  // a rejected plan leaves the disruption both ready and sent back, so don't count it twice
   const waiting = onDesk.size;
   const open = feed?.filter((d) => ["REPORTED", "OPTIONS_READY", "SUBMITTED"].includes(d.status)) ?? [];
   const awaiting = feed?.filter((d) => d.status === "SUBMITTED").length ?? 0;
@@ -260,7 +260,7 @@ export default function ControllerWorkspace() {
   const sentBack = queue.filter((q) => q.kind.startsWith("sent_back")).length;
 
   return (
-    // On wide screens the workspace fits the window exactly; only the panels scroll.
+    // wide screens: workspace fills the window and only the panels scroll
     <div className="flex flex-col gap-4 xl:h-[calc(100vh-6.75rem)] xl:overflow-hidden">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>

@@ -1,8 +1,8 @@
 """The operation in memory, shaped for the rules.
 
-A ``World`` is built once from typed records and then only read. The whole operating week
-is small enough that answering from memory beats a database round trip per question. The
-store (DynamoDB) loads the records; this module only decides how the engine sees them.
+Built once from typed records, then read-only. The operation is small enough that holding
+it in memory beats a DynamoDB round trip per question. The store loads the records; this
+module just shapes them for the engine.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ POSITIONING_REPORT_BUFFER = timedelta(minutes=15)
 
 
 class UnknownEntity(LookupError):
-    """An id that does not exist. Callers suggest near matches; the engine never guesses."""
+    """Unknown id. Callers suggest near matches; the engine doesn't guess."""
 
     def __init__(self, kind: str, value: str) -> None:
         super().__init__(f"no {kind} {value!r}")
@@ -39,7 +39,7 @@ class Positioning:
     to_station: str
     arrives_utc: datetime
     delay_hours: float
-    """How far the pairing must slip so they can report after landing."""
+    """Slip needed so they can report after landing."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,25 +53,22 @@ class World:
     book: RuleBook
     snapshot_utc: datetime
     reachability: Mapping[str, int]
-    """Minutes to reach each crew member: paid as a travel allowance, and a callout too
-    close to report time slips the departure."""
+    """Minutes for each crew member to get in. Paid as travel allowance; a callout too close
+    to report time slips the departure."""
     seniority: Mapping[str, int]
-    """Years of service. Ranks only through its callout allowance (part of the cost)."""
+    """Years of service. Only affects rank through the callout allowance in the cost."""
     risk: Mapping[str, float]
     unavailable: Mapping[str, tuple[tuple[date, str], ...]] = field(default_factory=dict)
-    """Crew reported unavailable in open disruptions: crew id -> (date, report id) pairs.
-    Empty for the published roster; filled in when analysing live disruptions."""
+    """Crew id -> (date, report id) from open disruptions. Empty for the published roster."""
     unavailable_from: Mapping[tuple[str, date], datetime] = field(default_factory=dict)
-    """(crew id, date) -> when the absence starts, for one reported from a time part-way
-    through its first day. Legs that left before it are still flown by them."""
+    """(crew id, date) -> start of a part-day absence. Legs before it are still theirs."""
     cancelled: frozenset[str] = frozenset()
-    """Flights cancelled by an approved plan: no one flies them, as crew or passenger."""
+    """Cancelled by an approved plan; nobody flies or positions on them."""
     airline_of_aircraft: Mapping[str, str] = field(default_factory=dict)
-    """Aircraft -> the airline that flies it."""
     airline_of_crew: Mapping[str, str] = field(default_factory=dict)
-    """Crew id -> the airline that employs them. Cover only ever comes from the same one."""
+    """Crew id -> employing airline. Cover only comes from the same airline."""
     airline_names: Mapping[str, str] = field(default_factory=dict)
-    """Airline code -> its name, as legality and answers say it."""
+    """Airline code -> display name."""
     command_qualified: frozenset[str] = frozenset()
     """First officers cleared to command: may fill a captain's seat."""
     right_seat_qualified: frozenset[str] = frozenset()
@@ -101,17 +98,14 @@ class World:
         return self.duty_days[pairing_id]
 
     def positioning(self, crew: CrewState, day: DutyDay) -> Positioning | None:
-        """The same-day flight from the crew member's base that delays the day least.
-
-        Only flights departing at or after the snapshot count. None means nobody can get
-        them there that day: a base-rule exclusion.
-        """
+        """Same-day flight from their base that delays the day least, among flights not yet
+        departed. None means they can't get there that day, which fails the base rule."""
         best: Positioning | None = None
         for f in self.flights.values():
             if f.date != day.date or f.dep_station != crew.base:
                 continue
             if f.dep_utc < self.snapshot_utc:
-                continue  # already departed: nobody can be put on it now
+                continue
             if f.flight_id in self.cancelled:
                 continue
             if f.arr_station != day.dep_station:
@@ -124,10 +118,12 @@ class World:
 
 
 def build_world(seed: SeedData, now: datetime | None = None) -> World:
-    """The operation as the engine sees it at ``now``: the seed's own moment (the duty
-    clocks' time) when not given, as in tests and evaluation; the real time in a deployed
-    operation. Never earlier than the duty clocks: hours before them are already counted.
-    Duties rostered before ``now`` count as flown, so the hour limits see them."""
+    """The operation as the engine sees it at ``now``.
+
+    ``now`` is the real time when deployed; tests and the evaluation leave it out and get the
+    seed's own moment (the duty clocks' time). Never earlier than the duty clocks, whose
+    hours are already counted. Duties rostered before ``now`` count as flown so the hour
+    limits see them."""
     flights = {f.flight_id: f for f in seed.flights}
 
     duty_days: dict[str, tuple[DutyDay, ...]] = {}

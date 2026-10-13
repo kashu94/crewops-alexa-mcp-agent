@@ -161,7 +161,7 @@ def test_run_command_needs_a_named_profile(monkeypatch, capsys):
     assert "AWS_PROFILE" in capsys.readouterr().err
 
 
-# -- Regression tests for review findings ----------------------------------------------
+# -- Regressions -----------------------------------------------------------------------
 
 
 def test_crew_reported_unavailable_elsewhere_is_not_offered(table):

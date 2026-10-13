@@ -1,15 +1,15 @@
-"""Spoken alerts: what just happened to each disruption, as one or two sentences.
+"""Spoken alerts, one or two sentences on what just happened to each disruption.
 
-The desk speaker, the "welcome back" summary and Alexa notifications all say the same
-thing, built here from the stored analysis and each disruption's audit trail (never from a
-model), so every figure in an alert is one the engine produced.
+The desk speaker, the "welcome back" summary and Alexa notifications all use what's built
+here. It comes from the stored analysis and the audit trail, not a model, so every figure
+in an alert is one the engine produced.
 
-An alert is a disruption's *latest* event: reported, analysed, a plan submitted, sent back
-(rejected, withdrawn or stale), approved, or closed. Its id names the event, so a listener
-that has heard one alert hears the next event on the same disruption as new.
+An alert is a disruption's latest event (reported, analysed, plan submitted, sent back,
+approved, closed). The alert id includes the event, so the next event on the same
+disruption counts as new for a listener that already heard the last one.
 
-Scopes say who an alert is for: a controller desk (``desk-1``...), ``approvals``, or the
-whole ``room``.
+Scope is who it's for: a controller desk (``desk-1``...), ``approvals``, or the whole
+``room``.
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ SCOPES = (ROOM, APPROVALS, *(d.desk_id for d in DESKS))
 SENT_BACK = ("REJECTED", "WITHDRAWN", "STALE")
 """Audit actions that return a plan to its desk."""
 FOR_DESK = ("OPTIONS_READY", "ESCALATED", *SENT_BACK, "COMMITTED", "CLOSED")
-"""What a desk speaker announces: new work, work back, and how its work ended. A report the
-analysis could not handle has no desk yet, so only the whole-room speaker announces it."""
+"""Events a desk speaker announces. ANALYSIS_FAILED isn't here because such a report has no
+desk yet; only the room speaker hears about it."""
 FOR_APPROVALS = ("SUBMITTED",)
 
 STRATEGY = {
@@ -48,15 +48,15 @@ _RUPEES = re.compile(r"₹([\d,]+)")
 
 
 def spoken(text: str) -> str:
-    """The same sentence as a voice should read it: "C-1042" as "C 1042", dates as
-    "13 October", amounts as "23,090 rupees"."""
+    """Rewrite for TTS: "C-1042" -> "C 1042", ISO dates -> "13 October", "₹23,090" ->
+    "23,090 rupees"."""
     text = _ID.sub(r"\1 \2", text)
     text = _DATE.sub(lambda m: _day(date(*map(int, m.groups()))), text)
     return _RUPEES.sub(r"\1 rupees", text)
 
 
 def _day(d: date | datetime) -> str:
-    return f"{d.day} {d:%B}"  # no leading zero, on every platform
+    return f"{d.day} {d:%B}"  # %-d isn't portable
 
 
 def _rupees(value: Any) -> str:
@@ -64,7 +64,7 @@ def _rupees(value: Any) -> str:
 
 
 def _cover(analysis: Mapping[str, Any]) -> str:
-    """The recommendation in a sentence, or what happens instead."""
+    """Recommendation in a sentence, or what happens instead."""
     handling = analysis.get("handling") or {}
     seats = analysis.get("seats") or []
     picks = [s for s in seats if s.get("status") == "options" and s.get("recommended")]
@@ -94,7 +94,6 @@ def brief(
     desks: list[Any],
     what: Callable[[Report], str],
 ) -> dict[str, Any]:
-    """One alert for a disruption at its latest event."""
     action = str(latest.get("action") or item.get("status") or "")
     happened = what(report)
     desk = desks[0] if desks else None
@@ -133,7 +132,7 @@ def brief(
         else None
     )
     if rated and action in ("OPTIONS_READY", "ESCALATED") and rated["level"] != "low":
-        # Said first, so a listener knows at once whether to drop what they are doing.
+        # lead with severity so the listener knows whether to drop everything
         text = f"{spoken_level(rated['level'])}. {text}"
     at = str(latest.get("at") or "")
     return {
@@ -146,7 +145,7 @@ def brief(
         "text": text,
         "speech": spoken(text),
         "desk": {"desk_id": desk.desk_id, "controller": desk.controller} if desk else None,
-        # Every desk it belongs to: an older record touching two desks' aircraft has two.
+        # older records can touch two desks' aircraft
         "desks": [d.desk_id for d in desks],
         "severity": rated["level"] if rated else None,
     }
@@ -163,8 +162,8 @@ STAGE = {
     "COMMITTED": 4,
     "CLOSED": 4,
 }
-"""Where each audit action falls in a disruption's life: events stamped in the same second
-(a plan submitted and rejected at once) are ordered by it, so the later one is latest."""
+"""Lifecycle order of audit actions. Breaks ties when two events share a timestamp (a plan
+submitted and rejected in the same second)."""
 
 
 def _order(event: Mapping[str, Any]) -> tuple[str, int]:
@@ -188,8 +187,8 @@ def alerts(
     since: str | None = None,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
-    """The latest event of each disruption, for ``scope``, newer than ``since`` (an ISO
-    time), newest first."""
+    """Latest event per disruption for ``scope``, newer than ``since`` (ISO time), newest
+    first."""
     from crewops.store.items import from_dynamo
 
     if scope not in SCOPES:
@@ -199,9 +198,9 @@ def alerts(
         try:
             report = Report.from_dict(from_dynamo(item["report"]))
         except (DataError, KeyError, TypeError):
-            continue  # unreadable: the console shows it, the speaker skips it
+            continue  # the console still shows it
         if report.report_type is ReportType.PLANNED_LEAVE:
-            continue  # re-crewed weeks ahead: nothing for a speaker to announce
+            continue  # re-crewed weeks ahead, nothing to announce
         trail = audit(str(item["disruption_id"]))
         latest = max(trail, key=_order) if trail else {}
         analysis = from_dynamo(item.get("analysis") or {})
@@ -214,7 +213,7 @@ def alerts(
 
 
 def welcome_speech(name: str, alerts_since: list[Mapping[str, Any]], since: datetime) -> str:
-    """What arrived while someone was away, as one short spoken summary."""
+    """Short spoken summary of what arrived while someone was away."""
     if not alerts_since:
         return f"Welcome back, {name}. Nothing new came to you since {_day(since)} {since:%H:%M}Z."
     first = alerts_since[-1]  # oldest first reads best

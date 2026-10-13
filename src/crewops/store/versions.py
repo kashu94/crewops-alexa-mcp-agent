@@ -15,8 +15,8 @@ def version_key(crew_id: str) -> dict[str, str]:
 
 
 def bump_version(crew_id: str) -> dict[str, Any]:
-    """A transaction action that moves a crew member's roster version on, unconditionally:
-    for anything that changes whether they can fly (a report taking them out)."""
+    """Transaction action that bumps the version with no condition. Used when something
+    takes a crew member out (a sick report), so any commit that read the old version fails."""
     return {
         "Update": {
             "Key": version_key(crew_id),

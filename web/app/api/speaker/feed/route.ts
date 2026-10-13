@@ -3,8 +3,8 @@ import { ToolCallError } from "@/lib/mcp-result";
 
 const SCOPES = new Set(["room", "approvals", "desk-1", "desk-2", "desk-3"]);
 
-/** The alerts a desk or ops-room speaker announces, fetched as the speaker device. Needs
- * no one signed in. */
+/** Alert feed for a desk or ops-room speaker. Fetched as the speaker device, so nobody has to
+ * be signed in. */
 export async function GET(request: Request) {
   if (!(await paired())) {
     return Response.json({ error: "This screen is not paired as a speaker." }, { status: 401 });

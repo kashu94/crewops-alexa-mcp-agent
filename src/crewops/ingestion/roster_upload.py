@@ -1,14 +1,13 @@
-"""Lambda handler: an object lands under ``uploads/`` in the roster bucket.
+"""Lambda handler for objects landing under ``uploads/`` in the roster bucket.
 
-For each new object it reads the file, loads the current operation from DynamoDB, decides
-with ``roster.ingest`` whether the upload is acceptable, writes the uploaded records if so,
-and always writes a result report next to it:
+Reads the file, loads the current operation from DynamoDB and runs ``roster.ingest``. If
+the upload is accepted its records are written. A result report is written either way:
 
     uploads/week-38.json  ->  results/week-38.json.result.json
 
-A rejected upload is a normal outcome, not a failure: the handler reports it and returns.
-Only unexpected errors (DynamoDB or S3 unavailable) raise, so Lambda retries the event;
-writes are idempotent, so a retry is safe.
+Rejection is a normal outcome, so we report it and return. Only unexpected errors (S3 or
+DynamoDB unavailable) raise and get the event retried, which is safe because the writes
+are idempotent.
 """
 
 from __future__ import annotations
@@ -35,10 +34,9 @@ def result_key(upload_key: str) -> str:
 
 
 def process(s3: Any, store: Any, bucket: str, key: str) -> IngestResult:
-    """Ingest one uploaded object and write its result report."""
     size = s3.head_object(Bucket=bucket, Key=key)["ContentLength"]
     if size > MAX_UPLOAD_BYTES:
-        # Too large to read safely: reject without downloading it.
+        # HEAD first so we never pull a huge object into Lambda memory
         result = IngestResult(
             key,
             Status.REJECTED,

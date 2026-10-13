@@ -1,11 +1,10 @@
 """Store live reports as disruptions, exactly once.
 
 A report becomes a disruption item (status REPORTED) plus its first audit event, written in
-one transaction that only succeeds if the disruption id is new. A message delivered twice
-(SQS guarantees at-least-once delivery) therefore lands once; the second write is refused
-by the condition and reported as a duplicate, not an error.
+one transaction conditioned on the disruption id being new. SQS can deliver the same message
+twice; the second write fails the condition and comes back as a duplicate, not an error.
 
-Rejected reports are recorded separately so an admin can see what was refused and why.
+Rejected reports get their own items so an admin can see what was refused and why.
 """
 
 from __future__ import annotations
@@ -70,12 +69,12 @@ def audit_item(report: Report, received: datetime) -> dict[str, Any]:
 def store_report(table: Any, report: Report, received: datetime) -> StoreOutcome:
     """Write the disruption and its audit event together, only if the id is new.
 
-    Uses the table resource's client, which converts plain Python values itself, so items
-    are passed as plain dicts (no floats: report details hold only strings and integers).
+    Goes through the resource's client with plain dicts. That's fine because report details
+    only hold strings and ints, never floats.
 
-    A report that takes crew out (unavailable, or a lapsed certificate) also moves each
-    one's roster version on, so a plan being approved for them at the same moment is refused
-    and checked again rather than committed on a roster that no longer holds.
+    If the report takes crew out (unavailable, lapsed certificate) their roster versions are
+    bumped in the same transaction. A plan being approved for them at that moment then fails
+    its condition and gets re-checked, instead of committing against a stale roster.
     """
     bump = [
         {"Update": {"TableName": table.name, **bump_version(out)["Update"]}}
@@ -122,12 +121,11 @@ def store_rejection(
 ) -> None:
     """Record a refused message for the admin.
 
-    Keyed by the report id when the message carried a well-formed one, otherwise filed as
-    unidentified. The sort key includes the arrival time and the SQS message id, so every
-    refused message keeps its own record, and a redelivery of the same message rewrites the
-    same item instead of adding another. Reason and payload are cut to a fixed size, so no
-    message can produce an item DynamoDB would refuse; the payload is kept as text, never
-    parsed, since it may not be valid JSON at all.
+    Filed under the report id if the message had a well-formed one, else "unidentified".
+    The sort key has the arrival time and SQS message id, so each refused message gets its
+    own item and a redelivery overwrites it rather than adding a second. Reason and payload
+    are truncated so no message can blow the DynamoDB item size limit. The payload is kept
+    as raw text; it may not even be JSON.
     """
     at = _iso(received)
     owner = report_id if report_id and REPORT_ID_RE.match(report_id) else "unidentified"
@@ -158,8 +156,8 @@ def add_suggestion(
     note: str,
     at: datetime,
 ) -> dict[str, Any]:
-    """A controller's suggestion of cover for another desk's disruption. Advisory only:
-    the owning desk may adopt it, nothing else happens."""
+    """Cover suggested by a controller for another desk's disruption. Advisory only; the
+    owning desk can take it up or ignore it."""
     item = {
         schema.PK: disruption_pk(disruption_id),
         schema.SK: f"{SUGGESTION}{S}{_iso(at)}{S}{by}",
@@ -187,12 +185,12 @@ FILED = "FILED"
 
 
 def record_filed(table: Any, report: Report) -> None:
-    """Note a report against whoever filed it, when it is queued.
+    """Record a report against whoever filed it, at the time it is queued.
 
-    The queue and the worker may still refuse it (an unknown flight, a duplicate), and a
-    refusal is filed under the report id alone, so without this nobody could find out what
-    became of their own report. Also listed for the reporting desk (``FILED`` in gsi1), so
-    reporters see what crew report about themselves."""
+    The worker may still refuse it (unknown flight, duplicate) and a refusal is only keyed by
+    report id, so without this a sender couldn't find out what happened to their report.
+    Also indexed under ``FILED`` in gsi1 so the reporting desk sees what crew file about
+    themselves."""
     by = report.reported_by
     table.put_item(
         Item={
@@ -254,15 +252,12 @@ def rejections_for(table: Any, report_id: str) -> list[dict[str, Any]]:
 
 
 RESEND_IGNORED_FIELDS = frozenset({"reported_utc"})
-"""A sender resending a report usually stamps it again, so the time may differ."""
+"""Senders usually re-stamp a resent report, so the time can differ."""
 
 
 def same_report(stored: dict[str, Any], report: Report) -> bool:
-    """Whether a stored disruption holds this report: a genuine resend, not a reused id.
-
-    Type, sender, details and narrative must match exactly. The report time may differ,
-    because a client that resends usually stamps the message again; the first stored copy
-    keeps its original time.
+    """True if the stored disruption holds this same report (a genuine resend, not a reused
+    id). Everything but the report time must match; the first stored copy keeps its time.
     """
 
     def essence(doc: Any) -> dict[str, Any]:
@@ -312,10 +307,10 @@ ANALYSIS_FAILED = "ANALYSIS_FAILED"
 
 
 def record_analysis_failure(table: Any, disruption_id: str, reason: str, at: datetime) -> None:
-    """Note on the disruption's audit trail that it could not be analysed, and why.
+    """Add an audit event saying analysis failed, and why.
 
-    The disruption stays REPORTED, so it can be analysed again (``--pending``) once the
-    cause is fixed. Recorded once per attempt time; reasons are cut to a fixed size.
+    The disruption stays REPORTED so ``--pending`` picks it up again once the cause is
+    fixed. One event per attempt time; the reason is truncated.
     """
     when = _iso(at)
     table.put_item(
@@ -344,14 +339,14 @@ def store_analysis(
 ) -> AnalysisOutcome:
     """Attach an analysis to a REPORTED disruption and move it to OPTIONS_READY, once.
 
-    ``record_only`` (a reason) stores it CLOSED instead: an absence on days with nothing to
-    cover is kept on record (the person is not offered as cover then) without landing on a
-    desk, alerting anyone or starting an escalation clock.
+    With ``record_only`` (a reason) it goes straight to CLOSED instead. That is for an
+    absence on days with nothing to cover: we keep it so the person isn't offered as cover,
+    but it shouldn't land on a desk, alert anyone or start an escalation clock.
 
-    The update and its audit event are one transaction, conditioned on the disruption still
-    being REPORTED. A retried or duplicated trigger therefore cannot analyse twice or
-    overwrite a later status: the second attempt is refused and reported as already done.
-    Floats in the analysis are converted for DynamoDB, which has no float type.
+    The update and its audit event are one transaction conditioned on status still being
+    REPORTED, so a retried or duplicated trigger can't analyse twice or overwrite a later
+    status. The second attempt comes back as ALREADY_ANALYSED (or MISSING).
+    Floats go through to_dynamo since DynamoDB only takes Decimal.
     """
     at = _iso(analysed)
     status = STATUS_CLOSED if record_only else STATUS_OPTIONS_READY

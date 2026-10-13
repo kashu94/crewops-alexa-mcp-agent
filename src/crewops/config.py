@@ -1,12 +1,11 @@
 """Runtime settings, read once from the environment.
 
-Every AWS resource name is derived from a single stage name, so a second
-stage (``dev``, ``demo``, ``prod``) never collides with the first and no
-resource name is typed twice. Nothing here talks to AWS; this module only
-decides *which* resources and models the rest of the package uses.
+All AWS resource names hang off the stage name, so ``dev``, ``demo`` and ``prod`` can live
+side by side and no name is typed in two places. This module never calls AWS, it only works
+out which resources and models everything else uses.
 
-An empty environment variable counts as unset. ``CREWOPS_GUARDRAIL_ID=``
-in a ``.env`` file means "no guardrail yet", not "a guardrail named ''".
+Empty env vars count as unset, so ``CREWOPS_GUARDRAIL_ID=`` in ``.env`` means "no guardrail
+yet" rather than a guardrail called ''.
 """
 
 from __future__ import annotations
@@ -17,21 +16,19 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 STAGE_RE = re.compile(r"^[a-z][a-z0-9-]{1,19}$")
-"""Lowercase, starts with a letter, 2-20 chars. Resource names such as S3
-vector buckets only accept lowercase letters, digits and hyphens."""
+"""Kept short and lowercase because some resource names (S3 vector buckets, for one) only
+take lowercase letters, digits and hyphens."""
 
 TITAN_V2_DIMENSIONS = (256, 512, 1024)
-"""Output sizes Titan Text Embeddings V2 supports."""
 
 DEFAULT_REGION = "ap-southeast-2"
-"""Sydney: the home region of the AWS project this deploys to. Every service we use runs
-there: DynamoDB, SQS, SNS, Lambda, S3 Vectors, AgentCore, Bedrock (Nova and Titan)."""
+"""Sydney. Everything we use is available there, including S3 Vectors, AgentCore and the
+Nova and Titan models on Bedrock."""
 
-# Amazon Nova on Bedrock. These IDs work from any region that offers them, so changing
-# AWS_REGION does not silently break model calls:
-# - Nova Micro runs in-region (no profile prefix needed).
-# - Nova 2 Lite has no in-region endpoint; the global cross-region profile is required.
-# Any Bedrock Converse model with tool calling can replace these through the environment.
+# Nova on Bedrock. These ids work in any region that offers the model, so switching
+# AWS_REGION won't quietly break model calls. Nova Micro runs in-region without a profile
+# prefix. Nova 2 Lite has no in-region endpoint and needs the global cross-region profile.
+# Any Converse model with tool calling can be swapped in through the environment.
 DEFAULT_ROUTER_MODEL = "amazon.nova-micro-v1:0"
 DEFAULT_ADVISOR_MODEL = "global.amazon.nova-2-lite-v1:0"
 DEFAULT_EXPLAINER_MODEL = "global.amazon.nova-2-lite-v1:0"
@@ -39,7 +36,7 @@ DEFAULT_EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
 
 
 class ConfigError(ValueError):
-    """A setting is present but unusable."""
+    """Setting is present but unusable."""
 
 
 ENV_LINE_RE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
@@ -62,16 +59,12 @@ def _parse_value(value: str, where: str) -> str:
 
 
 def load_env_file(path: str | os.PathLike[str] = ".env", override: bool = False) -> dict[str, str]:
-    """Load ``KEY=VALUE`` lines from a ``.env`` file into ``os.environ``.
+    """Load ``KEY=VALUE`` lines from ``.env`` into ``os.environ``. Returns what was applied.
 
-    Blank lines and ``#`` comments are skipped, an optional ``export`` prefix is allowed,
-    spaces around ``=`` and trailing whitespace (including Windows line endings) are
-    ignored, a quoted value keeps its spaces, and ``value # note`` drops the note.
-    Variables already set in the shell win unless ``override`` is true, so a one-off
-    ``CREWOPS_STAGE=demo ...`` on the command line beats the file. A missing file is not
-    an error: every setting has a default.
-
-    Returns the values that were applied.
+    Handles comments, an optional ``export`` prefix, spaces around ``=``, CRLF endings,
+    quoted values, and trailing ``# note``. Shell variables win unless ``override`` is set,
+    so a one-off ``CREWOPS_STAGE=demo ...`` beats the file. No file is fine since every
+    setting has a default.
     """
     applied: dict[str, str] = {}
     try:
@@ -128,8 +121,8 @@ def _float(env: Mapping[str, str], key: str, default: float) -> float:
 
 
 def _guardrail_version(env: Mapping[str, str]) -> str:
-    """A guardrail is always pinned to a published version: the editable draft could change
-    under a running service without a deploy."""
+    """Guardrails must be pinned to a published version. DRAFT can be edited in the console
+    and would change behaviour under a running service without a deploy."""
     version = _get(env, "CREWOPS_GUARDRAIL_VERSION")
     if _get(env, "CREWOPS_GUARDRAIL_ID") and not version:
         raise ConfigError(
@@ -193,49 +186,46 @@ class Settings:
     max_tool_iterations: int
     """Hard stop on the advisor's tool loop."""
     router_semantic_floor: float
-    """Least cosine similarity for the router to borrow the intent of the closest example
-    question. Below it, the question goes to the triage model instead. Set from measured
-    paraphrases with ``python -m crewops.agent.calibrate``."""
+    """Minimum cosine similarity for the router to reuse the closest example's intent.
+    Anything lower goes to the triage model. Tuned on real paraphrases with
+    ``python -m crewops.agent.calibrate``."""
 
     user_pool_id: str | None
-    """The Cognito pool and app client whose access tokens the MCP server accepts. Set on
-    the deployed server by the stack; read from the auth stack by the local commands."""
+    """Cognito pool and app client whose tokens the MCP server accepts. The stack sets
+    these on the deployed server, local commands read them from the auth stack."""
     user_pool_client_id: str | None
     ingest_queue_url: str | None
-    """Where the MCP server sends reports."""
     queue_senders: tuple[str, ...]
-    """IAM principal ARNs, besides the MCP server, allowed to send reports straight to the
-    queue (an operator testing with ``send_report``). Empty: only the server."""
+    """Extra IAM principals allowed to send straight to the queue, e.g. an operator testing
+    with ``send_report``. Empty means only the MCP server."""
     memory_id: str | None
-    """AgentCore Memory holding each conversation's last turns. Unset: no memory, every
-    question stands on its own."""
+    """AgentCore Memory for recent conversation turns. Unset means each question is
+    answered on its own."""
     alerts_topic_arn: str | None
-    """The SNS topic the admin subscribes alert addresses to."""
     events_http_domain: str | None
-    """The AppSync Events API's HTTP domain, where live console updates are published."""
+    """AppSync Events HTTP domain for live console updates."""
     response_budget_seconds: float
-    """Time the voice path has to answer. Alexa allows 8 s; the rest is margin."""
+    """Alexa gives us 8 s. The default leaves some margin."""
     alexa_skill_id: str | None = None
-    """The CrewOps Alexa skill's id (amzn1.ask.skill...): requests for any other skill are
-    refused. Unset: no Alexa skill is deployed."""
+    """amzn1.ask.skill... id. Requests for any other skill are refused. Unset means no skill
+    is deployed."""
     alexa_redirect_urls: tuple[str, ...] = ()
-    """Alexa's account-linking redirect URLs, from the skill's Account Linking page. Set:
-    the auth stack adds a hosted sign-in page and an app client for Alexa."""
+    """From the skill's Account Linking page. When set, the auth stack adds a hosted sign-in
+    page and an app client for Alexa."""
     alexa_client_id: str | None = None
-    """The Cognito app client Alexa signs controllers in with; set on the skill by its stack."""
+    """Cognito app client used for Alexa account linking. Set on the skill by its stack."""
     alexa_events_stage: str = "development"
-    """Where Alexa notifications go: "development" (a skill in development, to its
-    developer's own devices) or "live" (a certified skill)."""
+    """In development, events only reach the developer's own devices. Use "live" once the
+    skill is certified."""
     escalate_after_minutes: int = 10
-    """How long a disruption may wait untouched on a desk before the duty supervisor is
-    emailed and the speakers announce it."""
+    """Untouched-on-desk time before the duty supervisor is emailed and speakers announce."""
     escalation_function_arn: str | None = None
     escalation_role_arn: str | None = None
-    """The escalation check and the role EventBridge Scheduler runs it with; set on the
-    notifier by its stack. Unset: no escalations are scheduled."""
+    """Escalation Lambda and the role Scheduler invokes it with. Both are set on the notifier
+    by its stack. If either is missing no escalations get scheduled."""
     push_enabled: bool = False
-    """Desktop alerts (web push) from the notifier; its stack sets it when the notifier runs
-    the MCP package, which carries the cryptography library push needs."""
+    """The stack only turns this on when the notifier ships the MCP package, because that's
+    the one bundling ``cryptography`` for web push."""
 
     # -- Derived resource names ---------------------------------------------
 
@@ -245,7 +235,7 @@ class Settings:
 
     @property
     def table_name(self) -> str:
-        """The single DynamoDB table holding the whole operation."""
+        """Single-table design, the whole operation lives here."""
         return f"{self.prefix}-ops"
 
     @property
@@ -262,7 +252,6 @@ class Settings:
 
     @property
     def ingest_queue(self) -> str:
-        """Live disruption reports land here before the worker stores them."""
         return f"{self.prefix}-ingest"
 
     @property
@@ -271,62 +260,58 @@ class Settings:
 
     @property
     def roster_bucket(self) -> str:
-        """Batch roster uploads; an S3 event triggers the loader."""
         return f"{self.prefix}-rosters"
 
     @property
     def alerts_topic(self) -> str:
-        """Outbound alerts to officers. Never an ingestion path."""
+        """Outbound only. Nothing reads from this topic."""
         return f"{self.prefix}-alerts"
 
     @property
     def event_api_name(self) -> str:
-        """AppSync Events API pushing live updates to the console."""
         return f"{self.prefix}-events"
 
     @property
     def memory_name(self) -> str:
-        """AgentCore Memory names allow letters, digits and underscores only."""
+        # AgentCore Memory names don't allow hyphens
         return f"crewops_{self.stage.replace('-', '_')}_memory"
 
     @property
     def issuer(self) -> str | None:
-        """The ``iss`` claim of the pool's tokens."""
+        """Expected ``iss`` claim on the pool's tokens."""
         if not self.user_pool_id:
             return None
         return f"https://cognito-idp.{self.aws_region}.amazonaws.com/{self.user_pool_id}"
 
     @property
     def mcp_runtime_name(self) -> str:
-        """AgentCore runtime names allow letters, digits and underscores only."""
+        # same naming rule as memory_name
         return f"crewops_{self.stage.replace('-', '_')}_mcp"
 
     @property
     def mcp_runtime_role(self) -> str:
-        """The MCP server's execution role. Fixed, so the ingest queue's policy can name it
-        without depending on the MCP stack."""
+        """Fixed name so the ingest queue policy can reference it without a dependency on
+        the MCP stack."""
         return f"{self.prefix}-mcp-runtime"
 
     @property
     def user_pool_name(self) -> str:
-        """Cognito user pool: who can sign in, and their roles as groups."""
+        """Roles are Cognito groups in this pool."""
         return f"{self.prefix}-users"
 
     @property
     def guardrail_name(self) -> str:
-        """Bedrock Guardrail screening every question and every answer."""
         return f"{self.prefix}-guardrail"
 
     @property
     def alexa_parameter_prefix(self) -> str:
-        """Parameter Store path of the skill's Login with Amazon client id and secret, which
-        send Alexa notifications. Created by hand (a SecureString), never in a file."""
+        """Holds the skill's LWA client id and secret for sending notifications. The secret
+        is a SecureString created by hand."""
         return f"/{self.prefix}/alexa"
 
     @property
     def push_parameter_prefix(self) -> str:
-        """Parameter Store path of the web push (VAPID) keys: the private key a SecureString,
-        the public key a plain parameter the web app reads."""
+        """VAPID keys. Private is a SecureString, public is plain so the web app can read it."""
         return f"/{self.prefix}/push"
 
     @property
@@ -382,9 +367,9 @@ class Settings:
 
 
 def shell_exports(path: str | os.PathLike[str] = ".env") -> str:
-    """``export`` lines for a POSIX shell: the ``.env`` values plus the resolved region and
-    stage. ``scripts/cdk.sh`` evaluates this, so the deploy script and the Python code read
-    ``.env`` with one parser and agree on every value, including defaults.
+    """``export`` lines with the ``.env`` values plus resolved region and stage.
+    ``scripts/cdk.sh`` evals this so the shell and Python share one ``.env`` parser and
+    the same defaults.
     """
     import shlex
 

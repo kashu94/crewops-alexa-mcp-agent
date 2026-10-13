@@ -249,7 +249,7 @@ def test_desk_command_end_to_end(plans, table, monkeypatch, capsys):
         desk.main(["--as", "nobody", "queue"])
 
 
-# -- Regression tests for review findings -------------------------------------------------
+# -- Regressions --------------------------------------------------------------------------
 
 from crewops.store.reports import store_analysis  # noqa: E402
 
@@ -332,8 +332,8 @@ def test_two_seats_of_one_role_on_one_pairing(table):
 
 
 def test_only_the_assigned_desk_plans_a_disruption(table):
-    # Seats on two airlines' aircraft, assigned to desk-2: no desk owns an aircraft, so the
-    # aircraft decide nothing. Only desk-2 sees it waiting and may plan it.
+    # Seats on two airlines' aircraft, assigned to desk-2. Desks don't own aircraft, so
+    # only desk-2 sees it waiting and may plan it.
     world = Operation.load(table).world
     crafted(
         table,

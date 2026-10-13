@@ -200,7 +200,7 @@ def test_too_few_first_officers_brings_in_captains_in_the_right_seat(world):
     assert result.crew_options, "a captain current in the right seat may fly as first officer"
     assert all(o.strategy is Strategy.RIGHT_SEAT for o in result.crew_options)
     assert all(o.crew_id in world.right_seat_qualified for o in result.crew_options)
-    # Never one pilot: the last resort for a pilot seat is still cancelling, not flying short.
+    # Never one pilot. The last resort for a pilot seat is cancelling, not flying short.
     assert result.short_crew is None and result.cancellation.strategy is Strategy.CANCEL
 
 

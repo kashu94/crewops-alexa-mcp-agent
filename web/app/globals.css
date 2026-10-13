@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* CrewOps control room, light. Cool canvas, white panels with hairline borders, aviation
-   cyan for selection, crimson for critical, amber for anything waiting on a person. */
+/* Light control-room theme. Cyan marks selection, crimson is critical, amber means someone
+   has to act. */
 :root {
   --background: #f3f6fa;
   --foreground: #0f172a;
@@ -101,7 +101,7 @@
   animation: wave 900ms ease-in-out infinite;
 }
 
-/* Cards that respond to the pointer: a lift and a cyan glow. */
+/* hover lift + cyan glow */
 .lift {
   transition:
     transform 180ms ease,
@@ -116,7 +116,6 @@
     0 0 0 1px rgb(56 189 248 / 0.25);
 }
 
-/* Range sliders in the accent colour. */
 input[type="range"] {
   accent-color: var(--accent);
 }
@@ -132,7 +131,7 @@ input[type="range"] {
 }
 
 body {
-  /* A faint ops-room grid behind everything. */
+  /* faint grid background */
   background-image:
     linear-gradient(rgb(148 163 184 / 0.07) 1px, transparent 1px),
     linear-gradient(90deg, rgb(148 163 184 / 0.07) 1px, transparent 1px);
@@ -142,7 +141,7 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Anything clickable shows the hand cursor (Tailwind v4 leaves buttons with the arrow). */
+/* Tailwind v4 dropped cursor: pointer on buttons. */
 button:not(:disabled),
 [role="button"]:not([aria-disabled="true"]),
 summary,
@@ -151,7 +150,7 @@ select {
   cursor: pointer;
 }
 
-/* The sign-in page's night approach: slow, quiet motion behind the text. */
+/* Sign-in backdrop. Keep the motion slow so it doesn't pull focus from the form. */
 @keyframes aurora-a {
   0%,
   100% {
@@ -270,7 +269,7 @@ select {
   }
 }
 
-/* The desk speaker's light ring, as an Echo's: what the device is doing at a glance. */
+/* Echo-style light ring on the desk speaker */
 @keyframes ring-spin {
   to {
     transform: rotate(360deg);

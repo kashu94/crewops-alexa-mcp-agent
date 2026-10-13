@@ -23,7 +23,7 @@ type Roster = {
     last_rest_ended: string | null;
   };
   pairings: { pairing_id: string; aircraft: string; role: string; days: Day[] }[];
-  /** The days shown (a few back, two months ahead) and the operation's today. */
+  /** Shown range (a few days back to two months ahead) and the operation's today. */
   window?: { from: string; to: string; today: string };
   notices?: { disruption_id: string; status: string; at: string | null; message: string }[];
   reported_unavailable?: {
@@ -76,8 +76,7 @@ function addDays(iso: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Month grids (Monday first) covering ``from`` to ``to``: each cell a date, or null for
- * the padding before the 1st. */
+/** Monday-first month grids from `from` to `to`. Leading padding cells are null. */
 function months(from: string, to: string): { label: string; cells: (string | null)[] }[] {
   const out: { label: string; cells: (string | null)[] }[] = [];
   let cursor = `${from.slice(0, 7)}-01`;
@@ -104,9 +103,9 @@ function ReportSheet({
 }: {
   crewId: string;
   taken: NonNullable<Roster["reported_unavailable"]>;
-  /** The dates they have a duty. */
+  /** duty dates */
   flying: Set<string>;
-  /** Today to two months ahead: the server refuses anything else. */
+  /** today to two months out; the server rejects anything outside */
   earliest: string;
   latest: string;
   onClose: (text?: string) => void;
@@ -115,11 +114,11 @@ function ReportSheet({
   const [error, setError] = useState<string | null>(null);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  // Days off in the chosen period: allowed (crew control should know), but nothing to cover.
+  // Only days off in range. Still allowed so crew control knows, but there's nothing to cover.
   const offOnly = useMemo(() => {
     if (!from) return false;
     const end = to && to >= from ? to : from;
-    // Compared as dates, never walked day by day: any year typed in stays instant.
+    // string compare, not a day-by-day walk, so a typo'd year 9999 doesn't hang the tab
     return ![...flying].some((d) => d >= from && d <= end);
   }, [from, to, flying]);
 
@@ -269,7 +268,7 @@ export default function Crew() {
   }, [me.crew_id]);
   useEffect(reload, [reload]);
 
-  // A report is checked within a minute: look again while one is still being checked.
+  // keep polling while a report is still being checked (takes up to a minute)
   const checking = filed.some((f) => f.status === "QUEUED" || f.status === "REPORTED");
   useEffect(() => {
     if (!checking) return;
@@ -277,7 +276,7 @@ export default function Crew() {
     return () => clearInterval(t);
   }, [checking, reload]);
 
-  // Days reported unavailable (by them or by a reporter), with why: shown in their own colour.
+  // reported-unavailable days (self or by a reporter) with the reason, in their own colour
   const out = useMemo(() => {
     const map = new Map<string, { reason: string | null; disruption_id: string }>();
     (roster?.reported_unavailable ?? []).forEach((r) => {
@@ -309,7 +308,7 @@ export default function Crew() {
       </div>
     );
 
-  // Older servers send no window: the duty clock's week then.
+  // older servers don't send a window; fall back to the duty clock's week
   const today = roster.window?.today ?? roster.clock.as_of.slice(0, 10);
   const win = roster.window ?? { from: today, to: addDays(today, 6), today };
 

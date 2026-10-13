@@ -69,10 +69,10 @@ REPORTED ──analysis (≈1 min)──> OPTIONS_READY ──submit_plan──>
   cover each seat ranked by cost, who must be told, and which controller desk owns it (the
   one with the fewest open disruptions, or the desk already handling the same seat).
 - A disruption left untouched on a desk for 10 minutes is escalated to the duty supervisor.
-- Someone out on days they fly nothing is **recorded** (closed at once, on no desk): they
-  are simply not offered as cover then.
-- **Severity** (high, medium, low) comes with every disruption, with its reasons: high
-  means a flight is at risk however it is handled. Say it first when it is high or medium.
+- Someone out on days they fly nothing is recorded: closed at once and put on no desk.
+  They are not offered as cover on those days.
+- Every disruption comes with a severity (high, medium, low) and its reasons. High means a
+  flight is at risk however it is handled. Say it first when it is high or medium.
 
 ## Playbooks
 
@@ -106,9 +106,10 @@ something moved meanwhile and the plan went back to the controller (say why, fro
 ### Report a disruption (reporter, controller, approver; crew for themselves)
 1. `report_reference` for valid crew ids, flights, gates and stations (never guess an id;
    `crew_tool("suggest_crew_ids", {"near": "C-10"})` offers real ones to confirm).
-2. Dates: **today to two months ahead**. Further ahead is planned leave, booked by an admin.
+2. Dates run from today to two months ahead. Further ahead is planned leave, booked by an
+   admin.
 3. Read the report back, then `report_disruption(report_type, details)`. It is checked and
-   analysed within a minute: follow it with `my_reports`.
+   analysed within a minute; follow it with `my_reports`.
 
 ### Planned leave (admin)
 `report_disruption("planned_leave", {"crew_id", "from_date", "to_date", "reason"})` with a

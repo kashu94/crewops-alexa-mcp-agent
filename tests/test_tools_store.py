@@ -54,7 +54,7 @@ def test_each_analysed_disruption_goes_to_the_least_loaded_desk(table):
         analysed(table, report_id)
     by_desk, raw = counts(CrewOpsTools.load(table))
     # One each in desk order, then the fourth to the desk given fewest overall (a tie, so
-    # desk order again): never by which aircraft it touches.
+    # desk order again). The aircraft it touches never matters.
     assert by_desk["Ananya Iyer"] == ["r-gate0001", "r-sick0001"]
     assert by_desk["Rohit Malhotra"] == ["r-tech0001"]
     assert by_desk["Divya Rao"] == ["r-stn00001"]

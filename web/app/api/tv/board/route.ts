@@ -1,8 +1,8 @@
 import { DeviceError, deviceCall, pairedDevice } from "@/lib/device";
 import { ToolCallError } from "@/lib/mcp-result";
 
-/** The ops-room wall display's data (the Fire TV app): fetched as the speaker device, so
- * nobody signs in on the TV. A hosted app answers only a paired device (see `pairedDevice`). */
+/** Board data for the Fire TV wall display. Fetched as the speaker device so nobody signs in
+ * on the TV. When hosted, only a paired device gets an answer (see `pairedDevice`). */
 export async function GET(request: Request) {
   if (!(await pairedDevice(request))) {
     return Response.json({ error: "This screen is not paired." }, { status: 401 });

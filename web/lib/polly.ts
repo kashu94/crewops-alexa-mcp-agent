@@ -4,7 +4,7 @@ import { PollyClient, SynthesizeSpeechCommand, type Engine, type VoiceId } from 
 
 import { settings } from "./config";
 
-export const MAX_SPOKEN_CHARS = 1500;
+const MAX_SPOKEN_CHARS = 1500;
 let polly: PollyClient | null = null;
 
 /** Text as MP3 in the deployment's Polly voice (Indian English). Used for answers and for

@@ -44,7 +44,7 @@ function sweep(now: number) {
   for (const [key, entry] of clients) {
     if (now - entry.used > IDLE_MS) drop(key, entry);
   }
-  // Over the cap: the least recently used go first.
+  // over the cap: evict least recently used
   const extra = clients.size - MAX_CLIENTS;
   if (extra > 0) {
     [...clients.entries()]
@@ -54,11 +54,10 @@ function sweep(now: number) {
   }
 }
 
-/** The cached connection for this token, or a new one. ``failed`` is a connection a call
- * just saw break: only that one is replaced. When several calls share a connection and it
- * breaks, the first to retry opens a new one and the rest reuse it, rather than each
- * closing the last one's fresh connection (which fails it mid-call with "Connection
- * closed"). */
+/** The cached connection for this token, or a new one. `failed` is the connection a call
+ * just saw break, and only that one gets replaced. If several calls share a connection when
+ * it breaks, the first retry opens a new one and the rest reuse it. Otherwise each retry
+ * would close the previous one's fresh connection and fail it with "Connection closed". */
 function clientFor(accessToken: string, failed?: Entry): { key: string; entry: Entry } {
   const now = Date.now();
   sweep(now);

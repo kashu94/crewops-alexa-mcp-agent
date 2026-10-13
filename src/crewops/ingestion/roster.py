@@ -1,16 +1,17 @@
-"""Roster uploads: parse a document, merge it over the current operation, and validate.
+"""Roster uploads. Parse a document, merge it over the current operation, validate.
 
-An upload is a JSON object holding any of the operation's collections, in the same shapes
-as the seed files, for example ``{"pairings": [...], "flagged_exceptions": [...]}``. The
-seed's ``rosters.json`` and ``rules.json`` can therefore be uploaded unchanged.
+An upload is a JSON object with any of the operation's collections in the seed file shapes,
+e.g. ``{"pairings": [...], "flagged_exceptions": [...]}``. So the seed's ``rosters.json``
+and ``rules.json`` upload as they are.
 
-Uploaded records replace existing records with the same identity (a crew id, a flight id,
-a pairing id, ...) and new identities are added. Nothing is ever deleted by an upload.
+Records replace existing ones with the same identity (crew id, flight id, pairing id, ...)
+and anything new is added. Uploads never delete.
 
-The merged operation is validated as a whole, because most mistakes only show against
-other records: a pairing naming a crew member who does not exist, or a new duty that
-double-books someone. Nothing is written unless the merged result has no errors.
-Everything here is pure; ``roster_upload`` does the AWS input and output.
+We validate the merged operation as a whole because most mistakes only show up against
+other records, like a pairing naming a crew member who doesn't exist or a duty that
+double-books someone. Nothing is written if the merge has errors.
+
+No I/O in this module. ``roster_upload`` handles S3 and DynamoDB.
 """
 
 from __future__ import annotations
@@ -45,9 +46,9 @@ MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 class Collection:
     record_type: type
     seed_field: str
-    """The ``SeedData`` field this collection merges into."""
+    """``SeedData`` field this merges into."""
     identity: Callable[[Any], Any]
-    """What makes two records "the same record" for replacement."""
+    """Key used to decide whether an uploaded record replaces an existing one."""
 
 
 COLLECTIONS: dict[str, Collection] = {
@@ -68,13 +69,12 @@ COLLECTIONS: dict[str, Collection] = {
 }
 COSTS_KEY = "costs"
 DESCRIPTIVE_KEYS = frozenset({"note", "notes", "time_convention", "definitions"})
-"""Free-text keys the seed files carry. Accepted and ignored."""
+"""Free-text keys the seed files carry. Accepted and ignored so seed files upload as-is."""
 
 
 @dataclass(frozen=True, slots=True)
 class Upload:
     records: Mapping[str, tuple[Any, ...]]
-    """Collection name -> parsed records."""
     costs: CostTable | None = None
 
     def all_records(self) -> Iterator[Any]:
@@ -92,7 +92,7 @@ class Upload:
 
 
 def parse_upload(doc: Any) -> Upload:
-    """Parse and check one upload document. Raises ``DataError`` naming the bad field."""
+    """Raises ``DataError`` naming the bad field."""
     if not isinstance(doc, Mapping):
         raise DataError("upload: expected a JSON object at the top level")
     unknown = set(doc) - set(COLLECTIONS) - {COSTS_KEY} - DESCRIPTIVE_KEYS
@@ -123,7 +123,6 @@ def parse_upload(doc: Any) -> Upload:
 
 
 def merge(base: SeedData, upload: Upload) -> SeedData:
-    """``base`` with the uploaded records replacing or adding by identity."""
     changes: dict[str, Any] = {}
     for name, rows in upload.records.items():
         collection = COLLECTIONS[name]
@@ -160,10 +159,10 @@ class IngestResult:
 
 
 def ingest(raw: bytes, base: SeedData, upload_key: str) -> tuple[IngestResult, list[Any]]:
-    """Decide what an upload would change. Returns the result and the records to write.
+    """Returns the result and the records to write (empty unless accepted).
 
-    Records to write is empty unless the result is accepted. Warnings already present in
-    ``base`` are not repeated, so a report only shows what this upload introduced.
+    Warnings that ``base`` already had are filtered out so the report only shows what this
+    upload introduced.
     """
 
     def rejected(*errors: str) -> tuple[IngestResult, list[Any]]:
