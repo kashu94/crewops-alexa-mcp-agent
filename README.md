@@ -557,8 +557,14 @@ icons explain each screen and term.
 
 The browser calls no AWS API except the live-events socket. The app's server forwards every
 action to the MCP server as the signed-in user, so every role rule is the server's. Voice
-input uses the browser's speech recognition (Chrome or Edge); elsewhere, type. Hosting on AWS comes in the next
-step.
+input uses the browser's speech recognition (Chrome or Edge); elsewhere, type.
+
+The app is hosted on AWS Amplify at https://dev.d2ibbbc4686wno.amplifyapp.com, built from the
+`dev` branch by `amplify.yml` (Node 20, root `web/`). The Amplify console holds the same
+`CREWOPS_*` variables as `web/.env.local` (without `AWS_PROFILE`); the build copies them into
+`.env.production`, because Amplify passes console variables to the build, not to the running
+server. Spoken replies on the hosted app need a compute role that may call
+`polly:SynthesizeSpeech` (App settings, IAM roles); without one the browser's own voice speaks.
 
 ### The desk speaker and "welcome back"
 
@@ -573,6 +579,14 @@ each announcement ends, three times at most. It stops as soon as the disruption 
 or asks "What are my notifications?". Several alerts take turns, oldest first. After the
 third announcement the ring stays amber until someone listens. Each alert is built from the
 disruption's latest event and its analysis, never from a model.
+
+The speaker also answers questions about the room, spoken (Ask) or typed: how many desks and
+controllers there are and who they are, what is open on each desk or on "my desk", which desk
+is busiest, how many disruptions are open, escalated or waiting for approval, and today's
+flights, crew out and reserves. The answers come from the ops board by fixed rules
+(`web/lib/room-answers.ts`), so they say nothing the wall display doesn't already show.
+Anything else is turned away with a pointer to Alexa or the assistant, because questions about
+people and legality need a signed-in person behind them.
 
 ```bash
 uv run python -m crewops.web_env --speaker   # after provisioning the team
