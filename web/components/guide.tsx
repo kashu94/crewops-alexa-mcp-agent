@@ -147,6 +147,12 @@ const BY_ROLE: Partial<Record<Role, Step[]>> = {
   ],
   admin: [
     {
+      title: "Reports filed in error and passwords",
+      text:
+        "Revoke a report filed in error (a reporter's, a crew member's own sick report, planned leave) with a reason, until cover is approved; a plan waiting for approval is withdrawn with it. " +
+        "Reset a team member's password: you get a new random one to pass on, once. Only a super admin resets an admin's. Admins never submit or approve a plan.",
+    },
+    {
       title: "Rules and alerts",
       text:
         "Book planned leave (it is re-crewed in advance, with no urgency). Tighten legality thresholds (never looser than regulation; only a super admin may relax one back), read the " +

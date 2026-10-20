@@ -376,7 +376,16 @@ export function CommittedPlan({ detail }: { detail: Detail }) {
       <ul className="mt-2 flex flex-col gap-1 text-sm">
         {(plan.picks ?? []).map((p) => (
           <li key={`${p.pairing_id}-${p.role}-${p.crew_id}`}>
-            <b>{p.name}</b> <Mono className="text-sky-700">{p.crew_id}</Mono> flies {p.role} on{" "}
+            {p.crew_id ? (
+              <>
+                <b>{p.name}</b> <Mono className="text-sky-700">{p.crew_id}</Mono> flies {p.role} on{" "}
+              </>
+            ) : (
+              // cancelled, or operated one short: nobody flies the seat
+              <>
+                <b>{p.name}</b> for {p.role} on{" "}
+              </>
+            )}
             <Mono>{p.pairing_id}</Mono>
             {p.replaces && (
               <>
@@ -471,21 +480,26 @@ export function Actions({
   }
 
   if (!canPlan && !canDecide && !canWithdraw) {
+    // After an action the reload can leave nothing for this role to do (an approval found
+    // stale, a plan sent back), so the outcome is kept above the status line.
     return (
-      <p className="flex items-center gap-2 text-xs text-muted">
-        <Lock size={13} />
-        {detail.status === "COMMITTED"
-          ? "Committed: the roster has been changed."
-          : detail.status === "CLOSED"
-            ? "Resolved: see the remark on the audit trail."
-            : pending
-              ? pending.submitted_by === me.user_id
-                ? "Waiting for a different approver."
-                : "A plan is waiting for an approver."
-              : isController && !detail.yours
-                ? `Only ${owner(detail)} can plan this one; you can read it.`
-                : "Nothing for your role to do here."}
-      </p>
+      <div className="flex flex-col gap-3">
+        {message && <Notice tone={message.tone}>{message.text}</Notice>}
+        <p className="flex items-center gap-2 text-xs text-muted">
+          <Lock size={13} />
+          {detail.status === "COMMITTED"
+            ? "Committed: the roster has been changed."
+            : detail.status === "CLOSED"
+              ? "Resolved: see the remark on the audit trail."
+              : pending
+                ? pending.submitted_by === me.user_id
+                  ? "Waiting for a different approver."
+                  : "A plan is waiting for an approver."
+                : isController && !detail.yours
+                  ? `Only ${owner(detail)} can plan this one; you can read it.`
+                  : "Nothing for your role to do here."}
+        </p>
+      </div>
     );
   }
 

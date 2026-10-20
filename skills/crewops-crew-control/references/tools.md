@@ -130,6 +130,18 @@ Reporters, controllers and approvers: the crew, flights, aircraft, gates and sta
 
 Parameters: none.
 
+### `reset_password`: **commits**
+
+Admin: give a team member a new random password, returned once. An admin resets crew, reporters, controllers, approvers and auditors; only a super admin resets an admin. Nobody resets their own here, nor the speaker device's.
+
+Parameters: `username` (string, required).
+
+### `revoke_report`: **commits**
+
+Admin: withdraw a report filed in error (a reporter's report, a crew member's own unavailability or planned leave), saying why. Only while nothing has been done about it: reported, being planned, or a plan waiting for approval (that plan is withdrawn too). Once cover is approved, crew control resolves it instead. The crew it named count as available again.
+
+Parameters: `disruption_id` (string, required); `reason` (string, required).
+
 ### `rule_thresholds`: reads only
 
 The legality rules' adjustable thresholds: current value, allowed range (never looser than regulation) and the rule's text.
@@ -171,6 +183,12 @@ Parameters: `disruption_id` (string, required); `choices` (null/object, optional
 Controller: suggest cover for a seat on another desk's disruption (seat as "P-2291/Captain/C-1042"). The owning desk sees it and may adopt it; it plans nothing.
 
 Parameters: `disruption_id` (string, required); `seat` (string, required); `crew_id` (string, required); `note` (string, optional, default `''`).
+
+### `team_accounts`: reads only
+
+Admin: the team's sign-ins, roles, and whether you may reset each password.
+
+Parameters: none.
 
 ### `welcome_back`: **changes**
 

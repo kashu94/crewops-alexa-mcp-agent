@@ -457,3 +457,15 @@ def test_the_echo_says_what_happened_through_a_reminder(ops_table):
     assert quiet.handle(envelope) == {"version": "1.0", "response": {}}
     with pytest.raises(proactive.ProactiveError):
         proactive.set_reminder("https://evil.example.com", "t", made)
+
+
+def test_spoken_leaves_a_date_shaped_non_date_as_written():
+    from crewops.alerts import spoken
+    from crewops.alexa.skill import response
+
+    # A reject reason or an answer can hold "2026-02-30"; it used to raise and silence the
+    # speaker feed and the skill's answer.
+    assert spoken("sent back: ref 2026-02-30, C-1042 on 2026-10-13") == (
+        "sent back: ref 2026-02-30, C 1042 on 13 October"
+    )
+    assert "2026-13-01" in response("Nothing on 2026-13-01.")["response"]["outputSpeech"]["text"]

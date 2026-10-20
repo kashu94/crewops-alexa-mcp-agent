@@ -107,6 +107,7 @@ const STATUS: Record<string, string> = {
   QUEUED: "bg-slate-100 text-slate-700 ring-slate-200",
   WITHDRAWN: "bg-slate-100 text-slate-700 ring-slate-200",
   STALE: "bg-orange-100 text-orange-800 ring-orange-200",
+  REVOKED: "bg-slate-100 text-slate-500 ring-slate-200",
 };
 
 export function Status({ value }: { value: string }) {

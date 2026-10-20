@@ -39,7 +39,7 @@ class ConfigError(ValueError):
     """Setting is present but unusable."""
 
 
-ENV_LINE_RE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
+ENV_LINE_RE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
 
 def _parse_value(value: str, where: str) -> str:
@@ -80,7 +80,9 @@ def load_env_file(path: str | os.PathLike[str] = ".env", override: bool = False)
         match = ENV_LINE_RE.match(line)
         if not match:
             raise ConfigError(f"{path}:{number}: expected KEY=VALUE, got {line!r}")
-        key, value = match.group(1), _parse_value(match.group(2).strip(), f"{path}:{number}")
+        key, rest = match.group(1), match.group(2)
+        # "A=   # note" is empty, as in a shell: "#" after a space starts a comment
+        value = "" if re.match(r"\s+#", rest) else _parse_value(rest.strip(), f"{path}:{number}")
         if override or key not in os.environ:
             os.environ[key] = value
             applied[key] = value

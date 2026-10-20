@@ -318,6 +318,14 @@ def test_who_am_i_comes_from_the_sign_in(pipeline):
     assert ask(pipeline, "who am I?", NAIR).text.startswith("You're A. Nair (C-1042), Captain")
     # A real question that opens with a greeting is still answered.
     assert ask(pipeline, "hi, who covers C-1042 on 13 Oct?", ROHIT).source == "template"
+    # So is one that opens by saying who you are; "who am I and what can I do" stays small talk.
+    for question in (
+        "I am a controller, who covers C-1042 on 13 Oct?",
+        "Am I a crew member on P-2291?",
+    ):
+        assert ask(pipeline, question, ROHIT).source != "smalltalk"
+    assert ask(pipeline, "who am I and what can I do?", ROHIT).source == "smalltalk"
+    assert ask(pipeline, "what's my desk today?", ROHIT).source == "smalltalk"
 
 
 def test_my_certificate_means_the_asker_and_never_everyone(pipeline):

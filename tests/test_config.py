@@ -129,6 +129,9 @@ def test_load_env_file_applies_values_without_overriding_shell(tmp_path, private
         ("A=a=b#c", "a=b#c"),
         ("A=plain # note", "plain"),
         ("A=", ""),
+        ("A= # none yet", ""),
+        ("A=\t# none yet", ""),
+        ("A=#x", "#x"),
     ],
 )
 def test_env_value_edge_cases(tmp_path, private_environ, line, value):
@@ -185,3 +188,13 @@ def test_guardrail_is_pinned_to_a_published_version():
         Settings.from_env({"CREWOPS_GUARDRAIL_ID": "gr-1"})
     with pytest.raises(ConfigError, match="not DRAFT"):
         Settings.from_env({"CREWOPS_GUARDRAIL_ID": "gr-1", "CREWOPS_GUARDRAIL_VERSION": "DRAFT"})
+
+
+def test_env_example_loads_as_documented(private_environ):
+    """Copying .env.example to .env must give working settings, not a config error."""
+    from pathlib import Path
+
+    example = Path(__file__).resolve().parents[1] / ".env.example"
+    load_env_file(example)
+    s = Settings.from_env()
+    assert s.stage == "dev" and s.guardrails_enabled is False

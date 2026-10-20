@@ -72,6 +72,17 @@ describe("desk speaker questions", () => {
     expect(say("how many flights today")).toBe("21 flights today, with 2,272 passengers booked.");
   });
 
+  it("counts a report not yet analysed, which has no severity", () => {
+    const fresh = (counts: RoomBoard["counts"]) =>
+      answerRoomQuestion("How many disruptions are open?", { ...board, counts }, "room").text;
+    expect(fresh({ open: 1, high: 0, medium: 0, low: 0, escalated: 0 })).toBe(
+      "1 disruption is open: 1 not yet assessed.",
+    );
+    expect(fresh({ open: 4, high: 1, medium: 1, low: 1, escalated: 1 })).toBe(
+      "4 disruptions are open: 1 high, 1 medium, 1 low, 1 not yet assessed, and 1 escalated.",
+    );
+  });
+
   it("turns away anything else", () => {
     const r = answerRoomQuestion("Is C-2087 legal for P-2291?", board, "room");
     expect(r).toEqual({ text: OUT_OF_SCOPE, inScope: false });

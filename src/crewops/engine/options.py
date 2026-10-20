@@ -163,8 +163,13 @@ class OptionsResult:
     @property
     def next_tier_premium_inr(self) -> int:
         """Extra cost of the next-cheapest price tier over the recommendation."""
-        tiers = sorted({o.cost_inr for o in self.crew_options})
-        return tiers[1] - tiers[0] if len(tiers) > 1 else 0
+        if not self.recommended:
+            return 0
+        # Substitutes are listed after every own-rank option, so one can cost less than the
+        # recommendation; only dearer tiers count.
+        cheapest = self.recommended.cost_inr
+        dearer = [o.cost_inr for o in self.crew_options if o.cost_inr > cheapest]
+        return min(dearer) - cheapest if dearer else 0
 
     @property
     def equal_cost_alternatives(self) -> int:
@@ -200,16 +205,19 @@ def _resilience(world: World, a: Assessment, role: Rank, base: str) -> float:
     """Score for using one of today's on-call crew of this rank at this base.
 
     Taking the only reserve captain at a station hurts more than taking one of twelve, hence
-    100 * (n - 1) / n. A day-off callout leaves the pool alone and scores 100.
+    100 * (n - 1) / n. A day-off callout leaves the pool alone and scores 100. The pool is the
+    crew member's own airline's, since another airline's reserves can't cover its trips.
     """
     if not a.on_reserve:
         return 100.0
     day = a.days[0].date
+    airline = world.airline_of_crew.get(a.crew_id)
     pool = sum(
         1
         for crew_id, duties in world.reserves.items()
         if any(day in r.dates and r.base == base for r in duties)
         and world.crew[crew_id].rank is role
+        and world.airline_of_crew.get(crew_id) == airline
     )
     return 100.0 if pool <= 0 else round(100.0 * (pool - 1) / pool, 1)
 

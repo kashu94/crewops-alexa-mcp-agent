@@ -31,6 +31,9 @@ from crewops.store.versions import read_versions, version_key  # noqa: F401
 STATUS_SUBMITTED = "SUBMITTED"
 STATUS_COMMITTED = "COMMITTED"
 STATUS_CLOSED = "CLOSED"
+STATUS_REVOKED = "REVOKED"
+"""Withdrawn by an admin as filed in error. Drops out of every open list and stops counting
+the crew it named as unavailable."""
 """Closed with no plan, because there was no legal cover. The controller records what was
 done instead (flights cancelled, say)."""
 PLAN_SUBMITTED = "SUBMITTED"
@@ -222,6 +225,32 @@ def close_disruption(table: Any, disruption_id: str, actor: str, at: datetime, r
             _audit(disruption_id, STATUS_CLOSED, actor, when, reason=reason),
         ],
     )
+
+
+def revoke(
+    table: Any,
+    disruption_id: str,
+    frm: str,
+    actor: str,
+    at: datetime,
+    reason: str,
+    plan: dict[str, Any] | None = None,
+) -> None:
+    """Any not-yet-acted-on status -> REVOKED. A plan waiting for approval is withdrawn in the
+    same transaction, so nobody can approve cover for a report that no longer stands."""
+    when = _iso(at)
+    actions = []
+    if plan is not None:
+        actions.append(
+            _move_plan(
+                plan, PLAN_WITHDRAWN, {"decided_by": actor, "decided_utc": when, "reason": reason}
+            )
+        )
+    actions += [
+        _move_disruption(disruption_id, frm, STATUS_REVOKED, None),
+        _audit(disruption_id, STATUS_REVOKED, actor, when, reason=reason),
+    ]
+    _transact(table, actions)
 
 
 def commit(

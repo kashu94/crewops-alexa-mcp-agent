@@ -56,8 +56,8 @@ live in code, never in a prompt.
 | Controller | Review disruptions and options, submit one plan for approval |
 | Approver | Approve or reject submitted plans; approval commits them |
 | Auditor | Read-only access to every disruption, decision and audit record |
-| Admin | Tighten rule thresholds, read the system activity log, manage alert addresses |
-| Super admin | Everything an admin does, and relax a rule threshold back towards regulation (an admin may only tighten one) |
+| Admin | Revoke a report filed in error (a reporter's, a crew member's own absence, planned leave) until cover is approved; reset the passwords of crew, reporters, controllers, approvers and auditors; book planned leave; tighten rule thresholds; read the system activity log; manage alert addresses. Never submits or approves a plan |
+| Super admin | Everything an admin does, and also resets admins' passwords and relaxes a rule threshold back towards regulation (an admin may only tighten one) |
 | Speaker | A device, not a person: hears the alert briefs for the desk or area its screen is set to; cannot read records, ask questions or change anything |
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#roles-and-approvals).
@@ -403,6 +403,9 @@ uv run python -m crewops.mcp.client --as c1042.nair report_disruption \
   '{"report_type": "crew_unavailable", "details": {"crew_id": "C-1042", "from_date": "2026-10-16", "reason": "sick"}}'
 ```
 
+Set `from_date` to a day from today up to two months ahead: on the real clock the server refuses
+dates outside that window.
+
 Its tools: `ask` (the full verified answer pipeline), `my_queue`, `show_disruption`,
 `report_disruption`, the plan actions (`submit_plan`, `approve_plan`, `reject_plan`,
 `withdraw_plan`, `close_disruption`), `list_crew_tools` / `crew_tool` for the
@@ -547,7 +550,7 @@ cd web && npm install && npm run dev # http://localhost:3000
 | Controller | controllers, auditors, admins | Live figures for the role, the ingestion feed of disruptions, and the solution engine: the recommendation, each seat's legal cover ranked by cost with cancellation last, every rule's margin checked on demand, crew another desk also wants, and the plan submitted from there. Each disruption's full record adds coverage figures, its desk, crew another desk is competing for (with a joint plan across both), recommendation cards by policy, a plain explanation of the chosen option, every legal option to choose from (the first ten, then the rest on request; anyone reported unavailable since is struck through), the regulated substitutes, operating short or cancelling, each chosen only after a warning, cover suggested by other desks, every excluded candidate and why, the trip's flights and crew, plans and the audit trail. A committed disruption shows the options as they stood and the choice made. Every record says in one sentence how it gets resolved (re-crew, a decision, or handled internally), shows gate moves and late flights with passengers booked, and lists who has been told and why; one handled internally is marked resolved with a remark |
 | Approver | approvers, auditors | The four-eyes queue: each waiting plan, approved with a second confirming click or sent back with a reason |
 | Crew | crew | Notices for me (a certificate about to lapse), this week's duty calendar (days reported unavailable in rose), my flights, duty-limit gauges, reporting myself unavailable (never twice for the same days), and what became of my reports |
-| Admin | admins | Rule thresholds (an admin tightens, only a super admin relaxes), the system activity log, and alert addresses |
+| Admin | admins | Who does what (admin against super admin), revoking reports filed in error, password resets (a new random password shown once), rule thresholds (an admin tightens, only a super admin relaxes), the system activity log, alert addresses and planned leave |
 | Alexa+ | everyone | Talk or type, hear the answer (Amazon Polly) with pause, resume and stop, and follow up. The latest exchange stands out from the conversation beside it. A round Alexa+ button in the corner of every page opens it. |
 
 The app opens on sign-in, which offers to continue as whoever is signed in; the session ends
@@ -641,7 +644,7 @@ Setting it up, once:
    the same values on the console's Account Linking page (authorization code grant, HTTP
    Basic, scopes `openid` and `profile`).
 4. Put the Alexa stack's `SkillEndpointUrl` in `alexa/skill-package/skill.json` (both
-   `REPLACE_WITH_SkillEndpointUrl`), and import the manifest and the interaction models in
+   endpoint `uri` values; the committed ones are our own deployment's), and import the manifest and the interaction models in
    the console (or deploy them with the ASK CLI). The endpoint uses the "wildcard
    certificate" option.
 5. On the skill's Permissions page, switch on Alexa Notifications and Reminders, note

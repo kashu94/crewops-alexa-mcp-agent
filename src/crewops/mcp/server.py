@@ -279,6 +279,27 @@ def build_server(
         """Admin: the latest audit events across the system, newest first."""
         return await run(ctx, lambda c: api.activity(c, limit))
 
+    @mcp.tool(annotations=COMMIT)
+    async def revoke_report(disruption_id: str, reason: str, ctx: Context) -> dict:
+        """Admin: withdraw a report filed in error (a reporter's report, a crew member's own
+        unavailability or planned leave), saying why. Only while nothing has been done about
+        it: reported, being planned, or a plan waiting for approval (that plan is withdrawn
+        too). Once cover is approved, crew control resolves it instead. The crew it named
+        count as available again."""
+        return await run(ctx, lambda c: api.revoke_report(c, disruption_id, reason))
+
+    @mcp.tool(annotations=READ)
+    async def team_accounts(ctx: Context) -> list:
+        """Admin: the team's sign-ins, roles, and whether you may reset each password."""
+        return await run(ctx, lambda c: api.team_accounts(c))
+
+    @mcp.tool(annotations=COMMIT)
+    async def reset_password(username: str, ctx: Context) -> dict:
+        """Admin: give a team member a new random password, returned once. An admin resets
+        crew, reporters, controllers, approvers and auditors; only a super admin resets an
+        admin. Nobody resets their own here, nor the speaker device's."""
+        return await run(ctx, lambda c: api.reset_password(c, username))
+
     @mcp.tool(annotations=READ)
     async def alert_addresses(ctx: Context) -> list:
         """Admin: the email addresses receiving alerts, the role each receives, and whether
@@ -323,6 +344,7 @@ def from_environment(host: str = "127.0.0.1") -> FastMCP:
 
     from crewops.agent.memory import ConversationMemory, memory_client
     from crewops.agent.service import build
+    from crewops.auth.accounts import Accounts
     from crewops.config import Settings
     from crewops.notify.subscriptions import AlertSubscriptions
     from crewops.store.ops_store import table_for
@@ -351,7 +373,15 @@ def from_environment(host: str = "127.0.0.1") -> FastMCP:
         if settings.alerts_topic_arn
         else None
     )
-    api = CrewOpsApi(table, lambda: build(settings, table), send, memory=memory, alerts=alerts)
+    accounts = Accounts(session.client("cognito-idp"), settings.user_pool_id or "")
+    api = CrewOpsApi(
+        table,
+        lambda: build(settings, table),
+        send,
+        memory=memory,
+        alerts=alerts,
+        accounts=accounts,
+    )
     gate = Gate(
         TokenVerifier(settings.issuer, settings.user_pool_client_id),
         lambda username: get_profile(table, username),

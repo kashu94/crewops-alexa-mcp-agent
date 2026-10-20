@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { TVFocusGuideView } from '@amazon-devices/react-native-kepler';
 
 import { colors, LEVEL, rupees, useScale, waited } from '../theme';
 import type { Card } from '../types';
@@ -14,7 +15,12 @@ export const DetailPanel = ({ card, onClose }: { card: Card; onClose: () => void
   const line = { color: colors.text, fontSize: s(22), lineHeight: s(32) };
   return (
     <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(5,9,20,0.85)', alignItems: 'center', justifyContent: 'center' }}>
-      <View
+      {/* Keeps the D-pad inside the panel: the board's cards behind it stay unreachable. */}
+      <TVFocusGuideView
+        trapFocusUp
+        trapFocusDown
+        trapFocusLeft
+        trapFocusRight
         style={{
           width: '62%',
           backgroundColor: colors.panel,
@@ -79,7 +85,7 @@ export const DetailPanel = ({ card, onClose }: { card: Card; onClose: () => void
           }}>
           <Text style={{ color: colors.text, fontSize: s(20), fontWeight: '600' }}>Close</Text>
         </Pressable>
-      </View>
+      </TVFocusGuideView>
     </View>
   );
 };

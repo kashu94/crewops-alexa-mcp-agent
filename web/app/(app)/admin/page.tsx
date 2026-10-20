@@ -3,6 +3,7 @@
 import { BellRing, CalendarRange, Gauge, History, Mail, Save, ScrollText, ShieldAlert, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { AdminDuties, Passwords, RevokeReports } from "@/components/admin-duties";
 import { useMe } from "@/components/me";
 import { Button, clock, cx, day, Empty, Field, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
@@ -193,6 +194,8 @@ function ThresholdRow({
 
 function describeEvent(e: Event): string {
   if (e.action === "RULE_CHANGED") return `${e.rule_id} ${e.param?.replace(/_/g, " ")} ${e.from} → ${e.to}`;
+  if (e.action === "PASSWORD_RESET") return `Password reset: ${e.reason?.replace(/^password reset for /, "") ?? ""}`;
+  if (e.action === "REVOKED") return `Report revoked ${e.disruption_id ?? ""}${e.reason ? `: ${e.reason}` : ""}`;
   if (e.action === "BLOCKED_PROMPT") return `Security: question refused (${e.reason ?? "override attempt"})`;
   if (e.action.startsWith("ALERT"))
     return `${e.action === "ALERT_ADDED" ? "Alert address added" : "Alert address removed"} (${e.role})`;
@@ -248,11 +251,17 @@ export default function Admin() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Administration</h1>
         <p className="text-sm text-muted">
-          Rule thresholds, system activity, alert addresses and planned leave. Plan decisions stay with controllers and
-          approvers.
+          Revoking reports filed in error, passwords, rule thresholds, system activity, alert addresses and planned
+          leave. Plan decisions stay with controllers and approvers.
         </p>
       </div>
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
+
+      <AdminDuties superAdmin={me.roles.includes("super_admin")} />
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+        <RevokeReports onChange={load} />
+        <Passwords onChange={load} />
+      </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
         <Panel

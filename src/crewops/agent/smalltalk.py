@@ -37,6 +37,54 @@ IDENTITY_RE = re.compile(
     re.I,
 )
 
+# Words that don't turn "who am I" into a real question ("who am I and what can I do?").
+_IDENTITY_FILLER = frozenset(
+    [
+        "a",
+        "about",
+        "also",
+        "am",
+        "an",
+        "and",
+        "any",
+        "are",
+        "but",
+        "can",
+        "could",
+        "do",
+        "does",
+        "i",
+        "is",
+        "me",
+        "my",
+        "now",
+        "or",
+        "please",
+        "right",
+        "so",
+        "tell",
+        "the",
+        "then",
+        "to",
+        "today",
+        "what",
+        "which",
+        "who",
+        "here",
+    ]
+)
+
+
+def _asks_more(question: str, match: re.Match[str]) -> bool:
+    """True when the rest of the question is a real one ("I am a controller, who covers
+    P-2291?"): it names an id or number, or has two or more words of its own."""
+    rest = question[: match.start()] + " " + question[match.end() :]
+    if re.search(r"\d", rest):
+        return True
+    words = re.findall(r"[a-z']+", _FILLER.sub(" ", rest).lower())
+    return len([w for w in words if w not in _IDENTITY_FILLER]) >= 2
+
+
 HELP = (
     "Ask me about rosters and reserves, duty hours and legality, cover for a sick call or a "
     "delay, a disruption's impact, gates, or a rule."
@@ -77,7 +125,8 @@ def who(caller: Caller, world: World) -> str:
 def small_talk(question: str, caller: Caller, world: World) -> str | None:
     """Reply to a greeting, thanks, goodbye or "who am I". None for anything else."""
     bare = _bare(question)
-    if IDENTITY_RE.search(question):
+    identity = IDENTITY_RE.search(question)
+    if identity and not _asks_more(question, identity):
         return who(caller, world)
     if not bare or len(bare) > 40:
         return None

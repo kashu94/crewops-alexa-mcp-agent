@@ -28,12 +28,18 @@ export function WelcomeBack() {
     let saved: string | null = null;
     try {
       saved = sessionStorage.getItem("crewops-welcome");
-      sessionStorage.removeItem("crewops-welcome");
     } catch {
       saved = null;
     }
     if (!saved) return;
     const t = setTimeout(() => {
+      // Removed only once shown: React's development double run cancels the first timer, and
+      // removing it earlier left the second run with nothing to show.
+      try {
+        sessionStorage.removeItem("crewops-welcome");
+      } catch {
+        // shown again on the next page load at worst
+      }
       try {
         const w = JSON.parse(saved) as Welcome;
         if (w.alerts?.length) setData(w);

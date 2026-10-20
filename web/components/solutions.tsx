@@ -334,7 +334,7 @@ export function SeatOptions({
               gone={!decided && o.crew_id ? unavailable[o.crew_id] : undefined}
             />
           ))}
-          {decided && !options.some((o) => o.crew_id === chosen) && (
+          {decided && chosen && !options.some((o) => o.crew_id === chosen) && (
             <li className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm text-emerald-900">
               Chosen: <Mono>{chosen}</Mono>, from beyond the top options shown here.
             </li>

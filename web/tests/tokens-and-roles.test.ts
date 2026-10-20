@@ -57,6 +57,25 @@ describe("the tool proxy", () => {
     expect(sameOrigin(req("http://localhost:3000"))).toBe(true);
     expect(sameOrigin(req("https://evil.example"))).toBe(false);
     expect(sameOrigin(req(null))).toBe(false);
+    expect(sameOrigin(req("null"))).toBe(false);
+  });
+
+  it("knows its own site behind proxies, and still nobody else's", () => {
+    const req = (origin: string, headers: Record<string, string>) =>
+      new Request("http://internal/api/tools/ask", { method: "POST", headers: { origin, ...headers } });
+    const site = "https://crewops.example";
+    // a chain of proxies lists every host it passed; the first is the one the browser used
+    expect(sameOrigin(req(site, { "x-forwarded-host": "crewops.example, internal:3000", host: "internal:3000" }))).toBe(
+      true,
+    );
+    // a proxy that forwards its own name but keeps the browser's Host
+    expect(sameOrigin(req(site, { "x-forwarded-host": "internal:3000", host: "crewops.example" }))).toBe(true);
+    // the default port spelled out
+    expect(sameOrigin(req(site, { "x-forwarded-host": "crewops.example:443", host: "internal:3000" }))).toBe(true);
+    expect(
+      sameOrigin(req("https://evil.example", { "x-forwarded-host": "crewops.example", host: "crewops.example" })),
+    ).toBe(false);
+    expect(sameOrigin(req(site, { "x-forwarded-host": "crewops.example:8443", host: "internal:3000" }))).toBe(false);
   });
 
   it("encodes the runtime ARN in the invocation URL", () => {

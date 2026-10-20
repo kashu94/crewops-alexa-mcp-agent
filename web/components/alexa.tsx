@@ -104,10 +104,16 @@ export function AlexaModule({
     conversationRef.current = conversation;
   }, [conversation]);
 
+  // False once the assistant is left: an answer still on its way must not start speaking
+  // on another page, where nothing could stop it.
+  const mounted = useRef(true);
+
   useEffect(() => {
+    mounted.current = true;
     recognition.current = makeRecognition();
     setCanListen(recognition.current !== null);
     return () => {
+      mounted.current = false;
       audio.current?.pause();
       if (clipUrl.current) URL.revokeObjectURL(clipUrl.current);
     };
@@ -127,8 +133,8 @@ export function AlexaModule({
       });
       setTurns((t) => t.map((x) => (x.id === id ? { ...x, answer } : x)));
       if (voice) {
-        const clip = await speak(answer.answer);
-        if (clip) {
+        const clip = mounted.current ? await speak(answer.answer) : null;
+        if (clip && mounted.current) {
           audio.current?.pause();
           if (clipUrl.current) URL.revokeObjectURL(clipUrl.current);
           clipUrl.current = URL.createObjectURL(clip);

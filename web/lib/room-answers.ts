@@ -149,7 +149,14 @@ export function answerRoomQuestion(question: string, board: RoomBoard, scope = "
   if (/\bdisruptions?\b|\bopen\b|\bissues?\b|\bproblems?\b|\bgoing on\b|\bsituation\b|\bstatus\b/.test(q)) {
     const { open, high, medium, low, escalated } = board.counts;
     if (!open) return ok("No disruptions are open. All quiet.");
-    const levels = [high && `${high} high`, medium && `${medium} medium`, low && `${low} low`].filter(Boolean);
+    // a report not yet analysed is open but has no severity
+    const unrated = open - high - medium - low;
+    const levels = [
+      high && `${high} high`,
+      medium && `${medium} medium`,
+      low && `${low} low`,
+      unrated > 0 && `${unrated} not yet assessed`,
+    ].filter(Boolean);
     return ok(
       `${plural(open, "disruption is", "disruptions are")} open: ${levels.join(", ")}` +
         `${escalated ? `, and ${escalated} escalated` : ""}.`,

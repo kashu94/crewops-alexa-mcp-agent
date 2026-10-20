@@ -15,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AIRLINES, AirlineBadge } from "@/components/airline";
 import { useLiveListener } from "@/components/live";
@@ -377,17 +377,25 @@ export default function Operations() {
   const [onlyIssues, setOnlyIssues] = useState(false);
 
   const [start, setStart] = useState("");
+  // Only the newest request may land: an earlier week answering late must not replace it.
+  const latest = useRef(0);
   const load = useMemo(
-    () => () =>
-      tool<Week>("operations_overview", start ? { start } : {}).then(
+    () => () => {
+      const request = ++latest.current;
+      return tool<Week>("operations_overview", start ? { start } : {}).then(
         (w) => {
+          if (request !== latest.current) return;
           setData(w);
+          setError(null);
           // keep the selected day if it's in this week, else today, else the week's first day
           const today = w.window?.today ?? "";
           setSelected((s) => (s && w.week.includes(s) ? s : w.week.includes(today) ? today : (w.week[0] ?? null)));
         },
-        (err: Error) => setError(err.message),
-      ),
+        (err: Error) => {
+          if (request === latest.current) setError(err.message);
+        },
+      );
+    },
     [start],
   );
   useEffect(() => {
@@ -419,7 +427,8 @@ export default function Operations() {
     });
   }, [data, date, airline, query, onlyIssues]);
 
-  if (error) return <Notice tone="error">{error}</Notice>;
+  // A failed refresh keeps the board it already has, with the error above it.
+  if (error && !data) return <Notice tone="error">{error}</Notice>;
   if (!data) {
     return (
       <div className="flex flex-1 items-center justify-center text-muted">
@@ -444,6 +453,7 @@ export default function Operations() {
 
   return (
     <div className="flex flex-col gap-5">
+      {error && <Notice tone="error">{error}</Notice>}
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">Operations</p>

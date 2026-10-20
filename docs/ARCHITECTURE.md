@@ -467,6 +467,18 @@ streamable HTTP, a code package on Linux ARM64, billed per second while a sessio
   nothing, carried ids pass the same role checks as typed ones, and a memory failure only
   means the question stands on its own. What is waiting for whom is always read from
   the table, never from memory.
+- **Revoking a report.** An admin withdraws a report filed in error with `revoke_report`
+  and a reason: a reporter's, a crew member's own absence, or planned leave. It is allowed
+  while nothing has been approved (REPORTED, OPTIONS_READY or SUBMITTED, or an absence only
+  recorded); a plan waiting for approval is withdrawn in the same transaction, so it can't be
+  approved afterwards. The disruption becomes REVOKED, drops out of every open list, and the
+  crew it named count as available again. After approval the roster has changed, so the
+  controller resolves it instead.
+- **Passwords.** `reset_password` gives a team member a new random password, returned once
+  to the admin to pass on, and logged without the password. An admin resets crew, reporters,
+  controllers, approvers and auditors; only a super admin resets an admin. Nobody resets their
+  own here, and the speaker device's password is only replaced by `web_env --speaker`.
+  `team_accounts` lists who the caller may reset.
 - **Alert addresses.** Admins manage the email alert addresses with `alert_addresses`,
   `add_alert_address` and `remove_alert_address` (see [Notifications](#notifications)).
 - **Rule thresholds.** Four numbers in the legality rules (the flight duty period limit, duty
@@ -602,8 +614,8 @@ they submitted.
 | Controller | Yes | Yes | Yes | | Own desk | |
 | Approver | Yes | Yes | | Yes | Yes | |
 | Auditor | | Read only | | | Yes | |
-| Admin | | | | | Yes | Tighten rule thresholds, alert addresses |
-| Super admin | | | | | Yes | As admin, and relax rule thresholds |
+| Admin | Planned leave | Read only | | | Yes | Revoke reports filed in error, reset the passwords of everyone but admins and the speaker, tighten rule thresholds, alert addresses |
+| Super admin | Planned leave | Read only | | | Yes | As admin, and reset admins' passwords and relax rule thresholds |
 
 ### What can be reported
 
@@ -640,6 +652,8 @@ REPORTED ─► OPTIONS_READY ─► SUBMITTED ───────────
                           │       ├─► WITHDRAWN by the controller             ├─► back to
                           │       └─► STALE if the roster changed             ┘   OPTIONS_READY
                           └─► CLOSED by a controller, with a reason, when nothing can be covered
+
+REPORTED, OPTIONS_READY or SUBMITTED ─► REVOKED by an admin, with a reason (filed in error)
 ```
 
 Approving is the commit. When the approver approves, the system re-checks legality and writes
@@ -683,7 +697,8 @@ caller):
 - Agents never decide. The advisor and the disruption analysis only prepare options. Submit,
   approve and reject require a signed-in person with the right role.
 - Admins configure; they do not operate. Admin and super admin cannot submit or approve
-  plans unless they also hold that role. Every role change is audited.
+  plans unless they also hold that role. They can revoke a report filed in error, but only
+  before cover is approved. Every role change, revoke and password reset is audited.
 - Each transition is logged with who, when, which plan and why.
 
 ## Demo flow
