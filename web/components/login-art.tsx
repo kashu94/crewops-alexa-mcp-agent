@@ -3,7 +3,7 @@
 
 const HORIZON = 430;
 const NEAR = 830;
-const LIGHTS = 24;
+const LIGHTS = 72;
 /** The runway's vanishing point sits right of centre, so the text has open sky. */
 const CX = 470;
 const SPREAD = 250;
@@ -86,21 +86,34 @@ export function NightApproach() {
             fill="url(#tarmac)"
           />
           <line x1="0" x2="600" y1={HORIZON} y2={HORIZON} stroke="url(#horizon)" strokeWidth="1" />
+          {/* faint runway edges, so the road visibly runs on to the horizon */}
+          {[-1, 1].map((side) => (
+            <line
+              key={side}
+              x1={CX}
+              y1={HORIZON}
+              x2={CX + side * SPREAD * 1.12}
+              y2={y(1.12)}
+              stroke="#fef3c7"
+              strokeOpacity="0.16"
+              strokeWidth="1"
+            />
+          ))}
           {CITY.map(([x, r]) => (
             <circle key={x} cx={x} cy={HORIZON - 3} r={r} className="city-light" fill="#fde68a" filter="url(#glow)" />
           ))}
           <g filter="url(#glow)">
             {depth.map((s, i) => (
               <g key={i}>
-                <circle cx={CX - SPREAD * s} cy={y(s)} r={1 + 3.6 * s} fill="#fef3c7" opacity={0.55 + 0.4 * s} />
-                <circle cx={CX + SPREAD * s} cy={y(s)} r={1 + 3.6 * s} fill="#fef3c7" opacity={0.55 + 0.4 * s} />
+                <circle cx={CX - SPREAD * s} cy={y(s)} r={0.6 + 4 * s} fill="#fef3c7" opacity={0.45 + 0.5 * s} />
+                <circle cx={CX + SPREAD * s} cy={y(s)} r={0.6 + 4 * s} fill="#fef3c7" opacity={0.45 + 0.5 * s} />
                 <circle
                   cx={CX}
                   cy={y(s)}
-                  r={0.8 + 2.6 * s}
+                  r={0.5 + 2.9 * s}
                   fill="#e0f2fe"
                   className="lead-in"
-                  style={{ animationDelay: `${i * 0.085}s` }}
+                  style={{ animationDelay: `${i * 0.03}s` }}
                 />
               </g>
             ))}

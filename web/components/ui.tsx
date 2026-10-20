@@ -205,11 +205,12 @@ export function nextDay(iso: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** On a form's "from" date: an "until" field must fall strictly after it, so move its minimum
- * and clear a value that no longer fits. Empty "until" still means a single day. */
-export function untilAfter(from: HTMLInputElement, untilName: string) {
+/** On a form's "from" field: its "until" field may not start before it (the same day, or
+ * the same moment for a time, is the earliest), so move its minimum and clear a value that no
+ * longer fits. Works for date and datetime-local inputs alike. */
+export function untilFrom(from: HTMLInputElement, untilName: string) {
   const until = from.form?.elements.namedItem(untilName);
-  if (!(until instanceof HTMLInputElement)) return;
-  until.min = nextDay(from.value) || until.min;
-  if (until.value && from.value && until.value <= from.value) until.value = "";
+  if (!(until instanceof HTMLInputElement) || !from.value) return;
+  until.min = from.value;
+  if (until.value && until.value < from.value) until.value = "";
 }

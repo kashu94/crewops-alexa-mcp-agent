@@ -39,7 +39,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <LiveProvider enabled={me.roles.some((r) => STAFF.includes(r))}>
       {/* The frame: sidebar and top bar share one tint with no rule between them; the work
           sits on a white sheet inset 8px from the window's right and bottom edges. */}
-      <div className="flex min-h-screen bg-background">
+      <div className="flex min-h-screen overflow-x-clip bg-background">
         <aside className="sticky top-0 hidden h-screen w-[228px] shrink-0 flex-col px-3 pb-3 lg:flex">
           <Brand />
           <Nav />

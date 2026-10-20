@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  AlertOctagon,
   Building2,
   CalendarDays,
   CheckCheck,
@@ -14,6 +13,7 @@ import {
   ShieldCheck,
   Sparkles,
   Swords,
+  Users,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -120,7 +120,7 @@ export function Coverage({ detail }: { detail: Detail }) {
     stats = [
       { label: "Duty dates", value: dates.size, icon: CalendarDays },
       { label: "Flights uncrewed", value: uncrewed.size, icon: Plane },
-      { label: "Passengers booked", value: booked, icon: AlertOctagon },
+      { label: "Passengers booked", value: booked, icon: Users },
       { label: "Stations", value: stations.size, icon: MapPin },
     ];
   } else {
@@ -130,7 +130,7 @@ export function Coverage({ detail }: { detail: Detail }) {
       { label: "Flights affected", value: flights.length, icon: Plane },
       { label: "Leaving late", value: flights.filter((f) => f.late_minutes > 0).length, icon: CalendarDays },
       { label: "Gate moves", value: stands.length, icon: MapPin },
-      { label: "Passengers booked", value: flights.reduce((n, f) => n + (f.booked ?? 0), 0), icon: AlertOctagon },
+      { label: "Passengers booked", value: flights.reduce((n, f) => n + (f.booked ?? 0), 0), icon: Users },
     ];
   }
   return (
@@ -599,12 +599,12 @@ export function Actions({
                 onClick={() => act("close_disruption", { reason }, "Sent to an approver for sign-off")}
               >
                 {internal ? <CheckCircle2 size={14} /> : null}
-                {internal ? "Mark resolved" : "Close without a plan"}
+                {internal ? "Mark resolved" : "Close the disruption"}
               </Button>
               <p className="text-[11px] text-muted">
                 {internal
                   ? "No crew change is needed. An approver signs it off; the remark goes on the audit trail and to whoever reported it."
-                  : "Only when no seat can be covered, for example the flights were cancelled. An approver signs it off."}
+                  : "When it has been dealt with another way, for example the flights were cancelled. An approver signs it off."}
               </p>
             </div>
           )}

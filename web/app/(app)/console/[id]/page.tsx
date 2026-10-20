@@ -27,6 +27,13 @@ import { clock, day, Empty, Mono, Notice, Panel, SeverityBadge, Spinner, Status 
 import { tool } from "@/lib/client";
 import { describe, shownStatus, type Detail } from "@/lib/types";
 
+/** " · on 21 Oct" or " · 21 Oct – 22 Oct": the days this seat needs cover. */
+function coverDates(dates: string[] | undefined): string {
+  if (!dates?.length) return "";
+  const sorted = [...dates].sort();
+  return sorted.length === 1 ? ` · on ${day(sorted[0])}` : ` · ${day(sorted[0])} – ${day(sorted[sorted.length - 1])}`;
+}
+
 export default function DisruptionPage() {
   const { id } = useParams<{ id: string }>();
   const me = useMe();
@@ -159,6 +166,12 @@ export default function DisruptionPage() {
           </Mono>
           {detail.reported_by && <> by {detail.reported_by}</>}
         </p>
+        {detail.narrative && (
+          <p className="rounded-md bg-sunken px-3 py-2 text-sm">
+            <span className="text-muted">Note from {detail.reported_by ?? "the reporter"}: </span>
+            {detail.narrative}
+          </p>
+        )}
         {detail.severity && detail.severity.level !== "low" && (
           <p className="text-xs text-muted">
             <span className="font-semibold text-foreground">Why {detail.severity.level} severity:</span>{" "}
@@ -197,7 +210,7 @@ export default function DisruptionPage() {
             detail.seats.map((s) => (
               <Panel
                 key={seatKey(s)}
-                title={`Cover for ${s.pairing_id} · ${s.role}${s.crew_out ? ` · for ${s.crew_out}` : ""}`}
+                title={`Cover for ${s.pairing_id} · ${s.role}${s.crew_out ? ` · for ${s.crew_out}` : ""}${coverDates(s.impact?.affected_dates)}`}
                 icon={<Cpu size={14} className="text-accent" />}
               >
                 {detail.status === "COMMITTED" ? (

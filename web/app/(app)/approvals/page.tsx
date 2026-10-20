@@ -67,6 +67,13 @@ function Decision({ item, onDone }: { item: QueueItem; onDone: (text: string, ok
         </div>
       </div>
 
+      {item.note && (
+        <p className="mt-3 rounded-md bg-sunken px-3 py-2 text-sm">
+          <span className="text-muted">Note from {item.submitted_by}: </span>
+          {item.note}
+        </p>
+      )}
+
       <FourEyes
         className="mt-3"
         fingerprint={item.fingerprint}

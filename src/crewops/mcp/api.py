@@ -414,6 +414,10 @@ class CrewOpsApi:
         # disruption yet.
         if d.get("valid_to") and date.fromisoformat(d["valid_to"]) > latest:
             return f"valid_to: up to {latest} (two months ahead)"
+        if report.report_type is ReportType.GATE_CHANGE:
+            current = next((g.gate for g in tools.gates if g.flight_id == d.get("flight_id")), None)
+            if current and current == d.get("new_gate"):
+                return f"new_gate: {d['flight_id']} already boards at {current}; pick another gate"
         bad = [x for x in days if not earliest <= x <= latest]
         if not bad:
             return None
@@ -518,6 +522,8 @@ class CrewOpsApi:
             "reported_utc": report.get("reported_utc"),
             "reported_by": (report.get("reported_by") or {}).get("user_id"),
             "details": report.get("details", {}),
+            # What the reporter (or the crew member) added for crew control, in their words.
+            "narrative": report.get("narrative") or "",
             "desks": desks,
             # Touching no aircraft at all (a closed gate nobody was using): any desk's.
             "yours": bool(caller.desk)

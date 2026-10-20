@@ -240,6 +240,8 @@ export type Detail = {
   disruption_id: string;
   status: string;
   summary: string;
+  /** What the reporter (or crew member) added for crew control. */
+  narrative?: string;
   severity?: Severity | null;
   report_type: string | null;
   reported_utc: string | null;
@@ -296,6 +298,8 @@ export type QueueItem = {
   reason?: string | null;
   /** to_confirm: what the controller did, for the approver to sign off */
   remark?: string | null;
+  /** to_decide: the controller's note to the approver */
+  note?: string | null;
   submitted_utc?: string | null;
   /** SHA-256 of exactly what was submitted (crewops.plans.fingerprint). */
   fingerprint?: string | null;

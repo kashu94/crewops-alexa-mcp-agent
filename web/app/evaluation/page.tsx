@@ -243,20 +243,29 @@ export default function Evaluation() {
               question reworded, plus behaviour cases. Scoring is deterministic; no model judges another.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            {Object.keys(reports).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                className={`h-8 rounded-md px-3 text-sm font-medium transition-colors ${
-                  m === mode ? "bg-brand text-white" : "bg-surface text-foreground ring-1 ring-control hover:bg-sunken"
-                }`}
-              >
-                {m === "offline" ? "Rules and templates" : "Live (Nova on Bedrock)"}
-              </button>
-            ))}
-          </div>
+          {/* A choice only when both runs exist; with one, a plain label says which it is. */}
+          {Object.keys(reports).length < 2 ? (
+            <p className="rounded-md bg-sunken px-3 py-1.5 text-sm text-muted">
+              {mode === "offline" ? "Rules and templates (offline run)" : "Live run (Nova on Bedrock)"}
+            </p>
+          ) : (
+            <div className="flex items-center gap-2" role="group" aria-label="Which run">
+              {Object.keys(reports).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMode(m)}
+                  className={`h-8 rounded-md px-3 text-sm font-medium transition-colors ${
+                    m === mode
+                      ? "bg-brand text-white"
+                      : "bg-surface text-foreground ring-1 ring-control hover:bg-sunken"
+                  }`}
+                >
+                  {m === "offline" ? "Rules and templates" : "Live (Nova on Bedrock)"}
+                </button>
+              ))}
+            </div>
+          )}
         </header>
 
         <section className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line lg:grid-cols-4">
@@ -401,9 +410,7 @@ export default function Evaluation() {
         </section>
 
         <p className="text-center text-xs text-muted">
-          Synthetic crew data. Reproduce with{" "}
-          <code className="rounded bg-white px-1 py-0.5 ring-1 ring-slate-200">python -m crewops.agent.evaluate</code>{" "}
-          (offline, free) or <code className="rounded bg-white px-1 py-0.5 ring-1 ring-slate-200">--live</code>.{" "}
+          All crew, flights and airlines here are synthetic, made up for this demonstration.{" "}
           <Link href="/login" className="text-accent hover:underline">
             Sign in to CrewOps
           </Link>

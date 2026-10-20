@@ -1121,3 +1121,13 @@ def test_a_reserve_sees_their_standby_days_and_name(api):
     }
     # Someone who flies has trips and no standby.
     assert api.my_roster(CREW)["on_call"] == []
+
+
+def test_a_gate_change_to_the_flights_own_gate_is_refused_at_once(api):
+    with pytest.raises(ApiError) as err:
+        api.report(
+            IMRAN,
+            "gate_change",
+            {"flight_id": "DX401-2026-10-13", "new_gate": "BLR-G4"},
+        )
+    assert err.value.code == "INVALID" and "already boards at BLR-G4" in err.value.message

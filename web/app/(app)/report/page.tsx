@@ -21,20 +21,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, ty
 
 import { AIRLINES, AirlineBadge, airlineOf } from "@/components/airline";
 import { Modal } from "@/components/modal";
-import {
-  Button,
-  clock,
-  cx,
-  day,
-  Empty,
-  Mono,
-  nextDay,
-  Notice,
-  Panel,
-  Spinner,
-  Status,
-  untilAfter,
-} from "@/components/ui";
+import { Button, clock, cx, day, Empty, Mono, Notice, Panel, Spinner, Status, untilFrom } from "@/components/ui";
 import { tool } from "@/lib/client";
 import { describe, shownStatus, type MyReport, type Reference } from "@/lib/types";
 
@@ -186,12 +173,12 @@ function Fields({
           min={first}
           max={last}
           defaultValue={prefill.from_date ?? first}
-          onChange={(e) => untilAfter(e.currentTarget, "to_date")}
+          onChange={(e) => untilFrom(e.currentTarget, "to_date")}
           className={input}
         />
       </Label>
       <Label text="Until" hint="Optional: the same day if empty">
-        <input name="to_date" type="date" min={nextDay(prefill.from_date ?? first)} max={last} className={input} />
+        <input name="to_date" type="date" min={prefill.from_date ?? first} max={last} className={input} />
       </Label>
     </div>
   );
@@ -219,6 +206,7 @@ function Fields({
           required
           min={`${first}T00:00`}
           max={`${last}T23:59`}
+          onChange={(e) => untilFrom(e.currentTarget, "to_utc")}
           className={input}
         />
       </Label>
@@ -370,20 +358,7 @@ function Fields({
         </>
       );
     case "gate_change":
-      return (
-        <>
-          <Label text="Flight">
-            <input name="flight_id" list="flight-list" required placeholder="DX401-2026-10-13" className={input} />
-          </Label>
-          <Label text="New gate">
-            <select name="new_gate" required className={input}>
-              {reference.gates.map((g) => (
-                <option key={g}>{g}</option>
-              ))}
-            </select>
-          </Label>
-        </>
-      );
+      return <GateChange reference={reference} />;
     case "aircraft_technical":
       return (
         <>
@@ -398,6 +373,36 @@ function Fields({
         </>
       );
   }
+}
+
+/** A gate change offers only the other gates at the flight's departure station: never the
+ * gate it already boards at (the server refuses that too). */
+function GateChange({ reference }: { reference: Reference }) {
+  const [flightId, setFlightId] = useState("");
+  const flight = reference.flights.find((f) => f.flight_id === flightId.trim().toUpperCase());
+  const gates = reference.gates.filter((g) => !flight || (g.startsWith(`${flight.from}-`) && g !== flight.gate));
+  return (
+    <>
+      <Label text="Flight" hint={flight?.gate ? `Boards at ${flight.gate} now` : undefined}>
+        <input
+          name="flight_id"
+          list="flight-list"
+          required
+          placeholder="DX401-2026-10-13"
+          value={flightId}
+          onChange={(e) => setFlightId(e.target.value)}
+          className={input}
+        />
+      </Label>
+      <Label text="New gate">
+        <select name="new_gate" required className={input} key={flight?.flight_id ?? "any"}>
+          {gates.map((g) => (
+            <option key={g}>{g}</option>
+          ))}
+        </select>
+      </Label>
+    </>
+  );
 }
 
 function detailsOf(kind: Kind, f: FormData, crewIds: string[]): Record<string, unknown> {
@@ -673,8 +678,8 @@ export default function ReportPage() {
     }
     const f0 = new FormData(form);
     const toDate = text(f0.get("to_date"));
-    if (toDate && toDate <= text(f0.get("from_date"))) {
-      setMessage({ tone: "error", text: "'Until' must be after 'From'; leave it empty for a single day." });
+    if (toDate && toDate < text(f0.get("from_date"))) {
+      setMessage({ tone: "error", text: "'Until' can't be before 'From'." });
       return;
     }
     if (f0.get("from_utc") && f0.get("to_utc") && text(f0.get("to_utc")) <= text(f0.get("from_utc"))) {

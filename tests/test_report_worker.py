@@ -266,6 +266,7 @@ def test_resend_with_changed_details_is_still_a_conflict(table):
         ("BLR-G9", "unknown gate BLR-G9"),
         ("HYD-G1", "not at DX401-2026-10-13's departure station"),
         ("BLR-E1", None),  # an emergency gate at the station is a real gate
+        ("BLR-G4", "already boards at BLR-G4"),  # its own gate is no change
     ],
 )
 def test_gate_change_to_a_gate_that_is_not_there_is_refused(table, new_gate, reason):

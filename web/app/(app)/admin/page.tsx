@@ -5,20 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AdminDuties, Passwords, RevokeReports } from "@/components/admin-duties";
 import { useMe } from "@/components/me";
-import {
-  Button,
-  clock,
-  cx,
-  day,
-  Empty,
-  Field,
-  Mono,
-  Notice,
-  Panel,
-  Spinner,
-  Status,
-  untilAfter,
-} from "@/components/ui";
+import { Button, clock, cx, day, Empty, Field, Mono, Notice, Panel, Spinner, Status, untilFrom } from "@/components/ui";
 import { tool } from "@/lib/client";
 import { shownStatus } from "@/lib/types";
 
@@ -475,14 +462,13 @@ export default function Admin() {
               required
               min={plusDays(leaveRef.today, 1)}
               max={leaveRef.leave_until ?? undefined}
-              onChange={(e) => untilAfter(e.currentTarget, "to")}
+              onChange={(e) => untilFrom(e.currentTarget, "to")}
             />
             <Field
               label="Until"
               name="to"
               type="date"
-              hint="Optional: the same day if empty"
-              min={plusDays(leaveRef.today, 2)}
+              min={plusDays(leaveRef.today, 1)}
               max={leaveRef.leave_until ?? undefined}
             />
             <label className="flex flex-col gap-1 text-sm">
@@ -501,6 +487,7 @@ export default function Admin() {
             <Button type="submit" tone="accent" disabled={busy}>
               {busy ? <Spinner /> : <CalendarRange size={14} />} Book leave
             </Button>
+            <p className="text-xs text-muted sm:col-span-5">Leave &quot;Until&quot; empty for a single day.</p>
           </form>
         )}
         <div className="mt-4">

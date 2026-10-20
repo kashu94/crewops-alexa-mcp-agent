@@ -23,6 +23,7 @@ from typing import Any
 from crewops.agent import injection
 from crewops.agent.breaker import CircuitOpen
 from crewops.agent.context import Turn, as_reply, carry_ids
+from crewops.agent.crew_self import crew_self
 from crewops.agent.entities import Vocabulary, extract, spoken_ids
 from crewops.agent.intents import Intent, Tier
 from crewops.agent.pii import redact, redact_text
@@ -174,6 +175,9 @@ class Pipeline:
 
         if chat := small_talk(question, caller, self.tools.world):
             return Answer(question, chat, None, source="smalltalk")
+        if caller.crew_id and (own := crew_self(question, caller, self.tools.world)):
+            # A crew member's question about themselves: their own roster, nobody else's.
+            return Answer(question, own, None, source="template")
 
         context_notes: list[str] = []
         reply = previous is not None and previous.awaiting == "detail"

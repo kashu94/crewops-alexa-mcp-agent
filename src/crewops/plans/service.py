@@ -753,6 +753,8 @@ def summary(plan: Mapping[str, Any]) -> dict[str, Any]:
         "desk": plan["desk"],
         "submitted_by": plan["submitted_by"],
         "total_cost_inr": plan["total_cost_inr"],
+        # the controller's note to the approver, if any
+        "note": plan.get("note") or "",
         "assignments": [
             f"{a['pairing_id']} {a['role']}: {a['name']} ({a['crew_id']}) replacing "
             f"{a['replaces']}, ₹{a['cost_inr']:,}"

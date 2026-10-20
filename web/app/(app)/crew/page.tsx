@@ -3,9 +3,9 @@
 import { BellRing, CalendarDays, Clock3, HeartPulse, MoonStar, Plane, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { AIRLINES } from "@/components/airline";
+import { AirlineBadge, AIRLINES } from "@/components/airline";
 import { useMe } from "@/components/me";
-import { Button, clock, cx, day, Empty, Field, Mono, nextDay, Notice, Panel, Spinner, Status } from "@/components/ui";
+import { Button, clock, cx, day, Empty, Field, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
 import { tool } from "@/lib/client";
 import { shownStatus } from "@/lib/types";
 
@@ -204,7 +204,7 @@ function ReportSheet({
               value={from}
               onChange={(e) => {
                 setFrom(e.target.value);
-                if (to && to <= e.target.value) setTo("");
+                if (to && to < e.target.value) setTo("");
               }}
             />
             <Field
@@ -212,7 +212,7 @@ function ReportSheet({
               name="to"
               type="date"
               hint="Optional: the same day if empty"
-              min={from ? nextDay(from) : nextDay(earliest)}
+              min={from || earliest}
               max={latest}
               value={to}
               onChange={(e) => setTo(e.target.value)}
@@ -245,7 +245,7 @@ function ReportSheet({
               ))}
             </div>
           </fieldset>
-          <Field label="Anything to tell the reporter?" name="narrative" maxLength={500} hint="Optional" />
+          <Field label="Anything crew control should know?" name="narrative" maxLength={500} hint="Optional" />
           {error && <Notice tone="error">{error}</Notice>}
           <Button type="submit" tone="danger" disabled={busy}>
             {busy && <Spinner />} Tell crew control
@@ -326,10 +326,20 @@ export default function Crew() {
         <div>
           <p className="text-sm text-muted">Good to see you</p>
           <h1 className="mt-0.5 text-[22px] font-semibold tracking-tight">{roster.name ?? me.user_id}</h1>
-          <p className="mt-0.5 text-sm text-muted">
-            <Mono>{roster.crew_id}</Mono> · {roster.rank ?? roster.pairings[0]?.role ?? "Crew"}
-            {standby.size > 0 && " (reserve)"}
-            {roster.airline && <> · {AIRLINES[roster.airline]?.name ?? roster.airline}</>}
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+            {roster.airline && (
+              <span
+                className="inline-flex items-center gap-1.5 font-medium"
+                style={{ color: AIRLINES[roster.airline]?.color }}
+              >
+                <AirlineBadge code={roster.airline} compact />
+                {AIRLINES[roster.airline]?.name ?? roster.airline}
+              </span>
+            )}
+            <span>
+              <Mono>{roster.crew_id}</Mono> · {roster.rank ?? roster.pairings[0]?.role ?? "Crew"}
+              {standby.size > 0 && " (reserve)"}
+            </span>
           </p>
         </div>
         <Button tone="danger" className="h-10 px-4" onClick={() => setSheet(true)}>

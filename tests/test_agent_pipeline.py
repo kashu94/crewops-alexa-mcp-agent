@@ -382,3 +382,23 @@ def test_a_missing_id_offers_who_was_just_asked_about_first(pipeline):
         "is there any id with crew C-123?", ROHIT, Turn.of(first, datetime.now(UTC))
     )
     assert then.text.startswith("C-123 doesn't exist. Did you mean A. Nair (C-1042)")
+
+
+def test_crew_ask_about_themselves_and_get_their_own_roster(pipeline):
+    tomorrow = ask(pipeline, "what are my flights tomorrow", NAIR)
+    assert tomorrow.text.startswith("Your trips tomorrow: 13 Oct: P-2291 on VT-DXC as Captain")
+    assert ask(pipeline, "what are my flights today", NAIR).text == "No trips today."
+    typo = ask(pipeline, "am I legal for p 22291", NAIR).text
+    assert typo.startswith("There's no trip P-22291. Your next: 13 Oct: P-2291")
+    assert ask(pipeline, "am I a captain or a first officer", NAIR).text == (
+        "You're a Captain with Konkan Skyways, based at BLR."
+    )
+    assert ask(pipeline, "when am I not available", NAIR).text == (
+        "You have no days reported unavailable or on leave."
+    )
+    # A real trip still goes to the legality engine.
+    assert "legal for P-2291" in ask(pipeline, "am I legal for P-2291", NAIR).text
+    reserve = Caller("c3310", frozenset({Role.CREW}), crew_id="C-3310")
+    assert ask(pipeline, "am I on standby", reserve).text.startswith(
+        "You're on call at BLR, 06:00 to 18:00Z"
+    )
