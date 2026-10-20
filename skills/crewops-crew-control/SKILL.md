@@ -62,7 +62,8 @@ that: you act as the signed-in person, with exactly their role's rights.
 REPORTED ──analysis (≈1 min)──> OPTIONS_READY ──submit_plan──> SUBMITTED ──approve_plan──> COMMITTED
                                   │      ▲                        │
                                   │      └── reject / withdraw / STALE (roster changed) ──┘
-                                  └── close_disruption (nothing coverable, or handled elsewhere) ──> CLOSED
+                                  └── close_disruption (nothing coverable, or handled elsewhere) ──> RESOLVING
+                                        ──> confirm_resolution by an approver ──> CLOSED (or return_resolution)
 ```
 
 - The analysis runs automatically when a report arrives: what it breaks, every legal way to

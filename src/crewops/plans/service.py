@@ -207,8 +207,9 @@ class Plans:
         """End a disruption that has no coverable seat, recording what was done (for example,
         the flights were cancelled). This is also how one handled outside crew control is
         marked resolved, with a remark: a gate closure re-gated by gate control, a delay every
-        crew member absorbs. Nothing on the roster changes, and a crew member it took out
-        stays out on its dates."""
+        crew member absorbs. It goes to RESOLVING for an approver other than this controller to
+        sign off (CLOSED) or send back. Nothing on the roster changes, and a crew member it
+        took out stays out on its dates."""
         desk = self._controller_desk(caller)
         item = self._disruption(disruption_id)
         if item["status"] != STATUS_OPTIONS_READY:
@@ -226,12 +227,62 @@ class Plans:
                 f"{', '.join(seat_key(s) for s in coverable)}: submit a plan instead",
             )
         try:
-            store.close_disruption(
+            store.submit_resolution(
                 self.table, disruption_id, caller.user_id, self.clock(), reason[:MAX_REASON]
             )
         except store.Conflict:
             raise PlanError("CONFLICT", f"{disruption_id} changed meanwhile") from None
-        return Outcome(store.STATUS_CLOSED, {"disruption_id": disruption_id, "reason": reason})
+        # Four eyes here too: an approver who is not this controller signs it off.
+        return Outcome(store.STATUS_RESOLVING, {"disruption_id": disruption_id, "reason": reason})
+
+    def _resolution(self, caller: Caller, disruption_id: str) -> dict[str, Any]:
+        """The submitted resolution an approver may decide: the controller's remark and who
+        sent it, checked for four eyes."""
+        if Role.APPROVER not in caller.roles:
+            raise PlanError("FORBIDDEN", "only an approver signs off a resolution")
+        item = self._disruption(disruption_id)
+        if item["status"] != store.STATUS_RESOLVING:
+            raise PlanError("WRONG_STATE", f"{disruption_id} is {item['status']}")
+        sent = [
+            e
+            for e in store.audit_trail(self.table, disruption_id)
+            if e.get("action") == "RESOLUTION_SUBMITTED"
+        ]
+        if not sent:
+            raise PlanError("WRONG_STATE", f"{disruption_id} has no resolution to sign off")
+        latest = sent[-1]
+        if latest.get("actor") == caller.user_id:
+            raise PlanError(
+                "FOUR_EYES", "a resolution is signed off by someone other than its sender"
+            )
+        return latest
+
+    def confirm_resolution(self, caller: Caller, disruption_id: str) -> Outcome:
+        sent = self._resolution(caller, disruption_id)
+        try:
+            store.confirm_resolution(
+                self.table,
+                disruption_id,
+                caller.user_id,
+                self.clock(),
+                str(sent.get("reason") or ""),
+                str(sent.get("actor") or ""),
+            )
+        except store.Conflict:
+            raise PlanError("CONFLICT", f"{disruption_id} changed meanwhile") from None
+        return Outcome(store.STATUS_CLOSED, {"disruption_id": disruption_id})
+
+    def return_resolution(self, caller: Caller, disruption_id: str, reason: str) -> Outcome:
+        self._resolution(caller, disruption_id)
+        if not reason.strip():
+            raise PlanError("INVALID", "say why it goes back to the desk")
+        try:
+            store.return_resolution(
+                self.table, disruption_id, caller.user_id, self.clock(), reason[:MAX_REASON]
+            )
+        except store.Conflict:
+            raise PlanError("CONFLICT", f"{disruption_id} changed meanwhile") from None
+        return Outcome(STATUS_OPTIONS_READY, {"disruption_id": disruption_id, "reason": reason})
 
     # ------------------------------------------------------------------
     # Approver actions
@@ -305,6 +356,24 @@ class Plans:
                 if plan["submitted_by"] != caller.user_id:
                     warnings = self.contention(plan, world)
                     out.append({"kind": "to_decide", **summary(plan), "warnings": list(warnings)})
+            for item in disruptions_with_status(self.table, store.STATUS_RESOLVING):
+                sent = [
+                    e
+                    for e in store.audit_trail(self.table, item["disruption_id"])
+                    if e.get("action") == "RESOLUTION_SUBMITTED"
+                ]
+                if sent and sent[-1].get("actor") != caller.user_id:
+                    analysis = from_dynamo(item.get("analysis") or {})
+                    out.append(
+                        {
+                            "kind": "to_confirm",
+                            "disruption_id": item["disruption_id"],
+                            "summary": analysis.get("summary", ""),
+                            "remark": sent[-1].get("reason", ""),
+                            "submitted_by": sent[-1].get("actor"),
+                            "submitted_utc": sent[-1].get("at"),
+                        }
+                    )
         desk = _desk(caller.desk) if Role.CONTROLLER in caller.roles else None
         if desk is not None:
             world = world or self.load(self.table).world

@@ -651,7 +651,10 @@ REPORTED ─► OPTIONS_READY ─► SUBMITTED ───────────
                           │       ├─► REJECTED by an approver, with a reason ─┐
                           │       ├─► WITHDRAWN by the controller             ├─► back to
                           │       └─► STALE if the roster changed             ┘   OPTIONS_READY
-                          └─► CLOSED by a controller, with a reason, when nothing can be covered
+                          └─► RESOLVING: a controller says what was done, when nothing can be
+                              covered or it was handled elsewhere ─► CLOSED when a different
+                              person, an approver, signs it off; or back to OPTIONS_READY if
+                              the approver sends it back with a reason
 
 REPORTED, OPTIONS_READY or SUBMITTED ─► REVOKED by an admin, with a reason (filed in error)
 ```

@@ -376,8 +376,48 @@ def test_uncovered_seats_must_be_acknowledged_and_a_hopeless_one_closed(table):
     with pytest.raises(PlanError) as err:
         plans.close(MEERA, "r-hopeless", "cancelled")
     assert err.value.code == "FORBIDDEN"
-    assert plans.close(ANANYA, "r-hopeless", "KS589 cancelled").status == "CLOSED"
+    # The controller resolves it; an approver signs it off.
+    assert plans.close(ANANYA, "r-hopeless", "KS589 cancelled").status == "RESOLVING"
+    assert plans.confirm_resolution(MEERA, "r-hopeless").status == "CLOSED"
     assert get_disruption(table, "r-hopeless")["status"] == "CLOSED"
+
+
+def test_a_resolution_is_signed_off_or_sent_back_by_another_person(table):
+    hopeless = {
+        "pairing_id": "P-2291",
+        "role": "First Officer",
+        "crew_out": "C-1694",
+        "status": "no_legal_cover",
+    }
+    crafted(table, "r-resolve1", [hopeless])
+    plans = Plans(table)
+    plans.close(ANANYA, "r-resolve1", "KS412 cancelled with operations")
+    assert get_disruption(table, "r-resolve1")["status"] == "RESOLVING"
+    # In the approver's queue, with the controller's remark; never in the sender's.
+    (item,) = [q for q in plans.queue(MEERA) if q["kind"] == "to_confirm"]
+    assert item["remark"] == "KS412 cancelled with operations" and item["submitted_by"] == "ananya"
+    both = Caller("ananya", frozenset({Role.CONTROLLER, Role.APPROVER}), desk="desk-1")
+    assert not [q for q in plans.queue(both) if q["kind"] == "to_confirm"]
+    for who, code in ((ANANYA, "FORBIDDEN"), (PRIYA, "FORBIDDEN"), (both, "FOUR_EYES")):
+        with pytest.raises(PlanError) as err:
+            plans.confirm_resolution(who, "r-resolve1")
+        assert err.value.code == code
+    # Sent back with a reason: on the desk again, ready to resolve or plan.
+    with pytest.raises(PlanError) as err:
+        plans.return_resolution(MEERA, "r-resolve1", " ")
+    assert err.value.code == "INVALID"
+    assert plans.return_resolution(MEERA, "r-resolve1", "check the crew hotel").status == (
+        "OPTIONS_READY"
+    )
+    with pytest.raises(PlanError) as err:
+        plans.confirm_resolution(KARAN, "r-resolve1")
+    assert err.value.code == "WRONG_STATE"
+    # Resolved again and signed off: closed, with what the controller did as its reason.
+    plans.close(ANANYA, "r-resolve1", "KS412 cancelled; crew stood down")
+    plans.confirm_resolution(KARAN, "r-resolve1")
+    closed = [e for e in store.audit_trail(table, "r-resolve1") if e["action"] == "CLOSED"]
+    assert closed[-1]["reason"] == "KS412 cancelled; crew stood down"
+    assert closed[-1]["actor"] == "karan" and closed[-1]["handled_by"] == "ananya"
 
 
 def test_sent_back_plans_leave_the_queue_once_resolved(plans):

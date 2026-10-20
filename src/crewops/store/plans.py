@@ -31,6 +31,9 @@ from crewops.store.versions import read_versions, version_key  # noqa: F401
 STATUS_SUBMITTED = "SUBMITTED"
 STATUS_COMMITTED = "COMMITTED"
 STATUS_CLOSED = "CLOSED"
+STATUS_RESOLVING = "RESOLVING"
+"""Crew control handled it outside a cover plan and said what was done; an approver signs it
+off (CLOSED) or sends it back (OPTIONS_READY)."""
 STATUS_REVOKED = "REVOKED"
 """Withdrawn by an admin as filed in error. Drops out of every open list and stops counting
 the crew it named as unavailable."""
@@ -223,6 +226,49 @@ def close_disruption(table: Any, disruption_id: str, actor: str, at: datetime, r
         [
             _move_disruption(disruption_id, STATUS_OPTIONS_READY, STATUS_CLOSED, None),
             _audit(disruption_id, STATUS_CLOSED, actor, when, reason=reason),
+        ],
+    )
+
+
+def submit_resolution(
+    table: Any, disruption_id: str, actor: str, at: datetime, remark: str
+) -> None:
+    """OPTIONS_READY -> RESOLVING: the controller says what was done; an approver signs off."""
+    when = _iso(at)
+    _transact(
+        table,
+        [
+            _move_disruption(disruption_id, STATUS_OPTIONS_READY, STATUS_RESOLVING, None),
+            _audit(disruption_id, "RESOLUTION_SUBMITTED", actor, when, reason=remark),
+        ],
+    )
+
+
+def confirm_resolution(
+    table: Any, disruption_id: str, actor: str, at: datetime, remark: str, by: str
+) -> None:
+    """RESOLVING -> CLOSED, signed off by an approver. The CLOSED event keeps the controller's
+    remark as its reason (what was done) and names who handled it."""
+    when = _iso(at)
+    _transact(
+        table,
+        [
+            _move_disruption(disruption_id, STATUS_RESOLVING, STATUS_CLOSED, None),
+            _audit(disruption_id, STATUS_CLOSED, actor, when, reason=remark, handled_by=by),
+        ],
+    )
+
+
+def return_resolution(
+    table: Any, disruption_id: str, actor: str, at: datetime, reason: str
+) -> None:
+    """RESOLVING -> OPTIONS_READY: the approver sends it back to the desk, saying why."""
+    when = _iso(at)
+    _transact(
+        table,
+        [
+            _move_disruption(disruption_id, STATUS_RESOLVING, STATUS_OPTIONS_READY, None),
+            _audit(disruption_id, "RESOLUTION_RETURNED", actor, when, reason=reason),
         ],
     )
 

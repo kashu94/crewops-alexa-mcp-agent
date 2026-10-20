@@ -216,11 +216,22 @@ def build_server(
 
     @mcp.tool(annotations=WRITE)
     async def close_disruption(disruption_id: str, reason: str, ctx: Context) -> dict:
-        """Controller: close a disruption that has no coverable seat, saying what was done
-        (for example, the flights were cancelled). Also marks one handled outside crew
-        control resolved (a gate closure re-gated, a delay every crew member absorbs), with
-        the remark as the reason."""
+        """Controller: resolve a disruption that has no coverable seat, saying what was done
+        (for example, the flights were cancelled), or one handled outside crew control (a
+        gate closure re-gated, a delay every crew member absorbs). It then waits for an
+        approver to sign it off."""
         return await run(ctx, lambda c: api.close(c, disruption_id, reason))
+
+    @mcp.tool(annotations=WRITE)
+    async def confirm_resolution(disruption_id: str, ctx: Context) -> dict:
+        """Approver: sign off a disruption a controller resolved with a remark (it is then
+        closed). Four eyes: never one you sent yourself."""
+        return await run(ctx, lambda c: api.confirm_resolution(c, disruption_id))
+
+    @mcp.tool(annotations=WRITE)
+    async def return_resolution(disruption_id: str, reason: str, ctx: Context) -> dict:
+        """Approver: send a resolved disruption back to its desk, saying why."""
+        return await run(ctx, lambda c: api.return_resolution(c, disruption_id, reason))
 
     @mcp.tool(annotations=WRITE)
     async def suggest_cover(

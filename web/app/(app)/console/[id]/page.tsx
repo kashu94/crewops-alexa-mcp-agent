@@ -161,7 +161,7 @@ export default function DisruptionPage() {
         </p>
         {detail.severity && detail.severity.level !== "low" && (
           <p className="text-xs text-muted">
-            <span className="font-semibold text-slate-700">Why {detail.severity.level} severity:</span>{" "}
+            <span className="font-semibold text-foreground">Why {detail.severity.level} severity:</span>{" "}
             {detail.severity.reasons.join("; ")}.
           </p>
         )}
@@ -176,7 +176,7 @@ export default function DisruptionPage() {
           {detail.seats.length === 0 && (
             <Panel title="Analysis" icon={<Cpu size={14} className="text-accent" />}>
               {detail.summary ? (
-                <div className="flex flex-col gap-2 text-sm leading-relaxed text-slate-800">
+                <div className="flex flex-col gap-2 text-sm leading-relaxed text-foreground">
                   <p>{detail.summary}</p>
                   {(detail.notes ?? []).length > 0 && (
                     <ul className="list-disc pl-5 text-xs text-muted">

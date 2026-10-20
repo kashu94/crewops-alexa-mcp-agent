@@ -29,10 +29,18 @@ SCOPES = (ROOM, APPROVALS, *(d.desk_id for d in DESKS))
 
 SENT_BACK = ("REJECTED", "WITHDRAWN", "STALE")
 """Audit actions that return a plan to its desk."""
-FOR_DESK = ("OPTIONS_READY", "ESCALATED", *SENT_BACK, "COMMITTED", "CLOSED", "REVOKED")
+FOR_DESK = (
+    "OPTIONS_READY",
+    "ESCALATED",
+    *SENT_BACK,
+    "RESOLUTION_RETURNED",
+    "COMMITTED",
+    "CLOSED",
+    "REVOKED",
+)
 """Events a desk speaker announces. ANALYSIS_FAILED isn't here because such a report has no
 desk yet; only the room speaker hears about it."""
-FOR_APPROVALS = ("SUBMITTED",)
+FOR_APPROVALS = ("SUBMITTED", "RESOLUTION_SUBMITTED")
 
 STRATEGY = {
     "reserve_callout": "a reserve callout",
@@ -125,6 +133,16 @@ def brief(
         title = "Plan sent back"
         text = f"The plan for {happened} was sent back" + (f": {reason}." if reason else ".")
         text += on_desk
+    elif action == "RESOLUTION_SUBMITTED":
+        title = "Waiting for sign-off"
+        text = f"{happened} was handled by {latest.get('actor')}" + (
+            f": {reason}." if reason else "."
+        )
+        text += " It needs an approver's sign-off."
+    elif action == "RESOLUTION_RETURNED":
+        title = "Sent back"
+        text = f"The resolution of {happened} was sent back" + (f": {reason}." if reason else ".")
+        text += on_desk
     elif action == "SUBMITTED":
         title = "Waiting for approval"
         text = f"A plan for {happened} is waiting for approval, from {latest.get('actor')}."
@@ -169,6 +187,8 @@ STAGE = {
     "OPTIONS_READY": 1,
     "ESCALATED": 1,
     "SUBMITTED": 2,
+    "RESOLUTION_SUBMITTED": 2,
+    "RESOLUTION_RETURNED": 3,
     **dict.fromkeys(SENT_BACK, 3),
     "APPROVED": 3,
     "COMMITTED": 4,

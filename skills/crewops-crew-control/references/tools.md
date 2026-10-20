@@ -42,9 +42,15 @@ Parameters: `question` (string, required); `conversation_id` (string, optional, 
 
 ### `close_disruption`: **changes**
 
-Controller: close a disruption that has no coverable seat, saying what was done (for example, the flights were cancelled). Also marks one handled outside crew control resolved (a gate closure re-gated, a delay every crew member absorbs), with the remark as the reason.
+Controller: resolve a disruption that has no coverable seat, saying what was done (for example, the flights were cancelled), or one handled outside crew control (a gate closure re-gated, a delay every crew member absorbs). It then waits for an approver to sign it off.
 
 Parameters: `disruption_id` (string, required); `reason` (string, required).
+
+### `confirm_resolution`: **changes**
+
+Approver: sign off a disruption a controller resolved with a remark (it is then closed). Four eyes: never one you sent yourself.
+
+Parameters: `disruption_id` (string, required).
 
 ### `crew_tool`: reads only
 
@@ -135,6 +141,12 @@ Parameters: none.
 Admin: give a team member a new random password, returned once. An admin resets crew, reporters, controllers, approvers and auditors; only a super admin resets an admin. Nobody resets their own here, nor the speaker device's.
 
 Parameters: `username` (string, required).
+
+### `return_resolution`: **changes**
+
+Approver: send a resolved disruption back to its desk, saying why.
+
+Parameters: `disruption_id` (string, required); `reason` (string, required).
 
 ### `revoke_report`: **commits**
 

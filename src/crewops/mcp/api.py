@@ -79,11 +79,12 @@ CREW_LOOK_BACK_DAYS = 5
 """How far back crew see their own flights."""
 READERS = frozenset({Role.CONTROLLER, Role.APPROVER, Role.AUDITOR, Role.ADMIN, Role.SUPER_ADMIN})
 ADMINS = frozenset({Role.ADMIN, Role.SUPER_ADMIN})
-FEED_STATUSES = ("REPORTED", "OPTIONS_READY", "SUBMITTED", "COMMITTED", "CLOSED")
+FEED_STATUSES = ("REPORTED", "OPTIONS_READY", "SUBMITTED", "RESOLVING", "COMMITTED", "CLOSED")
 OUTCOME = {
     "REPORTED": "Received; crew control is analysing it.",
     "OPTIONS_READY": "Crew control is arranging cover.",
     "SUBMITTED": "A plan is waiting for approval.",
+    "RESOLVING": "Handled by crew control; waiting for an approver to sign it off.",
     "COMMITTED": "Cover has been arranged.",
     "CLOSED": "Resolved by crew control.",
     "REVOKED": "Revoked by an admin: filed in error.",
@@ -638,9 +639,24 @@ class CrewOpsApi:
                     "days": days,
                 }
             )
+        crew = tools.world.crew.get(caller.crew_id)
+        # A reserve's duty is standby: the days on call and the window a callout falls in.
+        on_call = [
+            {
+                "date": d.isoformat(),
+                "base": duty.base,
+                "from_utc": duty.window_start.strftime("%H:%M"),
+                "to_utc": duty.window_end.strftime("%H:%M"),
+            }
+            for duty in tools.world.reserves.get(caller.crew_id, ())
+            for d in duty.dates
+            if first <= d <= last
+        ]
         return {
             "crew_id": caller.crew_id,
-            "name": mine[0]["name"] if mine else None,
+            "name": mine[0]["name"] if mine else (crew.name if crew else None),
+            "rank": crew.rank.value if crew else None,
+            "on_call": sorted(on_call, key=lambda o: o["date"]),
             "airline": tools.world.airline_of_crew.get(caller.crew_id),
             "notices": self._crew_notices(caller.crew_id),
             "reported_unavailable": self._reported_out(caller.crew_id),
@@ -1333,7 +1349,7 @@ class CrewOpsApi:
         status = item["status"]
         handling = from_dynamo(item.get("analysis") or {}).get("handling") or {}
         recorded = status == "CLOSED" and handling.get("kind") == "recorded"
-        if status not in ("REPORTED", "OPTIONS_READY", "SUBMITTED") and not recorded:
+        if status not in ("REPORTED", "OPTIONS_READY", "SUBMITTED", "RESOLVING") and not recorded:
             why = {
                 "COMMITTED": "cover was approved and the roster changed; crew control resolves it",
                 "CLOSED": "crew control already resolved it",
@@ -1464,3 +1480,9 @@ class CrewOpsApi:
 
     def close(self, caller: Caller, disruption_id: str, reason: str) -> dict[str, Any]:
         return self._plan_action(self.plans.close, caller, disruption_id, reason)
+
+    def confirm_resolution(self, caller: Caller, disruption_id: str) -> dict[str, Any]:
+        return self._plan_action(self.plans.confirm_resolution, caller, disruption_id)
+
+    def return_resolution(self, caller: Caller, disruption_id: str, reason: str) -> dict[str, Any]:
+        return self._plan_action(self.plans.return_resolution, caller, disruption_id, reason)

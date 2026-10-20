@@ -39,16 +39,16 @@ export function Info({ term, className }: { term: Term; className?: string }) {
         }}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
-        className="grid h-4 w-4 place-items-center rounded-full text-slate-400 transition hover:text-accent"
+        className="grid h-4 w-4 place-items-center rounded-full text-muted transition hover:text-accent"
       >
         <InfoIcon size={13} />
       </button>
       {open && (
         <span
           role="tooltip"
-          className="animate-rise absolute left-1/2 top-full z-50 mt-1.5 w-72 -translate-x-1/2 rounded-xl border border-line bg-white p-3 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-slate-700 shadow-xl"
+          className="absolute left-1/2 top-full z-50 mt-1.5 w-72 -translate-x-1/2 rounded-md border border-line bg-white p-3 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-foreground shadow-xl"
         >
-          <span className="mb-1 block text-[13px] font-semibold text-slate-900">{entry.title}</span>
+          <span className="mb-1 block text-[13px] font-semibold text-foreground">{entry.title}</span>
           {entry.text}
         </span>
       )}

@@ -34,7 +34,7 @@ from crewops.store.reports import (
 
 log = logging.getLogger(__name__)
 
-OPEN_STATUSES = (STATUS_REPORTED, STATUS_OPTIONS_READY, "SUBMITTED")
+OPEN_STATUSES = (STATUS_REPORTED, STATUS_OPTIONS_READY, "SUBMITTED", "RESOLVING")
 """Still being worked; these count against a controller's desk."""
 UNAVAILABLE_STATUSES = (*OPEN_STATUSES, "COMMITTED", "CLOSED")
 """Disruptions whose crew are out on their dates. Committed and closed ones count too, since

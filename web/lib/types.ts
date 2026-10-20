@@ -294,6 +294,8 @@ export type QueueItem = {
   uncovered?: string[];
   warnings?: string[];
   reason?: string | null;
+  /** to_confirm: what the controller did, for the approver to sign off */
+  remark?: string | null;
   submitted_utc?: string | null;
   /** SHA-256 of exactly what was submitted (crewops.plans.fingerprint). */
   fingerprint?: string | null;

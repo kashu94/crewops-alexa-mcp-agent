@@ -298,7 +298,9 @@ def test_a_gate_closure_is_handled_internally_and_resolved_with_a_remark(api):
         api.close(ROHIT, "r-gate-del1", "re-gated")
     assert err.value.code == "FORBIDDEN"
     out = api.close(ANANYA, "r-gate-del1", "DX402 bussed from stand 14; screens updated")
-    assert out["status"] == "CLOSED"
+    assert out["status"] == "RESOLVING"
+    assert api.show(IMRAN, "r-gate-del1")["outcome"].startswith("Handled by crew control; waiting")
+    assert api.confirm_resolution(MEERA, "r-gate-del1")["status"] == "CLOSED"
     trail = api.show(ANANYA, "r-gate-del1")["audit"]
     assert trail[-1]["reason"] == "DX402 bussed from stand 14; screens updated"
 
@@ -1104,3 +1106,18 @@ def test_password_resets_follow_admin_and_super_admin_lines(api):
     # Each reset is in the admin's activity log, without the password.
     resets = [e for e in api.activity(VIKRAM) if e["action"] == "PASSWORD_RESET"]
     assert len(resets) == 3 and all(out["password"] not in e.get("reason", "") for e in resets)
+
+
+def test_a_reserve_sees_their_standby_days_and_name(api):
+    reserve = Caller("c3310", frozenset({Role.CREW}), crew_id="C-3310")
+    roster = api.my_roster(reserve)
+    assert roster["pairings"] == [] and roster["name"] == "D. Reddy"
+    assert roster["rank"] == "Captain"
+    assert roster["on_call"][0] == {
+        "date": "2026-10-12",
+        "base": "BLR",
+        "from_utc": "06:00",
+        "to_utc": "18:00",
+    }
+    # Someone who flies has trips and no standby.
+    assert api.my_roster(CREW)["on_call"] == []

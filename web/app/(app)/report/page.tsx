@@ -21,7 +21,20 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, ty
 
 import { AIRLINES, AirlineBadge, airlineOf } from "@/components/airline";
 import { Modal } from "@/components/modal";
-import { Button, clock, cx, day, Empty, Mono, Notice, Panel, Spinner, Status } from "@/components/ui";
+import {
+  Button,
+  clock,
+  cx,
+  day,
+  Empty,
+  Mono,
+  nextDay,
+  Notice,
+  Panel,
+  Spinner,
+  Status,
+  untilAfter,
+} from "@/components/ui";
 import { tool } from "@/lib/client";
 import { describe, shownStatus, type MyReport, type Reference } from "@/lib/types";
 
@@ -64,12 +77,12 @@ const KINDS: { kind: Kind; title: string; hint: string; icon: typeof Users }[] =
 const REASONS = ["sick", "fatigue", "personal", "other"];
 
 const input =
-  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none transition focus:border-accent focus:ring-4 focus:ring-sky-100";
+  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none transition focus:border-accent focus:ring-4 focus:ring-[#cfe0ef]";
 
 function Label({ text, hint, children }: { text: string; hint?: string; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-1 text-sm">
-      <span className="font-medium text-slate-700">{text}</span>
+      <span className="font-medium text-foreground">{text}</span>
       {children}
       {hint && <span className="text-xs text-muted">{hint}</span>}
     </label>
@@ -121,11 +134,11 @@ function CrewChips({
           {value.map((id) => (
             <li
               key={id}
-              className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft py-1 pl-2.5 pr-1 text-xs text-sky-900"
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft py-1 pl-2.5 pr-1 text-xs text-[#173f63]"
             >
               <Mono className="font-semibold">{id}</Mono>
               {name(id) && (
-                <span className="text-sky-800/80">
+                <span className="text-[#173f63]">
                   {name(id)!.name}, {name(id)!.rank}
                 </span>
               )}
@@ -173,17 +186,18 @@ function Fields({
           min={first}
           max={last}
           defaultValue={prefill.from_date ?? first}
+          onChange={(e) => untilAfter(e.currentTarget, "to_date")}
           className={input}
         />
       </Label>
       <Label text="Until" hint="Optional: the same day if empty">
-        <input name="to_date" type="date" min={first} max={last} className={input} />
+        <input name="to_date" type="date" min={nextDay(prefill.from_date ?? first)} max={last} className={input} />
       </Label>
     </div>
   );
   const reason = (
     <fieldset className="flex flex-col gap-1.5 text-sm">
-      <legend className="mb-1 font-medium text-slate-700">Reason</legend>
+      <legend className="mb-1 font-medium text-foreground">Reason</legend>
       <div className="grid grid-cols-4 gap-2">
         {REASONS.map((r, i) => (
           <label key={r} className="cursor-pointer">
@@ -321,7 +335,7 @@ function Fields({
             <input name="reason" required maxLength={200} placeholder="Jet bridge fault" className={input} />
           </Label>
           <fieldset className="flex flex-col gap-1.5 text-sm">
-            <legend className="mb-1 font-medium text-slate-700">Cause</legend>
+            <legend className="mb-1 font-medium text-foreground">Cause</legend>
             <div className="grid grid-cols-2 gap-2">
               {[
                 ["internal", "Internal", "Equipment or staff at the gate: the station fixes it"],
@@ -504,18 +518,18 @@ function ReportDetail({ r, scope, onClose }: { r: MyReport; scope: "mine" | "cre
         ))}
       </dl>
       {r.narrative && (
-        <p className="mt-4 rounded-xl bg-sunken px-3 py-2 text-sm italic text-slate-700">“{r.narrative}”</p>
+        <p className="mt-4 rounded-md bg-sunken px-3 py-2 text-sm italic text-foreground">“{r.narrative}”</p>
       )}
       <div
         className={cx(
-          "mt-4 rounded-xl px-3 py-2 text-sm",
-          r.status === "REJECTED" ? "bg-critical-soft text-red-900" : "bg-accent-soft/60 text-sky-950",
+          "mt-4 rounded-md px-3 py-2 text-sm",
+          r.status === "REJECTED" ? "bg-critical-soft text-red-900" : "bg-accent-soft/60 text-[#173f63]",
         )}
       >
         {r.handled ?? r.outcome}
       </div>
       {r.remark && (
-        <p className="mt-2 rounded-xl bg-ok-soft px-3 py-2 text-sm text-emerald-900">Crew control: {r.remark}</p>
+        <p className="mt-2 rounded-md bg-ok-soft px-3 py-2 text-sm text-emerald-900">Crew control: {r.remark}</p>
       )}
     </Modal>
   );
@@ -545,7 +559,7 @@ function MyReports({
               onClick={() => onScope(k)}
               className={cx(
                 "rounded-md px-2 py-0.5 normal-case tracking-normal",
-                scope === k ? "bg-accent-soft text-sky-800" : "text-muted hover:text-foreground",
+                scope === k ? "bg-accent-soft text-[#173f63]" : "text-muted hover:text-foreground",
               )}
             >
               {k === "mine" ? "My reports" : "From crew"}
@@ -575,7 +589,7 @@ function MyReports({
               <button
                 type="button"
                 onClick={() => setOpen(r)}
-                className="group w-full rounded-xl border border-line px-3 py-2.5 text-left transition hover:border-sky-300 hover:bg-sky-50/40"
+                className="group w-full rounded-md border border-line px-3 py-2.5 text-left transition hover:border-[#cfe0ef] hover:bg-accent-soft/40"
                 title="Show the whole report"
               >
                 <div className="flex items-center justify-between gap-2">
@@ -589,7 +603,7 @@ function MyReports({
                   <Mono>{r.disruption_id}</Mono> · {day(r.reported_utc)} <Mono>{clock(r.reported_utc)}</Mono>
                   {scope === "crew" && r.reported_by && <> · by {r.reported_by}</>}
                 </p>
-                <p className="mt-1 flex items-center gap-1 truncate text-xs text-slate-600">
+                <p className="mt-1 flex items-center gap-1 truncate text-xs text-muted">
                   <Building2 size={12} className="shrink-0" /> {deskLine(r)}
                 </p>
                 <span className="mt-1.5 flex items-center gap-0.5 text-[11px] font-medium text-accent opacity-80 group-hover:opacity-100">
@@ -659,8 +673,8 @@ export default function ReportPage() {
     }
     const f0 = new FormData(form);
     const toDate = text(f0.get("to_date"));
-    if (toDate && toDate < text(f0.get("from_date"))) {
-      setMessage({ tone: "error", text: "'Until' must be on or after 'From'." });
+    if (toDate && toDate <= text(f0.get("from_date"))) {
+      setMessage({ tone: "error", text: "'Until' must be after 'From'; leave it empty for a single day." });
       return;
     }
     if (f0.get("from_utc") && f0.get("to_utc") && text(f0.get("to_utc")) <= text(f0.get("from_utc"))) {
@@ -716,8 +730,8 @@ export default function ReportPage() {
                       setMessage(null);
                     }}
                     className={cx(
-                      "lift flex flex-col items-start gap-1 rounded-xl border p-3 text-left transition",
-                      kind === k ? "border-accent bg-accent-soft ring-1 ring-sky-200" : "border-line bg-surface",
+                      "lift flex flex-col items-start gap-1 rounded-md border p-3 text-left transition",
+                      kind === k ? "border-accent bg-accent-soft ring-1 ring-[#cfe0ef]" : "border-line bg-surface",
                     )}
                   >
                     <Icon size={16} className={kind === k ? "text-accent" : "text-muted"} />
@@ -727,7 +741,7 @@ export default function ReportPage() {
                 ))}
               </div>
 
-              <div key={`${kind}:${JSON.stringify(prefill)}`} className="animate-rise flex flex-col gap-3">
+              <div key={`${kind}:${JSON.stringify(prefill)}`} className="flex flex-col gap-3">
                 <Fields kind={kind} reference={reference} crewIds={crewIds} setCrewIds={setCrewIds} prefill={prefill} />
                 <Label text="Anything crew controller should know" hint="Optional">
                   <input name="narrative" maxLength={500} className={input} />

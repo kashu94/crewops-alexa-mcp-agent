@@ -25,7 +25,7 @@ export function AdminDuties({ superAdmin }: { superAdmin: boolean }) {
     yes ? (
       <Check size={14} className="mx-auto text-emerald-600" aria-label="yes" />
     ) : (
-      <X size={14} className="mx-auto text-slate-300" aria-label="no" />
+      <X size={14} className="mx-auto text-[#b4b7ba]" aria-label="no" />
     );
   return (
     <Panel title="Who does what" icon={<UserCog size={14} className="text-accent" />}>
@@ -35,7 +35,7 @@ export function AdminDuties({ superAdmin }: { superAdmin: boolean }) {
       </p>
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-[11px] uppercase tracking-wider text-muted">
+          <tr className="text-left text-xs text-muted">
             <th className="py-1 font-medium">Duty</th>
             <th className={cx("w-24 py-1 text-center font-medium", !superAdmin && "text-accent")}>Admin</th>
             <th className={cx("w-24 py-1 text-center font-medium", superAdmin && "text-accent")}>Super admin</th>
@@ -160,7 +160,7 @@ export function RevokeReports({ onChange }: { onChange?: () => void }) {
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
                     placeholder="Why it is revoked (filed twice, wrong person, wrong dates…)"
-                    className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-sky-100"
+                    className="min-w-0 flex-1 rounded-md border border-control bg-surface px-3 py-1.5 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
                   />
                   <Button type="submit" tone="danger" disabled={busy || !reason.trim()} className="py-1.5 text-xs">
                     {busy ? <Spinner /> : <Undo2 size={13} />} Revoke
@@ -257,7 +257,7 @@ export function Passwords({ onChange }: { onChange?: () => void }) {
         onChange={(e) => setFilter(e.target.value)}
         placeholder="Find a person, sign-in or role"
         aria-label="Find a person"
-        className="mb-2 w-full rounded-lg border border-line bg-surface px-3 py-1.5 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-sky-100"
+        className="mb-2 w-full rounded-md border border-control bg-surface px-3 py-1.5 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
       />
       {accounts === null ? (
         <Spinner />
@@ -266,7 +266,7 @@ export function Passwords({ onChange }: { onChange?: () => void }) {
       ) : (
         <ul className="max-h-80 divide-y divide-line overflow-y-auto">
           {list.map((a) => (
-            <li key={a.username} className="flex items-center justify-between gap-2 py-1.5 text-sm">
+            <li key={a.username} className="flex min-h-12 items-center justify-between gap-2 py-1.5 text-sm">
               <span className="min-w-0 truncate">
                 {a.name ?? a.username} <Mono className="text-muted">{a.username}</Mono>
                 <span className="text-muted"> · {a.roles.join(", ").replace(/_/g, " ")}</span>
@@ -281,7 +281,9 @@ export function Passwords({ onChange }: { onChange?: () => void }) {
                   {busy === a.username ? <Spinner /> : <KeyRound size={13} />} Reset
                 </Button>
               ) : (
-                <span className="shrink-0 text-[11px] text-muted">not yours to reset</span>
+                <span className="inline-flex h-8 shrink-0 items-center px-2.5 text-xs text-muted">
+                  Not yours to reset
+                </span>
               )}
             </li>
           ))}
