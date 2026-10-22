@@ -225,6 +225,32 @@ def test_whats_waiting_and_free_questions(ops_table):
     assert said(bye) == "Goodbye." and bye["response"]["shouldEndSession"] is True
 
 
+def test_a_question_keeps_its_opening_word(ops_table):
+    """ "Alexa, ask crew ops who covers ..." reaches the skill as AskWhoIntent with only
+    "covers ..." in the slot; the word goes back on before the question is asked."""
+    api = FakeApi()
+    who = {"name": "AskWhoIntent", "slots": {"question": {"value": "covers P-2291"}}}
+    skill(ops_table, api).handle(envelope("IntentRequest", intent=who))
+    hello = {"name": "HelloIntent"}
+    skill(ops_table, api).handle(envelope("IntentRequest", intent=hello))
+    assert api.asked == [("rohit.malhotra", "who covers P-2291"), ("rohit.malhotra", "hello")]
+
+
+def test_every_locale_model_has_the_intents_the_skill_handles():
+    from pathlib import Path
+
+    from crewops.alexa.skill import QUESTION_STARTS, SAID
+
+    models = Path(__file__).parents[1] / "alexa" / "skill-package" / "interactionModels"
+    for path in sorted(models.glob("custom/*.json")):
+        intents = json.loads(path.read_text())["interactionModel"]["languageModel"]["intents"]
+        by_name = {i["name"]: i for i in intents}
+        for name, word in QUESTION_STARTS.items():
+            assert by_name[name]["samples"] == [f"{word} {{question}}"], (path.name, name)
+        assert set(SAID) <= set(by_name) and "AskCrewOpsIntent" in by_name, path.name
+        assert "ask crew ops {question}" in by_name["AskCrewOpsIntent"]["samples"]
+
+
 def test_notification_permission_is_remembered_and_withdrawn(ops_table):
     s = skill(ops_table)
     s.handle(envelope())  # linked

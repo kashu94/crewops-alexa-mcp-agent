@@ -39,6 +39,39 @@ HELP = (
     "You can ask: what's waiting for me. Or ask CrewOps a question, such as: ask CrewOps who "
     "covers C 1042 on P 2291."
 )
+QUESTION_STARTS = {
+    "AskWhoIntent": "who",
+    "AskWhosIntent": "who's",
+    "AskWhatIntent": "what",
+    "AskWhatsIntent": "what's",
+    "AskWhichIntent": "which",
+    "AskWhenIntent": "when",
+    "AskWhereIntent": "where",
+    "AskHowIntent": "how",
+    "AskWhyIntent": "why",
+    "AskIsIntent": "is",
+    "AskAreIntent": "are",
+    "AskAmIntent": "am",
+    "AskCanIntent": "can",
+    "AskCouldIntent": "could",
+    "AskShouldIntent": "should",
+    "AskWillIntent": "will",
+    "AskDoIntent": "do",
+    "AskDoesIntent": "does",
+    "AskHasIntent": "has",
+    "AskHaveIntent": "have",
+    "AskExplainIntent": "explain",
+    "AskShowIntent": "show",
+    "AskListIntent": "list",
+    "AskGiveMeIntent": "give me",
+    "AskAnyIntent": "any",
+}
+"""A free-form question needs words before its slot (AMAZON.SearchQuery can't stand alone),
+and the slot holds only what follows them. So each opening word has its own intent, and the
+word is put back here: "who covers C 1042 on P 2291" arrives as AskWhoIntent with "covers C
+1042 on P 2291"."""
+SAID = {"HelloIntent": "hello", "ThanksIntent": "thank you"}
+
 EXAMPLES = {
     "crew": "ask CrewOps when do I fly next",
     "reporter": "ask CrewOps is gate BLR G6 free",
@@ -200,8 +233,11 @@ class Skill:
         name = intent.get("name", "")
         if name == "WhatsWaitingIntent":
             return self.waiting(caller)
-        if name == "AskCrewOpsIntent":
+        if name == "AskCrewOpsIntent" or name in QUESTION_STARTS or name in SAID:
             question = ((intent.get("slots") or {}).get("question") or {}).get("value", "").strip()
+            if name in QUESTION_STARTS and question:
+                question = f"{QUESTION_STARTS[name]} {question}"
+            question = SAID.get(name, question)
             if not question:
                 return response("What would you like to ask?", end=False, reprompt=help_for(caller))
             answer = self.api.ask(caller, question)

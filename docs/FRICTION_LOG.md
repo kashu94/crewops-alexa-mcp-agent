@@ -383,6 +383,28 @@ Entries in section 4 are about our own code, so they use a shorter form:
 - Suggestion: Show the redirect URLs before the form (or on the skill's overview), and
   allow saving the switch without the provider details.
 
+### FL-242: Free-form questions fell through to the help reply on a phone
+
+- Date: 2026-10-22
+- Service / tool: Alexa Skills Kit (interaction model, `AMAZON.SearchQuery`), Alexa app on iOS
+- Severity: High (the skill's main use did not work by voice; about an hour)
+- Task attempted: Ask the linked skill questions from the Alexa app: "ask crew ops who
+  covers C 1042 on P 2291", "what's the FDP limit".
+- Steps taken: Opened the skill, asked questions inside the session and as one-shots.
+- Expected: The question passed to the skill's free-form intent.
+- Actual: Every question got the help reply; only the fixed "what's waiting" phrases
+  worked. A `SearchQuery` slot must follow carrier words ("tell me", "check"), and the model
+  only had those, so questions starting "who", "is" or "ask crew ops" matched nothing and
+  went to the fallback intent. The slot also never includes the carrier words, so one
+  intent with "who {question}" and "is {question}" can't tell which word was said. The
+  build reported no warning, and the console's simulator (FL-219) gave no way to see it.
+- Workaround: One intent per opening word ("who", "what's", "is", "am", ...), each with
+  only "<word> {question}", and the skill puts the word back before answering; plus
+  "ask crew ops {question}" for asking inside an open session. Hello and thanks get their
+  own intents.
+- Suggestion: A catch-all free-text slot that can stand alone, or return the matched
+  carrier words with the slot; and a build warning when every sample needs a carrier phrase.
+
 ### FL-221: The Vega project generator wrote into the repository root and replaced its .gitignore
 
 - Date: 2026-10-13
