@@ -83,6 +83,18 @@ describe("desk speaker questions", () => {
     );
   });
 
+  it("says who it is, says hello and counts crew out", () => {
+    expect(say("Who are you?")).toMatch(/^I'm the CrewOps ops-room speaker/);
+    expect(say("hello")).toMatch(/^Hello\. You can ask/);
+    expect(say("thank you")).toBe("You're welcome.");
+    expect(say("how many crew are out")).toBe("2 crew members are out today.");
+  });
+
+  it("says every desk is quiet rather than naming one", () => {
+    const quiet = { ...board, desks: board.desks.map((d) => ({ ...d, open: 0, high: 0 })) };
+    expect(answerRoomQuestion("which desk is busiest", quiet).text).toBe("Every desk is quiet: nothing is open.");
+  });
+
   it("turns away anything else", () => {
     const r = answerRoomQuestion("Is C-2087 legal for P-2291?", board, "room");
     expect(r).toEqual({ text: OUT_OF_SCOPE, inScope: false });

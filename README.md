@@ -584,7 +584,7 @@ or asks "What are my notifications?". Several alerts take turns, oldest first. A
 third announcement the ring stays amber until someone listens. Each alert is built from the
 disruption's latest event and its analysis, never from a model.
 
-The speaker also answers questions about the room, spoken (Ask) or typed: how many desks and
+The speaker also answers questions about the room, spoken (Ask) or typed: who it is, how many desks and
 controllers there are and who they are, what is open on each desk or on "my desk", which desk
 is busiest, how many disruptions are open, escalated or waiting for approval, and today's
 flights, crew out and reserves. The answers come from the ops board by fixed rules

@@ -27,6 +27,10 @@ const HELP =
   "You can ask: how many desks are there, who are the controllers, how many disruptions are open, " +
   "what's on Rohit's desk, which desk is busiest, anything escalated, or how many flights today.";
 
+const INTRO =
+  "I'm the CrewOps ops-room speaker. I read out each new disruption and its cover as it happens, " +
+  "and answer questions about the desks, the controllers, open disruptions and today's numbers.";
+
 const NUMBER_WORDS: Record<string, string> = { one: "1", won: "1", two: "2", to: "2", too: "2", three: "3" };
 
 function plural(n: number, word: string, many = `${word}s`): string {
@@ -84,6 +88,9 @@ export function answerRoomQuestion(question: string, board: RoomBoard, scope = "
   const howMany = /\bhow many\b|\bnumber of\b|\bcount\b/.test(q);
 
   if (/\bhelp\b|what can (i|you)|what do you (know|cover)/.test(q)) return ok(HELP);
+  if (/^ (who|what) are you |^ what('s| is) your name |^ introduce yourself /.test(q)) return ok(INTRO);
+  if (/^ (hi|hello|hey|good (morning|afternoon|evening)) $/.test(q)) return ok(`Hello. ${HELP}`);
+  if (/^ (ok |okay )?(thanks|thank you|cheers)( very much)? $/.test(q)) return ok("You're welcome.");
 
   const desk = deskAsked(q, board, scope);
   if (desk) return ok(deskDetail(desk, board));
@@ -107,6 +114,7 @@ export function answerRoomQuestion(question: string, board: RoomBoard, scope = "
   }
 
   if (/\bbusiest\b|\bmost\b|\bleast\b|\bquietest\b/.test(q) && /\bdesk|controller|disruption|open\b/.test(q)) {
+    if (board.desks.every((d) => d.open === 0)) return ok("Every desk is quiet: nothing is open.");
     const sorted = [...board.desks].sort((a, b) => b.open - a.open || b.high - a.high);
     const pick = /\bleast\b|\bquietest\b/.test(q) ? sorted.at(-1) : sorted[0];
     return ok(pick ? deskDetail(pick, board) : "There are no desks on the board.");
@@ -163,7 +171,7 @@ export function answerRoomQuestion(question: string, board: RoomBoard, scope = "
     );
   }
 
-  if (/\bcrew out\b|\bunavailable\b|\bsick\b|\babsent\b|\bout today\b/.test(q)) {
+  if (/\bcrew (are |is )?out\b|\bunavailable\b|\bsick\b|\babsent\b|\bout today\b|\bon leave\b/.test(q)) {
     return ok(`${plural(board.day.crew_out, "crew member is", "crew members are")} out today.`);
   }
 

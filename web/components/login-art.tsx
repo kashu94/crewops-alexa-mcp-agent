@@ -13,6 +13,9 @@ const depth = Array.from({ length: LIGHTS }, (_, i) => 1 / (1 + i * 0.3));
 
 const y = (s: number) => HORIZON + (NEAR - HORIZON) * s;
 
+/** Lights dim into the haze with distance, so the far end dissolves instead of bunching up. */
+const fade = (s: number) => 0.95 * Math.min(1, Math.max(0, (s - 0.12) / 0.33));
+
 /** Distant lights along the horizon: fixed, so the server and browser draw the same. */
 const CITY = [
   [408, 1],
@@ -76,17 +79,24 @@ export function NightApproach() {
               <stop offset="0.45" stopColor="#94c5ff" stopOpacity="0" />
               <stop offset="1" stopColor="#94c5ff" stopOpacity="0.28" />
             </linearGradient>
-            <linearGradient id="tarmac" x1="0" y1="0" x2="0" y2="1">
+            {/* the road fades out well before the horizon, so its far end never reads as a point */}
+            <linearGradient id="tarmac" gradientUnits="userSpaceOnUse" x1="0" y1={HORIZON} x2="0" y2={NEAR}>
               <stop offset="0" stopColor="#0b1a33" stopOpacity="0" />
+              <stop offset="0.3" stopColor="#0b1a33" stopOpacity="0" />
               <stop offset="1" stopColor="#020611" stopOpacity="0.85" />
+            </linearGradient>
+            <linearGradient id="edge" gradientUnits="userSpaceOnUse" x1="0" y1={HORIZON} x2="0" y2={NEAR}>
+              <stop offset="0" stopColor="#fef3c7" stopOpacity="0" />
+              <stop offset="0.16" stopColor="#fef3c7" stopOpacity="0" />
+              <stop offset="1" stopColor="#fef3c7" stopOpacity="0.18" />
             </linearGradient>
           </defs>
           <polygon
-            points={`${CX},${HORIZON} ${CX + SPREAD + 40},${NEAR} ${CX - SPREAD - 40},${NEAR}`}
+            points={`${CX - 3},${HORIZON} ${CX + 3},${HORIZON} ${CX + SPREAD + 40},${NEAR} ${CX - SPREAD - 40},${NEAR}`}
             fill="url(#tarmac)"
           />
           <line x1="0" x2="600" y1={HORIZON} y2={HORIZON} stroke="url(#horizon)" strokeWidth="1" />
-          {/* faint runway edges, so the road visibly runs on to the horizon */}
+          {/* faint runway edges, fading with distance like the lights */}
           {[-1, 1].map((side) => (
             <line
               key={side}
@@ -94,8 +104,7 @@ export function NightApproach() {
               y1={HORIZON}
               x2={CX + side * SPREAD * 1.12}
               y2={y(1.12)}
-              stroke="#fef3c7"
-              strokeOpacity="0.16"
+              stroke="url(#edge)"
               strokeWidth="1"
             />
           ))}
@@ -105,16 +114,19 @@ export function NightApproach() {
           <g filter="url(#glow)">
             {depth.map((s, i) => (
               <g key={i}>
-                <circle cx={CX - SPREAD * s} cy={y(s)} r={0.6 + 4 * s} fill="#fef3c7" opacity={0.45 + 0.5 * s} />
-                <circle cx={CX + SPREAD * s} cy={y(s)} r={0.6 + 4 * s} fill="#fef3c7" opacity={0.45 + 0.5 * s} />
-                <circle
-                  cx={CX}
-                  cy={y(s)}
-                  r={0.5 + 2.9 * s}
-                  fill="#e0f2fe"
-                  className="lead-in"
-                  style={{ animationDelay: `${i * 0.03}s` }}
-                />
+                <circle cx={CX - SPREAD * s} cy={y(s)} r={0.4 + 4.2 * s} fill="#fef3c7" opacity={fade(s)} />
+                <circle cx={CX + SPREAD * s} cy={y(s)} r={0.4 + 4.2 * s} fill="#fef3c7" opacity={fade(s)} />
+                {/* the group carries the fade: the flashing animation sets the light's own opacity */}
+                <g opacity={fade(s)}>
+                  <circle
+                    cx={CX}
+                    cy={y(s)}
+                    r={0.3 + 3.1 * s}
+                    fill="#e0f2fe"
+                    className="lead-in"
+                    style={{ animationDelay: `${i * 0.03}s` }}
+                  />
+                </g>
               </g>
             ))}
           </g>

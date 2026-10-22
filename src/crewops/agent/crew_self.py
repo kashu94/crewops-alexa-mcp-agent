@@ -16,7 +16,7 @@ from crewops.engine import World
 from crewops.tools import Caller
 
 FLY_RE = re.compile(
-    r"\b(my (flights?|trips?|schedule|roster|pairings?|duty days?|duties)\b|"
+    r"\b(my (next |upcoming )?(flights?|trips?|schedule|roster|pairings?|duty days?|duties)\b|"
     r"when (do|am) i (fly|flying|on duty|working|rostered)|"
     r"do i (fly|have (a |any )?(flights?|trips?|duty))|"
     r"am i (flying|rostered|on duty|working)|where (do|am) i (fly|flying))",
@@ -98,6 +98,35 @@ def _trips(world: World, crew_id: str, first: date, last: date) -> list[str]:
                     )
                 )
     return [text for _, text in sorted(lines)]
+
+
+NEXT_TRIP_RE = re.compile(
+    r"\b(my )?(next|upcoming) (trip|flight|pairing|duty)\b|\bmy (trip|pairing)\b", re.I
+)
+
+
+def next_trip(world: World, crew_id: str) -> str | None:
+    """The id of the crew member's next trip that hasn't finished, or None."""
+    today = world.snapshot_utc.date()
+    upcoming = [
+        (min(d.date for d in p.days), p.pairing_id)
+        for p in world.pairings.values()
+        if any(s.crew_id == crew_id for s in p.crew) and any(d.date >= today for d in p.days)
+    ]
+    return min(upcoming)[1] if upcoming else None
+
+
+def with_next_trip(question: str, caller: Caller, world: World) -> str:
+    """ "am I legal for my next trip" with that trip's id added, so the legality check runs."""
+    if (
+        not caller.crew_id
+        or TRIP_RE.search(question)
+        or not NEXT_TRIP_RE.search(question)
+        or not re.search(r"\blegal|\bfit to fly|\ballowed to (fly|operate)", question, re.I)
+    ):
+        return question
+    trip = next_trip(world, caller.crew_id)
+    return f"{question} ({trip})" if trip else question
 
 
 def crew_self(question: str, caller: Caller, world: World) -> str | None:

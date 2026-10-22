@@ -185,7 +185,6 @@ export default function Login() {
               {busy ? <Spinner /> : <Lock size={14} />} Sign in
             </Button>
           </form>
-          <p className="mt-6 text-xs text-muted">Each role sees only what it may: the server checks every action.</p>
         </div>
       </section>
     </main>

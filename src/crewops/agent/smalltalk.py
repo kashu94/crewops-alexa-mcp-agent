@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from crewops.agent.roles_help import help_for
 from crewops.domain.desks import DESKS
 from crewops.engine import World
 from crewops.tools import Caller
@@ -133,9 +134,9 @@ def small_talk(question: str, caller: Caller, world: World) -> str | None:
     name = _name(caller, world)
     hello = f"Hello {name}." if name else "Hello."
     if GREETING_RE.match(bare):
-        return f"{hello} {HELP}"
+        return f"{hello} {help_for(caller)}"
     if HOW_RE.match(bare):
-        return f"All good, thanks{', ' + name if name else ''}. {HELP}"
+        return f"All good, thanks{', ' + name if name else ''}. {help_for(caller)}"
     if THANKS_RE.match(bare):
         return "You're welcome. Anything else?"
     if BYE_RE.match(bare):

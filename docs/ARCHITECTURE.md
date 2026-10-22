@@ -73,7 +73,8 @@ speech and is discarded unless it keeps every fact.
 |---|---|---|
 | Guardrail on input | 0 | Bedrock Guardrails screens the question for harmful content and prompt attacks. |
 | Spoken ids | 0 | Ids as voice input writes them ("see 3231", "C 32 31", "pee 2291", "D X 412") become C-3231, P-2291, DX412. Only the exact shape of an id is rewritten; a date or "see you at 10" is left alone. |
-| Conversation | 0 | Greetings, thanks, goodbyes and "who am I" are answered from the sign-in, before routing, so "hello" is never read as a lookup. |
+| Conversation | 0 | Greetings, thanks, goodbyes and "who am I" are answered from the sign-in, before routing, so "hello" is never read as a lookup. "Who are you", "what can I do", "what can a super admin do that I can't" and "can I relax a threshold" are answered from the caller's roles, in the same terms the server enforces. "What's waiting for me" reads an approver's sign-offs or what on a controller's desk needs a plan. |
+| Rule questions | 0 | "What's the FDP limit" or "how much rest does crew need", naming no one, goes to that rule's current text; "what are the rules" lists all seven. |
 | Router | 0 | Ordered regex rules classify the question; ids, dates and stations are extracted by pattern only. |
 | Semantic fallback | 0 | Embedding match against the example questions. Borrows the closest one's intent, never its ids or answer, and only above a similarity floor measured on paraphrases. |
 | Triage | 0–1 (Nova Micro) | Classifies intent only when both stages above abstain. No tools. A reply it cannot parse means a lookup. |
